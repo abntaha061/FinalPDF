@@ -36,6 +36,11 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import android.animation.ObjectAnimator
+import android.animation.AnimatorSet
+import android.view.View
+import androidx.core.animation.doOnEnd
 import com.example.data.AppDatabase
 import com.example.data.PdfRepository
 import com.example.ui.PdfViewModel
@@ -70,6 +75,8 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        val splashScreen = installSplashScreen()
+
         super.onCreate(savedInstanceState)
         
         // Let the system handle notch insets smoothly
@@ -80,6 +87,24 @@ class MainActivity : ComponentActivity() {
             this,
             PdfViewModelFactory(repository, this.applicationContext)
         )[PdfViewModel::class.java]
+
+        splashScreen.setKeepOnScreenCondition {
+            // Keep splash visible until ViewModel finishes loading recent files
+            !viewModel.isReady.value
+        }
+
+        splashScreen.setOnExitAnimationListener { splashScreenView ->
+            // Animate the logo scaling down and fading out
+            val scaleX = ObjectAnimator.ofFloat(splashScreenView.iconView, View.SCALE_X, 1f, 0.8f)
+            val scaleY = ObjectAnimator.ofFloat(splashScreenView.iconView, View.SCALE_Y, 1f, 0.8f)
+            val alpha  = ObjectAnimator.ofFloat(splashScreenView.iconView, View.ALPHA, 1f, 0f)
+            AnimatorSet().apply {
+                playTogether(scaleX, scaleY, alpha)
+                duration = 400
+                doOnEnd { splashScreenView.remove() }
+                start()
+            }
+        }
 
         setContent {
             val isNightModeBySettings by viewModel.isNightMode.collectAsState()

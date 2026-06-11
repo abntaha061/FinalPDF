@@ -26,6 +26,9 @@ class PdfViewModel(
     private val context: Context
 ) : ViewModel() {
 
+    private val _isReady = MutableStateFlow(false)
+    val isReady: StateFlow<Boolean> = _isReady.asStateFlow()
+
     init {
         viewModelScope.launch {
             context.dataStore.data.map { preferences ->
@@ -34,6 +37,10 @@ class PdfViewModel(
                 _readingMode.value = mode
                 _isNightMode.value = (mode == "night")
             }
+        }
+        viewModelScope.launch {
+            recentDocuments.first()
+            _isReady.value = true
         }
     }
 

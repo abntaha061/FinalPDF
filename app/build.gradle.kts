@@ -90,6 +90,7 @@ dependencies {
   implementation(libs.androidx.navigation.compose)
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)
+  implementation("androidx.core:core-splashscreen:1.0.1")
   implementation(libs.hilt.android)
   implementation(libs.coil.compose)
   implementation("com.github.mhiew:android-pdf-viewer:3.2.0-beta.1")
