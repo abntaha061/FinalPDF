@@ -41,11 +41,22 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.example.ui.PdfViewModel
+import com.example.ui.AudioViewModel
+import com.example.ui.AudioState
 import com.example.ui.components.BottomReaderBar
 import com.example.ui.components.PdfViewerWidget
 import com.example.ui.components.BookmarkDrawer
 import com.example.ui.theme.*
 import com.example.util.PdfPrintAdapter
+import com.example.util.PdfDocumentAdapter
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.RepeatMode
 import com.github.barteksc.pdfviewer.PDFView
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -69,6 +80,9 @@ fun ViewerScreen(
 ) {
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
+    
+    val audioViewModel: AudioViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+    val audioState by audioViewModel.audioState.collectAsState()
     
     val activeDocument by viewModel.currentDocument.collectAsState()
     val activeUri by viewModel.selectedUri.collectAsState()
@@ -682,12 +696,12 @@ fun ViewerScreen(
                             try {
                                 val printManager = context.getSystemService(Context.PRINT_SERVICE) as? PrintManager
                                 if (printManager != null) {
-                                    val printAdapter = PdfPrintAdapter(
+                                    val printAdapter = PdfDocumentAdapter(
                                         context = context,
-                                        pdfUri = Uri.parse(activeUri!!),
-                                        documentName = documentName
+                                        fileUri = Uri.parse(activeUri!!),
+                                        totalPages = totalPages
                                     )
-                                    printManager.print("$documentName Print Job", printAdapter, null)
+                                    printManager.print("قارئ PDF - $documentName", printAdapter, android.print.PrintAttributes.Builder().build())
                                 }
                             } catch (e: Exception) {
                                 Log.e("ViewerScreen", "Error launching printer job", e)
@@ -708,9 +722,12 @@ fun ViewerScreen(
                 JumpToPageDialog(
                     totalPages = totalPages,
                     onDismiss = { showJumpDialog = false },
-                    onJump = { targetPage ->
-                        viewModel.jumpToPage(targetPage)
+                    onJump = { targetPageVal ->
+                        viewModel.jumpToPage(targetPageVal - 1)
                         showJumpDialog = false
+                        coroutineScope.launch {
+                            snackbarHostState.showSnackbar("تم الانتقال إلى الصفحة $targetPageVal")
+                        }
                     }
                 )
             }
@@ -1057,6 +1074,30 @@ fun ViewerScreen(
                 }
             }
 
+            // Mini Audio Player Overlay
+            AnimatedVisibility(
+                visible = audioState is AudioState.Playing || audioState is AudioState.Loading || audioState is AudioState.Error,
+                enter = slideInVertically(
+                    initialOffsetY = { -it },
+                    animationSpec = tween(durationMillis = 200)
+                ),
+                exit = slideOutVertically(
+                    targetOffsetY = { -it },
+                    animationSpec = tween(durationMillis = 200)
+                ),
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+            ) {
+                MiniAudioBar(
+                    audioState = audioState,
+                    onStopClick = {
+                        audioViewModel.stopAudio()
+                    }
+                )
+            }
+
             // Custom styled floating SnackbarHost
             SnackbarHost(
                 hostState = snackbarHostState,
@@ -1097,28 +1138,46 @@ fun JumpToPageDialog(
 ) {
     var textValue by remember { mutableStateOf("") }
     var inputError by remember { mutableStateOf<String?>(null) }
+    val coroutineScope = rememberCoroutineScope()
+    val shakeOffset = remember { Animatable(0f) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("انتقال إلى صفحة", fontWeight = FontWeight.Bold, color = AppPrimary) },
-        text = {
-            Column(modifier = Modifier.fillMaxWidth()) {
+        title = {
+            Box(modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp), contentAlignment = Alignment.CenterEnd) {
                 Text(
-                    text = "أدخل رقم الصفحة بين 1 و $totalPages",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = AppTextSecondary
+                    text = "انتقل إلى صفحة",
+                    fontWeight = FontWeight.Bold,
+                    color = AppTextPrimary,
+                    style = MaterialTheme.typography.titleLarge
                 )
-                Spacer(modifier = Modifier.height(12.dp))
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
                 OutlinedTextField(
                     value = textValue,
                     onValueChange = {
                         textValue = it
                         inputError = null
                     },
-                    placeholder = { Text("رقم الصفحة") },
+                    placeholder = {
+                        Text(
+                            text = "رقم الصفحة (1 - $totalPages)",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = AppTextSecondary.copy(alpha = 0.7f),
+                            modifier = Modifier.fillMaxWidth(),
+                            textAlign = TextAlign.Center
+                        )
+                    },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     isError = inputError != null,
                     singleLine = true,
+                    maxLines = 1,
+                    textStyle = LocalTextStyle.current.copy(textAlign = TextAlign.Center),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = AppTextPrimary,
                         unfocusedTextColor = AppTextPrimary,
@@ -1127,14 +1186,26 @@ fun JumpToPageDialog(
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
+                        .graphicsLayer(translationX = shakeOffset.value)
                         .testTag("page_input")
                 )
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                Text(
+                    text = "إجمالي الصفحات: $totalPages",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = AppTextSecondary,
+                    textAlign = TextAlign.Center
+                )
+                
                 if (inputError != null) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = inputError!!,
                         color = Color.Red,
-                        style = MaterialTheme.typography.labelSmall
+                        style = MaterialTheme.typography.labelSmall,
+                        textAlign = TextAlign.Center
                     )
                 }
             }
@@ -1144,21 +1215,40 @@ fun JumpToPageDialog(
                 colors = ButtonDefaults.buttonColors(containerColor = AppPrimary),
                 onClick = {
                     val pageNum = textValue.toIntOrNull()
-                    if (pageNum == null) {
-                        inputError = "رقم الصفحة غير صالح"
+                    if (textValue.trim().isEmpty() || pageNum == null) {
+                        coroutineScope.launch {
+                            repeat(3) {
+                                shakeOffset.animateTo(
+                                    targetValue = 8f,
+                                    animationSpec = tween(durationMillis = 50, easing = LinearEasing)
+                                )
+                                shakeOffset.animateTo(
+                                    targetValue = -8f,
+                                    animationSpec = tween(durationMillis = 50, easing = LinearEasing)
+                                )
+                            }
+                            shakeOffset.animateTo(
+                                targetValue = 0f,
+                                animationSpec = tween(durationMillis = 50, easing = LinearEasing)
+                            )
+                        }
                     } else if (pageNum < 1 || pageNum > totalPages) {
-                        inputError = "يجب أن تكون الصفحة بين 1 و $totalPages"
+                        inputError = "أدخل رقماً بين 1 و $totalPages"
                     } else {
-                        onJump(pageNum - 1)
+                        onJump(pageNum)
                     }
-                }
+                },
+                modifier = Modifier.testTag("confirm_jump_button")
             ) {
-                Text("اذهب")
+                Text("انتقال", color = Color.White)
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("إلغاء", color = AppPrimary)
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.testTag("cancel_jump_button")
+            ) {
+                Text("إلغاء", color = AppTextSecondary)
             }
         },
         containerColor = AppSurface
@@ -1386,6 +1476,133 @@ fun ReadingModeCard(
                 fontWeight = FontWeight.Bold,
                 style = MaterialTheme.typography.bodyMedium
             )
+        }
+    }
+}
+
+@Composable
+fun WaveformAnimation() {
+    val infiniteTransition = rememberInfiniteTransition(label = "waveform")
+    
+    val height1 by infiniteTransition.animateFloat(
+        initialValue = 8f,
+        targetValue = 24f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 400, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "h1"
+    )
+    val height2 by infiniteTransition.animateFloat(
+        initialValue = 8f,
+        targetValue = 24f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 400, delayMillis = 150, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "h2"
+    )
+    val height3 by infiniteTransition.animateFloat(
+        initialValue = 8f,
+        targetValue = 24f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 400, delayMillis = 300, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "h3"
+    )
+
+    Row(
+        modifier = Modifier
+            .width(40.dp)
+            .height(24.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .width(4.dp)
+                .height(height1.dp)
+                .background(Color.White, shape = RoundedCornerShape(2.dp))
+        )
+        Box(
+            modifier = Modifier
+                .width(4.dp)
+                .height(height2.dp)
+                .background(Color.White, shape = RoundedCornerShape(2.dp))
+        )
+        Box(
+            modifier = Modifier
+                .width(4.dp)
+                .height(height3.dp)
+                .background(Color.White, shape = RoundedCornerShape(2.dp))
+        )
+    }
+}
+
+@Composable
+fun MiniAudioBar(
+    audioState: AudioState,
+    onStopClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        shape = RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp),
+        colors = CardDefaults.cardColors(containerColor = AppPrimary),
+        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .height(56.dp)
+            .testTag("mini_audio_bar")
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Box(
+                modifier = Modifier.width(40.dp),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                if (audioState is AudioState.Playing) {
+                    WaveformAnimation()
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.VolumeUp,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            }
+
+            val textToDisplay = when (audioState) {
+                is AudioState.Loading -> "جاري تحميل النطق..."
+                is AudioState.Error -> "خطأ في تشغيل الصوت"
+                else -> "جاري تشغيل النطق..."
+            }
+            Text(
+                text = textToDisplay,
+                color = AppTextPrimary,
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp,
+                modifier = Modifier.weight(1f),
+                textAlign = TextAlign.Center
+            )
+
+            IconButton(
+                onClick = onStopClick,
+                modifier = Modifier.testTag("stop_audio_button")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Stop,
+                    contentDescription = "Stop pronunciation",
+                    tint = Color.White,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
         }
     }
 }

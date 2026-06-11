@@ -28,8 +28,9 @@ class CustomLinkHandler(
 
         if (!uriString.isNullOrEmpty()) {
             val lowerUri = uriString.lowercase()
-            // If the link contains audio file URL (mp3, wav, ogg)
-            if (lowerUri.endsWith(".mp3") || lowerUri.endsWith(".wav") || lowerUri.endsWith(".ogg")) {
+            // If the link contains audio file URL (mp3, wav, ogg, m4a, aac)
+            if (lowerUri.endsWith(".mp3") || lowerUri.endsWith(".wav") || lowerUri.endsWith(".ogg") ||
+                lowerUri.endsWith(".m4a") || lowerUri.endsWith(".aac")) {
                 Log.d("CustomLinkHandler", "Tapped audio URL, sending to AudioPlayerManager: $uriString")
                 AudioPlayerManager.play(context, uriString)
             } else if (uriString.startsWith("http://") || uriString.startsWith("https://")) {
