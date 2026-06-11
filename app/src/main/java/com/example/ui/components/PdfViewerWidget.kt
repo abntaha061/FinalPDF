@@ -4,12 +4,15 @@ import android.net.Uri
 import android.util.Log
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.ui.PdfViewModel
 import com.github.barteksc.pdfviewer.PDFView
@@ -29,7 +32,8 @@ fun PdfViewerWidget(
     modifier: Modifier = Modifier,
     onPdfViewCreated: ((PDFView) -> Unit)? = null,
     onTap: (() -> Unit)? = null,
-    onLongPress: ((androidx.compose.ui.geometry.Offset) -> Unit)? = null
+    onLongPress: ((androidx.compose.ui.geometry.Offset) -> Unit)? = null,
+    onZoomChanged: ((Float) -> Unit)? = null
 ) {
     val context = LocalContext.current
     var isLoaded by remember { mutableStateOf(false) }
@@ -53,7 +57,10 @@ fun PdfViewerWidget(
     Box(modifier = modifier.fillMaxSize()) {
         if (!isLoaded && loadError == null) {
             CircularProgressIndicator(
-                modifier = Modifier.align(Alignment.Center)
+                modifier = Modifier
+                    .size(48.dp)
+                    .align(Alignment.Center),
+                color = MaterialTheme.colorScheme.primary
             )
         }
 
@@ -66,95 +73,120 @@ fun PdfViewerWidget(
             }
         }
 
-        AndroidView(
-            factory = { ctx ->
-                PDFView(ctx, null).apply {
-                    onPdfViewCreated?.invoke(this)
-                    
-                    val gestureDetector = android.view.GestureDetector(ctx, object : android.view.GestureDetector.SimpleOnGestureListener() {
-                        override fun onSingleTapConfirmed(e: android.view.MotionEvent): Boolean {
-                            onTap?.invoke()
-                            return true
-                        }
+        key(isNightMode, isSwipeHorizontal, pdfUriString) {
+            AndroidView(
+                factory = { ctx ->
+                    PDFView(ctx, null).apply {
+                        onPdfViewCreated?.invoke(this)
                         
-                        override fun onLongPress(e: android.view.MotionEvent) {
-                            onLongPress?.invoke(androidx.compose.ui.geometry.Offset(e.x, e.y))
-                        }
-                    })
-                    
-                    setOnTouchListener { _, event ->
-                        gestureDetector.onTouchEvent(event)
-                        false
-                    }
-
-                    try {
-                        val fileUri = Uri.parse(pdfUriString)
-                        val configurator = fromUri(fileUri)
-
-                        // 1. Pages configuration
-                        if (pageCount > 0) {
-                            val pagesList = IntArray(pageCount) { it }
-                            configurator.pages(*pagesList)
-                        }
-
-                        // 2. Exact configured properties
-                        configurator
-                            .enableSwipe(true)                        // vertical scroll enabled
-                            .swipeHorizontal(isSwipeHorizontal)       // scroll direction = configured (default vertical)
-                            .enableDoubletap(true)                    // double tap zooms in/out
-                            .defaultPage(currentPage)                 // start from current page
-                            .onLoad { totalPages ->
-                                isLoaded = true
-                                viewModel.setTotalPages(totalPages)
-                                onLoadComplete(totalPages)
-                            }
-                            .onPageChange { page, total ->
-                                viewModel.setCurrentPage(page)
-                                onPageChanged(page, total)
-                            }
-                            .onError { error ->
-                                loadError = error.message ?: "Unknown error"
-                                viewModel.setError(error.message)
-                                onError(error)
-                            }
-                            .onPageError { page, error ->
-                                Log.e("PdfViewerWidget", "Error on page $page", error)
-                            }
-                            .onTap { e ->
+                        // Set min, mid, and max zoom limits as requested
+                        setMinZoom(0.5f)
+                        setMidZoom(1.5f)
+                        setMaxZoom(4.0f)
+                        
+                        val gestureDetector = android.view.GestureDetector(ctx, object : android.view.GestureDetector.SimpleOnGestureListener() {
+                            override fun onSingleTapConfirmed(e: android.view.MotionEvent): Boolean {
                                 onTap?.invoke()
-                                true
+                                return true
                             }
-                            .enableAnnotationRendering(true)          // renders PDF annotations
-                            .enableAntialiasing(true)                 // smooth rendering, no pixelation
-                            .spacing(8)                               // 8dp space between pages
-                            .autoSpacing(false)
-                            .pageFitPolicy(FitPolicy.WIDTH)           // fit width of screen
-                            .nightMode(isNightMode)
-                            .scrollHandle(DefaultScrollHandle(ctx))
-                            .linkHandler(CustomLinkHandler(context, this)) // Custom link handler
-                            .load()
+                            
+                            override fun onLongPress(e: android.view.MotionEvent) {
+                                onLongPress?.invoke(androidx.compose.ui.geometry.Offset(e.x, e.y))
+                            }
 
-                    } catch (e: Exception) {
-                        Log.e("PdfViewerWidget", "Exception parsing URI", e)
-                        loadError = e.message ?: "URI error"
-                        viewModel.setError(e.message)
-                        onError(e)
-                    }
-                }
-            },
-            update = { pdfView ->
-                // Apply layout updates dynamically safely
-                if (isLoaded) {
-                    try {
-                        if (pdfView.currentPage != currentPage) {
-                            pdfView.jumpTo(currentPage)
+                            override fun onDoubleTap(e: android.view.MotionEvent): Boolean {
+                                val currentZoom = zoom
+                                val targetZoom = when {
+                                    currentZoom < 1.45f -> 1.5f
+                                    currentZoom < 2.95f -> 3.0f
+                                    else -> 1.0f
+                                }
+                                zoomWithAnimation(e.x, e.y, targetZoom)
+                                onZoomChanged?.invoke(targetZoom)
+                                return true
+                            }
+                        })
+                        
+                        setOnTouchListener { _, event ->
+                            gestureDetector.onTouchEvent(event)
+                            val action = event.actionMasked
+                            if (action == android.view.MotionEvent.ACTION_MOVE || 
+                                action == android.view.MotionEvent.ACTION_UP || 
+                                action == android.view.MotionEvent.ACTION_POINTER_UP) {
+                                onZoomChanged?.invoke(zoom)
+                            }
+                            false
                         }
-                    } catch (e: Exception) {
-                        // ignore
+
+                        try {
+                            val fileUri = Uri.parse(pdfUriString)
+                            val configurator = fromUri(fileUri)
+
+                            // 1. Pages configuration
+                            if (pageCount > 0) {
+                                val pagesList = IntArray(pageCount) { it }
+                                configurator.pages(*pagesList)
+                            }
+
+                            // 2. Exact configured properties
+                            configurator
+                                .enableSwipe(true)                        // vertical scroll enabled
+                                .swipeHorizontal(isSwipeHorizontal)       // scroll direction = configured (default vertical)
+                                .enableDoubletap(false)                   // custom double tap managed manually above
+                                .defaultPage(currentPage)                 // start from current page
+                                .onLoad { totalPages ->
+                                    isLoaded = true
+                                    viewModel.setTotalPages(totalPages)
+                                    onLoadComplete(totalPages)
+                                }
+                                .onPageChange { page, total ->
+                                    viewModel.setCurrentPage(page)
+                                    onPageChanged(page, total)
+                                }
+                                .onError { error ->
+                                    loadError = error.message ?: "Unknown error"
+                                    viewModel.setError(error.message)
+                                    onError(error)
+                                }
+                                .onPageError { page, error ->
+                                    Log.e("PdfViewerWidget", "Error on page $page", error)
+                                }
+                                .onTap { e ->
+                                    onTap?.invoke()
+                                    true
+                                }
+                                .enableAnnotationRendering(true)          // renders PDF annotations
+                                .enableAntialiasing(true)                 // smooth rendering, no pixelation
+                                .spacing(8)                               // 8dp space between pages
+                                .autoSpacing(false)
+                                .pageFitPolicy(FitPolicy.WIDTH)           // fit width of screen
+                                .nightMode(isNightMode)
+                                .scrollHandle(DefaultScrollHandle(ctx))
+                                .linkHandler(CustomLinkHandler(context, this)) // Custom link handler
+                                .load()
+
+                        } catch (e: Exception) {
+                            Log.e("PdfViewerWidget", "Exception parsing URI", e)
+                            loadError = e.message ?: "URI error"
+                            viewModel.setError(e.message)
+                            onError(e)
+                        }
                     }
-                }
-            },
-            modifier = Modifier.fillMaxSize()
-        )
+                },
+                update = { pdfView ->
+                    // Apply layout updates dynamically safely
+                    if (isLoaded) {
+                        try {
+                            if (pdfView.currentPage != currentPage) {
+                                pdfView.jumpTo(currentPage)
+                            }
+                        } catch (e: Exception) {
+                            // ignore
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
     }
 }

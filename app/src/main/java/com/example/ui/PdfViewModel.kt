@@ -3,6 +3,9 @@ package com.example.ui
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.preferencesDataStore
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -14,7 +17,23 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
-class PdfViewModel(private val repository: PdfRepository) : ViewModel() {
+private val Context.dataStore by preferencesDataStore(name = "pdf_reader_settings")
+private val NIGHT_MODE_KEY = booleanPreferencesKey("is_night_mode")
+
+class PdfViewModel(
+    private val repository: PdfRepository,
+    private val context: Context
+) : ViewModel() {
+
+    init {
+        viewModelScope.launch {
+            context.dataStore.data.map { preferences ->
+                preferences[NIGHT_MODE_KEY] ?: false
+            }.collect { isNight ->
+                _isNightMode.value = isNight
+            }
+        }
+    }
 
     // Document States
     val recentDocuments: StateFlow<List<PdfDocumentEntity>> = repository.allRecentPdfs
@@ -77,7 +96,13 @@ class PdfViewModel(private val repository: PdfRepository) : ViewModel() {
     val isCurrentPageBookmarked: StateFlow<Boolean> = _isCurrentPageBookmarked.asStateFlow()
 
     fun toggleNightMode() {
-        _isNightMode.value = !_isNightMode.value
+        val nextValue = !_isNightMode.value
+        _isNightMode.value = nextValue
+        viewModelScope.launch {
+            context.dataStore.edit { preferences ->
+                preferences[NIGHT_MODE_KEY] = nextValue
+            }
+        }
     }
 
     fun toggleSwipeHorizontal() {
@@ -88,7 +113,7 @@ class PdfViewModel(private val repository: PdfRepository) : ViewModel() {
         _selectedUri.value = uri.toString()
         _isViewerLoading.value = true
         
-        viewModelScope.launch {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             // Take persistable permission if possible
             try {
                 val flags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
@@ -270,11 +295,14 @@ class PdfViewModel(private val repository: PdfRepository) : ViewModel() {
     }
 }
 
-class PdfViewModelFactory(private val repository: PdfRepository) : ViewModelProvider.Factory {
+class PdfViewModelFactory(
+    private val repository: PdfRepository,
+    private val context: Context
+) : ViewModelProvider.Factory {
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(PdfViewModel::class.java)) {
             @Suppress("UNCHECKED_CAST")
-            return PdfViewModel(repository) as T
+            return PdfViewModel(repository, context) as T
         }
         throw IllegalArgumentException("Unknown ViewModel class")
     }

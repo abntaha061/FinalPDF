@@ -107,6 +107,15 @@ fun ViewerScreen(
     var showJumpDialog by remember { mutableStateOf(false) }
     var showFileInfoDialog by remember { mutableStateOf(false) }
 
+    var zoomLevel by remember { mutableStateOf(1.0f) }
+    var showZoomBadge by remember { mutableStateOf(false) }
+
+    LaunchedEffect(zoomLevel) {
+        showZoomBadge = true
+        delay(2000)
+        showZoomBadge = false
+    }
+
     // Search bar states
     var isSearching by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
@@ -379,8 +388,35 @@ fun ViewerScreen(
                             isTextSelected = true
                             showColorPicker = false
                         },
+                        onZoomChanged = { zoom ->
+                            zoomLevel = zoom
+                        },
                         viewModel = viewModel
                     )
+
+                    // Floating zoom level badge in the TopEnd near top-right corner
+                    AnimatedVisibility(
+                        visible = showZoomBadge,
+                        enter = fadeIn(animationSpec = tween(300)),
+                        exit = fadeOut(animationSpec = tween(500)),
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .padding(top = 100.dp, end = 16.dp)
+                    ) {
+                        Surface(
+                            color = Color(0xFF1E1E24).copy(alpha = 0.9f),
+                            shape = RoundedCornerShape(12.dp),
+                            shadowElevation = 4.dp
+                        ) {
+                            Text(
+                                text = String.format(java.util.Locale.US, "%.1fx", zoomLevel),
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            )
+                        }
+                    }
 
                     // Draw the custom Selection Highlight Overlay if text is selected
                     if (isTextSelected && selectionPos != null) {
@@ -680,12 +716,14 @@ fun ViewerScreen(
                         pdfViewInst?.let { pdfView ->
                             val proposedZoom = (pdfView.zoom + 0.25f).coerceAtMost(4.0f)
                             pdfView.zoomWithAnimation(proposedZoom)
+                            zoomLevel = proposedZoom
                         }
                     },
                     onZoomOutClick = {
                         pdfViewInst?.let { pdfView ->
                             val proposedZoom = (pdfView.zoom - 0.25f).coerceAtLeast(0.5f)
                             pdfView.zoomWithAnimation(proposedZoom)
+                            zoomLevel = proposedZoom
                         }
                     },
                     onBookmarkClick = {
@@ -744,33 +782,51 @@ fun ViewerScreen(
                 )
             }
 
-            // File Info M3 Information Dialog
+            // File Info M3 Information Dialog as a ModalBottomSheet
             if (showFileInfoDialog) {
-                AlertDialog(
+                ModalBottomSheet(
                     onDismissRequest = { showFileInfoDialog = false },
-                    title = { Text("معلومات الملف", fontWeight = FontWeight.Bold, color = AppPrimary) },
-                    text = {
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text("اسم الملف: $documentName", color = AppTextPrimary)
-                            val sizeText = activeDocument?.let {
-                                if (it.size > 1024 * 1024) String.format("%.2f MB", it.size / (1024f * 1024f))
-                                else String.format("%.1f KB", it.size / 1024f)
-                            } ?: "غير معروف"
-                            Text("الحجم: $sizeText", color = AppTextPrimary)
-                            Text("عدد الصفحات: $totalPages", color = AppTextPrimary)
-                            Text("مسار الملف: ${activeDocument?.uri ?: "غير متوفر"}", fontSize = 11.sp, color = AppTextSecondary)
-                        }
-                    },
-                    confirmButton = {
-                        Button(
-                            colors = ButtonDefaults.buttonColors(containerColor = AppPrimary),
-                            onClick = { showFileInfoDialog = false }
-                        ) {
-                            Text("حسناً")
-                        }
-                    },
+                    sheetState = rememberModalBottomSheetState(),
                     containerColor = AppSurface
-                )
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp)
+                            .navigationBarsPadding(),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Text(
+                            text = "معلومات الملف",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = AppPrimary,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+
+                        val info = getFileInfo(context, activeUri ?: "", totalPages)
+
+                        MetadataRow(label = "اسم الملف", value = info.name)
+                        MetadataRow(label = "الحجم", value = info.sizeString)
+                        MetadataRow(label = "عدد الصفحات", value = "${info.totalPages}")
+                        MetadataRow(label = "مسار الملف", value = info.filePath)
+                        MetadataRow(label = "تاريخ التعديل الأخير", value = info.lastModifiedString)
+                        MetadataRow(label = "إصدار PDF", value = info.pdfVersion)
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Button(
+                            onClick = { showFileInfoDialog = false },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                                .testTag("close_file_info_button"),
+                            colors = ButtonDefaults.buttonColors(containerColor = AppPrimary)
+                        ) {
+                            Text("إغلاق", color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
             }
 
             // Custom Text Selection Popup
@@ -1097,4 +1153,138 @@ fun JumpToPageDialog(
         },
         containerColor = AppSurface
     )
+}
+
+data class PdfFileInfo(
+    val name: String,
+    val sizeString: String,
+    val totalPages: Int,
+    val filePath: String,
+    val lastModifiedString: String,
+    val pdfVersion: String
+)
+
+private fun getPdfVersion(context: Context, uriString: String): String {
+    return try {
+        val uri = Uri.parse(uriString)
+        context.contentResolver.openInputStream(uri)?.use { inputStream ->
+            val headerStr = ByteArray(16)
+            val bytesRead = inputStream.read(headerStr)
+            if (bytesRead >= 8) {
+                val header = String(headerStr, 0, bytesRead, Charsets.US_ASCII)
+                val match = "%PDF-\\d\\.\\d".toRegex().find(header)
+                match?.value?.substring(1) ?: "PDF-1.4"
+            } else {
+                "PDF-1.4"
+            }
+        } ?: "PDF-1.4"
+    } catch (e: Exception) {
+        "PDF-1.4"
+    }
+}
+
+private fun getFileInfo(context: Context, uriString: String, totalPagesCount: Int): PdfFileInfo {
+    if (uriString.isEmpty()) {
+        return PdfFileInfo(
+            name = "مستند غير معروف",
+            sizeString = "غير معروف",
+            totalPages = totalPagesCount,
+            filePath = "غير متوفر",
+            lastModifiedString = "غير متوفر",
+            pdfVersion = "PDF-1.4"
+        )
+    }
+    
+    val uri = Uri.parse(uriString)
+    var name = "مستند غير معروف.pdf"
+    var size = 0L
+    var lastModifiedValue = 0L
+    
+    try {
+        if (uri.scheme == "content") {
+            context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                val sizeIndex = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                if (cursor.moveToFirst()) {
+                    if (nameIndex != -1) name = cursor.getString(nameIndex) ?: name
+                    if (sizeIndex != -1) size = cursor.getLong(sizeIndex)
+                }
+            }
+            
+            // Try to query last_modified column
+            try {
+                context.contentResolver.query(uri, arrayOf("last_modified"), null, null, null)?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val colIndex = cursor.getColumnIndex("last_modified")
+                        if (colIndex != -1) {
+                            lastModifiedValue = cursor.getLong(colIndex)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                // Ignore column does not exist
+            }
+        } else if (uri.scheme == "file") {
+            val file = java.io.File(uri.path ?: "")
+            if (file.exists()) {
+                name = file.name
+                size = file.length()
+                lastModifiedValue = file.lastModified()
+            }
+        }
+    } catch (e: Exception) {
+        // Fallback
+    }
+
+    if (name.isEmpty() || name == "مستند غير معروف") {
+        uri.lastPathSegment?.let { name = it }
+    }
+    if (!name.lowercase().endsWith(".pdf")) {
+        name += ".pdf"
+    }
+
+    val sizeString = if (size <= 0) {
+        "غير معروف"
+    } else if (size < 1024 * 1024) {
+        String.format(java.util.Locale.US, "%.1f KB", size / 1024.0)
+    } else {
+        String.format(java.util.Locale.US, "%.2f MB", size / (1024.0 * 1024.0))
+    }
+
+    val lastModifiedString = if (lastModifiedValue > 0) {
+        val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
+        sdf.format(java.util.Date(lastModifiedValue))
+    } else {
+        val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
+        sdf.format(java.util.Date())
+    }
+
+    val filePath = uri.path ?: uriString
+    val pdfVersion = getPdfVersion(context, uriString)
+
+    return PdfFileInfo(
+        name = name,
+        sizeString = sizeString,
+        totalPages = totalPagesCount,
+        filePath = filePath,
+        lastModifiedString = lastModifiedString,
+        pdfVersion = pdfVersion
+    )
+}
+
+@Composable
+fun MetadataRow(label: String, value: String) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = AppTextSecondary
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            color = AppTextPrimary,
+            modifier = Modifier.padding(top = 2.dp)
+        )
+    }
 }
