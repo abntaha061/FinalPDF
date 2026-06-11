@@ -1,58 +1,73 @@
 package com.example.data
 
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.withContext
+import javax.inject.Inject
+import javax.inject.Singleton
 
-class PdfRepository(private val pdfDao: PdfDao) {
-    val allRecentPdfs: Flow<List<PdfDocumentEntity>> = pdfDao.getAllRecentPdfs()
-    val bookmarkedPdfs: Flow<List<PdfDocumentEntity>> = pdfDao.getBookmarkedPdfs()
-
-    suspend fun getPdfByUri(uri: String): PdfDocumentEntity? {
-        return pdfDao.getPdfByUri(uri)
+@Singleton
+class PdfRepository @Inject constructor(
+    private val recentFileDao: RecentFileDao,
+    private val bookmarkDao: BookmarkDao,
+    private val highlightDao: HighlightDao
+) {
+    val allRecentPdfs: Flow<List<RecentFileEntity>> = recentFileDao.getAll()
+    
+    val bookmarkedPdfs: Flow<List<RecentFileEntity>> = recentFileDao.getAll().map { list ->
+        list.filter { it.isBookmarked }
     }
 
-    suspend fun insertPdf(pdf: PdfDocumentEntity) {
-        pdfDao.insertPdf(pdf)
+    suspend fun getPdfByUri(uri: String): RecentFileEntity? = withContext(Dispatchers.IO) {
+        recentFileDao.getByUri(uri)
     }
 
-    suspend fun updatePdfProgress(uri: String, currentPage: Int, totalPages: Int) {
-        pdfDao.updatePdfProgress(uri, currentPage, totalPages)
+    suspend fun insertPdf(pdf: RecentFileEntity) = withContext(Dispatchers.IO) {
+        recentFileDao.insert(pdf)
     }
 
-    suspend fun updatePdfBookmarkState(uri: String, isBookmarked: Boolean) {
-        pdfDao.updatePdfBookmarkState(uri, isBookmarked)
+    suspend fun updatePdfProgress(uri: String, currentPage: Int, totalPages: Int) = withContext(Dispatchers.IO) {
+        recentFileDao.updateProgress(uri, currentPage, totalPages, System.currentTimeMillis())
     }
 
-    suspend fun deletePdf(uri: String) {
-        pdfDao.deletePdf(uri)
+    suspend fun updatePdfBookmarkState(uri: String, isBookmarked: Boolean) = withContext(Dispatchers.IO) {
+        recentFileDao.updateBookmarkState(uri, isBookmarked)
+    }
+
+    suspend fun deletePdf(uri: String) = withContext(Dispatchers.IO) {
+        recentFileDao.getByUri(uri)?.let {
+            recentFileDao.delete(it)
+        }
     }
 
     // Page level bookmarks
-    fun getPageBookmarksForPdf(pdfUri: String): Flow<List<PdfPageBookmarkEntity>> {
-        return pdfDao.getPageBookmarksForPdf(pdfUri)
+    fun getPageBookmarksForPdf(pdfUri: String): Flow<List<BookmarkEntity>> {
+        return bookmarkDao.getByUri(pdfUri)
     }
 
-    suspend fun insertPageBookmark(bookmark: PdfPageBookmarkEntity) {
-        pdfDao.insertPageBookmark(bookmark)
+    suspend fun insertPageBookmark(bookmark: BookmarkEntity) = withContext(Dispatchers.IO) {
+        bookmarkDao.insert(bookmark)
     }
 
-    suspend fun deletePageBookmark(pdfUri: String, pageNumber: Int) {
-        pdfDao.deletePageBookmark(pdfUri, pageNumber)
+    suspend fun deletePageBookmark(pdfUri: String, pageNumber: Int) = withContext(Dispatchers.IO) {
+        bookmarkDao.deleteByPage(pdfUri, pageNumber)
     }
 
-    suspend fun hasPageBookmark(pdfUri: String, pageNumber: Int): Boolean {
-        return pdfDao.hasPageBookmark(pdfUri, pageNumber)
+    suspend fun hasPageBookmark(pdfUri: String, pageNumber: Int): Boolean = withContext(Dispatchers.IO) {
+        bookmarkDao.hasBookmark(pdfUri, pageNumber)
     }
 
     // Highlights
     fun getHighlightsForPdf(fileUri: String): Flow<List<HighlightEntity>> {
-        return pdfDao.getHighlightsForPdf(fileUri)
+        return highlightDao.getByUri(fileUri)
     }
 
-    suspend fun insertHighlight(highlight: HighlightEntity) {
-        pdfDao.insertHighlight(highlight)
+    suspend fun insertHighlight(highlight: HighlightEntity) = withContext(Dispatchers.IO) {
+        highlightDao.insert(highlight)
     }
 
-    suspend fun deleteHighlight(id: Long) {
-        pdfDao.deleteHighlight(id)
+    suspend fun deleteHighlight(id: Int) = withContext(Dispatchers.IO) {
+        highlightDao.deleteById(id)
     }
 }

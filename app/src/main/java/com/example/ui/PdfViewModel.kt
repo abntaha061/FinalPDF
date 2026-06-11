@@ -10,8 +10,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.data.HighlightEntity
-import com.example.data.PdfDocumentEntity
-import com.example.data.PdfPageBookmarkEntity
+import com.example.data.RecentFileEntity
+import com.example.data.BookmarkEntity
 import com.example.data.PdfRepository
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
@@ -38,10 +38,10 @@ class PdfViewModel(
     }
 
     // Document States
-    val recentDocuments: StateFlow<List<PdfDocumentEntity>> = repository.allRecentPdfs
+    val recentDocuments: StateFlow<List<RecentFileEntity>> = repository.allRecentPdfs
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val favoriteDocuments: StateFlow<List<PdfDocumentEntity>> = repository.bookmarkedPdfs
+    val favoriteDocuments: StateFlow<List<RecentFileEntity>> = repository.bookmarkedPdfs
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // Settings States
@@ -69,8 +69,8 @@ class PdfViewModel(
     private val _selectedUri = MutableStateFlow<String?>(null)
     val selectedUri: StateFlow<String?> = _selectedUri.asStateFlow()
 
-    private val _currentDocument = MutableStateFlow<PdfDocumentEntity?>(null)
-    val currentDocument: StateFlow<PdfDocumentEntity?> = _currentDocument.asStateFlow()
+    private val _currentDocument = MutableStateFlow<RecentFileEntity?>(null)
+    val currentDocument: StateFlow<RecentFileEntity?> = _currentDocument.asStateFlow()
 
     private val _currentPage = MutableStateFlow(0)
     val currentPage: StateFlow<Int> = _currentPage.asStateFlow()
@@ -82,7 +82,7 @@ class PdfViewModel(
     val isViewerLoading: StateFlow<Boolean> = _isViewerLoading.asStateFlow()
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    val activePageBookmarks: StateFlow<List<PdfPageBookmarkEntity>> = _selectedUri
+    val activePageBookmarks: StateFlow<List<BookmarkEntity>> = _selectedUri
         .flatMapLatest { uri ->
             if (uri != null) repository.getPageBookmarksForPdf(uri)
             else flowOf(emptyList())
@@ -145,17 +145,17 @@ class PdfViewModel(
             var doc = repository.getPdfByUri(uri.toString())
             
             if (doc == null) {
-                doc = PdfDocumentEntity(
+                doc = RecentFileEntity(
                     uri = uri.toString(),
                     name = metadata.first,
-                    size = metadata.second,
+                    sizeBytes = metadata.second,
                     currentPage = 0,
                     totalPages = 0
                 )
                 repository.insertPdf(doc)
             } else {
                 // Update access timestamp
-                doc = doc.copy(lastAccessed = System.currentTimeMillis())
+                doc = doc.copy(lastOpenedAt = System.currentTimeMillis())
                 repository.insertPdf(doc)
                 _currentPage.value = doc.currentPage
             }
@@ -211,10 +211,11 @@ class PdfViewModel(
                 repository.deletePageBookmark(uri, page)
                 _isCurrentPageBookmarked.value = false
             } else {
-                val bookmark = PdfPageBookmarkEntity(
-                    pdfUri = uri,
+                val bookmark = BookmarkEntity(
+                    fileUri = uri,
                     pageNumber = page,
-                    label = "Page ${page + 1}"
+                    label = "Page ${page + 1}",
+                    createdAt = System.currentTimeMillis()
                 )
                 repository.insertPageBookmark(bookmark)
                 _isCurrentPageBookmarked.value = true
@@ -233,10 +234,11 @@ class PdfViewModel(
 
     fun addPageBookmark(pdfUri: String, pageNumber: Int, label: String) {
         viewModelScope.launch {
-            val bookmark = PdfPageBookmarkEntity(
-                pdfUri = pdfUri,
+            val bookmark = BookmarkEntity(
+                fileUri = pdfUri,
                 pageNumber = pageNumber,
-                label = label
+                label = label,
+                createdAt = System.currentTimeMillis()
             )
             repository.insertPageBookmark(bookmark)
             if (_selectedUri.value == pdfUri && _currentPage.value == pageNumber) {
@@ -251,7 +253,7 @@ class PdfViewModel(
         }
     }
 
-    fun deleteHighlight(id: Long) {
+    fun deleteHighlight(id: Int) {
         viewModelScope.launch {
             repository.deleteHighlight(id)
         }

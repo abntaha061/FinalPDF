@@ -90,6 +90,7 @@ dependencies {
   implementation(libs.androidx.navigation.compose)
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)
+  implementation(libs.hilt.android)
   implementation(libs.coil.compose)
   implementation("com.github.mhiew:android-pdf-viewer:3.2.0-beta.1")
   implementation("androidx.documentfile:documentfile:1.0.1")
@@ -119,5 +120,6 @@ dependencies {
   debugImplementation(libs.androidx.compose.ui.test.manifest)
   debugImplementation(libs.androidx.compose.ui.tooling)
   "ksp"(libs.androidx.room.compiler)
+  "ksp"(libs.hilt.compiler)
   "ksp"(libs.moshi.kotlin.codegen)
 }

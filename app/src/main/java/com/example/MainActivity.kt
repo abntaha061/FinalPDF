@@ -36,7 +36,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import com.example.data.PdfDatabase
+import com.example.data.AppDatabase
 import com.example.data.PdfRepository
 import com.example.ui.PdfViewModel
 import com.example.ui.PdfViewModelFactory
@@ -46,8 +46,8 @@ import com.example.ui.theme.MyApplicationTheme
 
 class MainActivity : ComponentActivity() {
 
-    private val database by lazy { PdfDatabase.getDatabase(this) }
-    private val repository by lazy { PdfRepository(database.pdfDao()) }
+    private val database by lazy { AppDatabase.getDatabase(this) }
+    private val repository by lazy { PdfRepository(database.recentFileDao(), database.bookmarkDao(), database.highlightDao()) }
 
     private fun hasRequiredPermission(context: Context): Boolean {
         return when {

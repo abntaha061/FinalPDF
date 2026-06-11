@@ -203,7 +203,7 @@ fun ViewerScreen(
                 pdfViewInst = pdfViewInst,
                 onJumpToPage = { index -> viewModel.jumpToPage(index) },
                 onAddBookmark = { label -> viewModel.addPageBookmark(activeUri ?: "", currentPage + 1, label) },
-                onDeleteBookmark = { bookmark -> viewModel.deletePageBookmark(bookmark.pdfUri, bookmark.pageNumber) },
+                onDeleteBookmark = { bookmark -> viewModel.deletePageBookmark(bookmark.fileUri, bookmark.pageNumber) },
                 onCloseDrawer = { coroutineScope.launch { drawerState.close() } }
             )
         }
@@ -985,8 +985,9 @@ fun ViewerScreen(
                                         val highlight = HighlightEntity(
                                             fileUri = activeUri ?: "",
                                             pageNumber = currentPage,
-                                            text = selectedText,
-                                            color = "Yellow" // default color
+                                            selectedText = selectedText,
+                                            colorHex = "Yellow", // default color
+                                            createdAt = System.currentTimeMillis()
                                         )
                                         viewModel.insertHighlight(highlight)
                                         isTextSelected = false
@@ -1043,8 +1044,9 @@ fun ViewerScreen(
                                                 val highlight = HighlightEntity(
                                                     fileUri = activeUri ?: "",
                                                     pageNumber = currentPage,
-                                                    text = selectedText,
-                                                    color = colorName
+                                                    selectedText = selectedText,
+                                                    colorHex = colorName,
+                                                    createdAt = System.currentTimeMillis()
                                                 )
                                                 viewModel.insertHighlight(highlight)
                                                 isTextSelected = false

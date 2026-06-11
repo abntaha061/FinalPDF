@@ -28,7 +28,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.data.PdfDocumentEntity
+import com.example.data.RecentFileEntity
 import com.example.ui.PdfViewModel
 import com.example.ui.theme.*
 import kotlinx.coroutines.Dispatchers
@@ -274,7 +274,7 @@ fun StatCard(
 
 @Composable
 fun PdfGridCard(
-    pdf: PdfDocumentEntity,
+    pdf: RecentFileEntity,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -342,7 +342,7 @@ fun PdfGridCard(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = formatArabicFileSize(pdf.size),
+                        text = formatArabicFileSize(pdf.sizeBytes),
                         color = AppTextSecondary,
                         fontSize = 11.sp
                     )

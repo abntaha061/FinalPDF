@@ -36,7 +36,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.data.PdfPageBookmarkEntity
+import com.example.data.BookmarkEntity
 import com.example.ui.theme.*
 import com.github.barteksc.pdfviewer.PDFView
 import kotlinx.coroutines.Dispatchers
@@ -49,11 +49,11 @@ fun BookmarkDrawer(
     pdfUri: String,
     currentPage: Int,
     totalPages: Int,
-    pageBookmarks: List<PdfPageBookmarkEntity>,
+    pageBookmarks: List<BookmarkEntity>,
     pdfViewInst: PDFView?,
     onJumpToPage: (Int) -> Unit,
     onAddBookmark: (String) -> Unit,
-    onDeleteBookmark: (PdfPageBookmarkEntity) -> Unit,
+    onDeleteBookmark: (BookmarkEntity) -> Unit,
     onCloseDrawer: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -66,7 +66,7 @@ fun BookmarkDrawer(
 
     // Delete Bookmark state
     var showDeleteDialog by remember { mutableStateOf(false) }
-    var bookmarkToDelete by remember { mutableStateOf<PdfPageBookmarkEntity?>(null) }
+    var bookmarkToDelete by remember { mutableStateOf<BookmarkEntity?>(null) }
 
     // Render caching map for Thumbnails
     val thumbnailCache = remember { mutableStateMapOf<Int, Bitmap>() }
@@ -235,9 +235,9 @@ fun BookmarkDrawer(
                                                     }
 
                                                     // Left side: Small formatted timestamp
-                                                    val timeStr = remember(bookmark.timestamp) {
+                                                    val timeStr = remember(bookmark.createdAt) {
                                                         val sdf = java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.getDefault())
-                                                        sdf.format(java.util.Date(bookmark.timestamp))
+                                                        sdf.format(java.util.Date(bookmark.createdAt))
                                                     }
                                                     Text(
                                                         text = timeStr,
