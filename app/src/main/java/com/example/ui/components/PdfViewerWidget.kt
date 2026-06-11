@@ -23,7 +23,7 @@ import com.github.barteksc.pdfviewer.util.FitPolicy
 fun PdfViewerWidget(
     pdfUriString: String,
     currentPage: Int,
-    isNightMode: Boolean,
+    readingMode: String,
     isSwipeHorizontal: Boolean,
     onPageChanged: (Int, Int) -> Unit,
     onLoadComplete: (Int) -> Unit,
@@ -73,7 +73,7 @@ fun PdfViewerWidget(
             }
         }
 
-        key(isNightMode, isSwipeHorizontal, pdfUriString) {
+        key(readingMode, isSwipeHorizontal, pdfUriString) {
             AndroidView(
                 factory = { ctx ->
                     PDFView(ctx, null).apply {
@@ -83,6 +83,25 @@ fun PdfViewerWidget(
                         setMinZoom(0.5f)
                         setMidZoom(1.5f)
                         setMaxZoom(4.0f)
+
+                        // Apply sepia filter or normal filter dynamically
+                        if (readingMode == "sepia") {
+                            val paint = android.graphics.Paint().apply {
+                                colorFilter = android.graphics.ColorMatrixColorFilter(
+                                    android.graphics.ColorMatrix(
+                                        floatArrayOf(
+                                            0.393f, 0.769f, 0.189f, 0f, 0f,
+                                            0.349f, 0.686f, 0.168f, 0f, 0f,
+                                            0.272f, 0.534f, 0.131f, 0f, 0f,
+                                            0f,      0f,      0f,      1f, 0f
+                                        )
+                                    )
+                                )
+                            }
+                            setLayerType(android.view.View.LAYER_TYPE_HARDWARE, paint)
+                        } else {
+                            setLayerType(android.view.View.LAYER_TYPE_NONE, null)
+                        }
                         
                         val gestureDetector = android.view.GestureDetector(ctx, object : android.view.GestureDetector.SimpleOnGestureListener() {
                             override fun onSingleTapConfirmed(e: android.view.MotionEvent): Boolean {
@@ -160,7 +179,7 @@ fun PdfViewerWidget(
                                 .spacing(8)                               // 8dp space between pages
                                 .autoSpacing(false)
                                 .pageFitPolicy(FitPolicy.WIDTH)           // fit width of screen
-                                .nightMode(isNightMode)
+                                .nightMode(readingMode == "night")
                                 .scrollHandle(DefaultScrollHandle(ctx))
                                 .linkHandler(CustomLinkHandler(context, this)) // Custom link handler
                                 .load()

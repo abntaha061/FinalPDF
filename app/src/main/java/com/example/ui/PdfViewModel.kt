@@ -19,6 +19,7 @@ import kotlinx.coroutines.launch
 
 private val Context.dataStore by preferencesDataStore(name = "pdf_reader_settings")
 private val NIGHT_MODE_KEY = booleanPreferencesKey("is_night_mode")
+private val READING_MODE_KEY = androidx.datastore.preferences.core.stringPreferencesKey("reading_mode")
 
 class PdfViewModel(
     private val repository: PdfRepository,
@@ -28,9 +29,10 @@ class PdfViewModel(
     init {
         viewModelScope.launch {
             context.dataStore.data.map { preferences ->
-                preferences[NIGHT_MODE_KEY] ?: false
-            }.collect { isNight ->
-                _isNightMode.value = isNight
+                preferences[READING_MODE_KEY] ?: if (preferences[NIGHT_MODE_KEY] == true) "night" else "normal"
+            }.collect { mode ->
+                _readingMode.value = mode
+                _isNightMode.value = (mode == "night")
             }
         }
     }
@@ -45,6 +47,9 @@ class PdfViewModel(
     // Settings States
     private val _isNightMode = MutableStateFlow(false)
     val isNightMode: StateFlow<Boolean> = _isNightMode.asStateFlow()
+
+    private val _readingMode = MutableStateFlow("normal")
+    val readingMode: StateFlow<String> = _readingMode.asStateFlow()
 
     private val _isSwipeHorizontal = MutableStateFlow(false)
     val isSwipeHorizontal: StateFlow<Boolean> = _isSwipeHorizontal.asStateFlow()
@@ -98,9 +103,23 @@ class PdfViewModel(
     fun toggleNightMode() {
         val nextValue = !_isNightMode.value
         _isNightMode.value = nextValue
+        val nextMode = if (nextValue) "night" else "normal"
+        _readingMode.value = nextMode
         viewModelScope.launch {
             context.dataStore.edit { preferences ->
                 preferences[NIGHT_MODE_KEY] = nextValue
+                preferences[READING_MODE_KEY] = nextMode
+            }
+        }
+    }
+
+    fun setReadingMode(mode: String) {
+        _readingMode.value = mode
+        _isNightMode.value = (mode == "night")
+        viewModelScope.launch {
+            context.dataStore.edit { preferences ->
+                preferences[READING_MODE_KEY] = mode
+                preferences[NIGHT_MODE_KEY] = (mode == "night")
             }
         }
     }

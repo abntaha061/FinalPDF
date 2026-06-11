@@ -20,6 +20,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -41,15 +42,28 @@ fun BottomReaderBar(
     onGoToPageClick: () -> Unit,
     onPrintClick: () -> Unit,
     onFileInfoClick: () -> Unit,
+    onReadingModeClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     var showBrightnessPopup by remember { mutableStateOf(false) }
     var showMoreMenu by remember { mutableStateOf(false) }
-    var brightness by remember { mutableStateOf(0.7f) }
+    
+    val activity = context as? Activity
+    var brightness by remember {
+        mutableStateOf(
+            activity?.window?.let { window ->
+                val currentScreenBr = window.attributes.screenBrightness
+                if (currentScreenBr in 0.1f..1.0f) {
+                    currentScreenBr
+                } else {
+                    0.7f
+                }
+            } ?: 0.7f
+        )
+    }
 
     // Synchronize activity window brightness when adjusted
-    val activity = context as? Activity
     LaunchedEffect(brightness) {
         activity?.window?.let { window ->
             val lp = window.attributes
@@ -125,49 +139,55 @@ fun BottomReaderBar(
 
                 if (showBrightnessPopup) {
                     Popup(
-                        alignment = Alignment.TopCenter,
-                        offset = androidx.compose.ui.unit.IntOffset(0, -90),
                         onDismissRequest = { showBrightnessPopup = false },
-                        properties = PopupProperties(focusable = true)
+                        properties = PopupProperties(
+                            focusable = true,
+                            dismissOnClickOutside = true,
+                            dismissOnBackPress = true
+                        )
                     ) {
-                        Card(
-                            shape = RoundedCornerShape(12.dp),
-                            colors = CardDefaults.cardColors(containerColor = AppSurface),
-                            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                        // Full-screen transparent clickable overlay behind the popup that dismisses it on tap
+                        Box(
                             modifier = Modifier
-                                .width(220.dp)
-                                .height(56.dp)
+                                .fillMaxSize()
+                                .background(Color.Transparent)
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null
+                                ) {
+                                    showBrightnessPopup = false
+                                },
+                            contentAlignment = Alignment.BottomCenter
                         ) {
-                            Row(
+                            Card(
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(containerColor = AppSurface),
+                                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
                                 modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(horizontal = 12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    .padding(bottom = 80.dp) // Offset above the bottom bar
+                                    .width(48.dp)
+                                    .height(200.dp)
+                                    .clickable(enabled = false) {} // Prevent click-through dismissal
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.BrightnessLow,
-                                    contentDescription = null,
-                                    tint = AppTextSecondary,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Slider(
-                                    value = brightness,
-                                    onValueChange = { brightness = it },
-                                    valueRange = 0.05f..1f,
-                                    colors = SliderDefaults.colors(
-                                        thumbColor = AppPrimary,
-                                        activeTrackColor = AppPrimary,
-                                        inactiveTrackColor = AppPrimary.copy(alpha = 0.24f)
-                                    ),
-                                    modifier = Modifier.weight(1f)
-                                )
-                                Icon(
-                                    imageVector = Icons.Default.BrightnessHigh,
-                                    contentDescription = null,
-                                    tint = AppPrimary,
-                                    modifier = Modifier.size(16.dp)
-                                )
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Slider(
+                                        value = brightness,
+                                        onValueChange = { brightness = it },
+                                        valueRange = 0.1f..1.0f,
+                                        colors = SliderDefaults.colors(
+                                            thumbColor = AppPrimary,
+                                            activeTrackColor = AppPrimary,
+                                            inactiveTrackColor = AppPrimary.copy(alpha = 0.24f)
+                                        ),
+                                        modifier = Modifier
+                                            .width(180.dp)
+                                            .rotate(270f)
+                                            .testTag("brightness_slider")
+                                    )
+                                }
                             }
                         }
                     }
@@ -196,6 +216,15 @@ fun BottomReaderBar(
                     onDismissRequest = { showMoreMenu = false },
                     modifier = Modifier.background(AppSurface)
                 ) {
+                    DropdownMenuItem(
+                        text = { Text("وضع القراءة", color = AppTextPrimary, fontSize = 14.sp) },
+                        leadingIcon = { Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = AppPrimary) },
+                        onClick = {
+                            showMoreMenu = false
+                            onReadingModeClick()
+                        },
+                        modifier = Modifier.testTag("dropdown_reading_mode_option")
+                    )
                     DropdownMenuItem(
                         text = { Text("طباعة الملف", color = AppTextPrimary, fontSize = 14.sp) },
                         leadingIcon = { Icon(Icons.Default.Print, contentDescription = null, tint = AppPrimary) },

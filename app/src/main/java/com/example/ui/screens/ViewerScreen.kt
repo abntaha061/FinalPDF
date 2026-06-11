@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -74,6 +75,7 @@ fun ViewerScreen(
     val currentPage by viewModel.currentPage.collectAsState()
     val totalPages by viewModel.totalPages.collectAsState()
     val isNightMode by viewModel.isNightMode.collectAsState()
+    val readingMode by viewModel.readingMode.collectAsState()
     val isSwipeHorizontal by viewModel.isSwipeHorizontal.collectAsState()
     val isPageBookmarked by viewModel.isCurrentPageBookmarked.collectAsState()
     val pageBookmarks by viewModel.activePageBookmarks.collectAsState()
@@ -108,6 +110,7 @@ fun ViewerScreen(
     // Jump dialog & File information dialog states
     var showJumpDialog by remember { mutableStateOf(false) }
     var showFileInfoDialog by remember { mutableStateOf(false) }
+    var showReadingModeBottomSheet by remember { mutableStateOf(false) }
 
     var zoomLevel by remember { mutableStateOf(1.0f) }
     var showZoomBadge by remember { mutableStateOf(false) }
@@ -194,7 +197,13 @@ fun ViewerScreen(
         Box(
             modifier = modifier
                 .fillMaxSize()
-                .background(if (isNightMode) Color.Black else Color(0xFF13131A))
+                .background(
+                    when (readingMode) {
+                        "night" -> Color(0xFF16161A)
+                        "sepia" -> Color(0xFFF5E6C8)
+                        else -> Color(0xFF13131A)
+                    }
+                )
         ) {
             if (activeUri != null) {
                 // Interactive PDF Container
@@ -206,7 +215,7 @@ fun ViewerScreen(
                     PdfViewerWidget(
                         pdfUriString = activeUri!!,
                         currentPage = currentPage,
-                        isNightMode = isNightMode,
+                        readingMode = readingMode,
                         isSwipeHorizontal = isSwipeHorizontal,
                         onPageChanged = { page, pageCount ->
                             viewModel.updateProgress(activeUri!!, page, pageCount)
@@ -687,6 +696,9 @@ fun ViewerScreen(
                     },
                     onFileInfoClick = {
                         showFileInfoDialog = true
+                    },
+                    onReadingModeClick = {
+                        showReadingModeBottomSheet = true
                     }
                 )
             }
@@ -745,6 +757,83 @@ fun ViewerScreen(
                             colors = ButtonDefaults.buttonColors(containerColor = AppPrimary)
                         ) {
                             Text("إغلاق", color = Color.White, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+
+            // Reading Mode Selection BottomSheet
+            if (showReadingModeBottomSheet) {
+                ModalBottomSheet(
+                    onDismissRequest = { showReadingModeBottomSheet = false },
+                    sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+                    containerColor = AppSurface
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 36.dp, start = 20.dp, end = 20.dp, top = 8.dp)
+                            .navigationBarsPadding(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "وضع القراءة",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = AppPrimary,
+                            modifier = Modifier
+                                .padding(bottom = 20.dp)
+                        )
+                        
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Card 1: عادي
+                            ReadingModeCard(
+                                title = "عادي",
+                                icon = Icons.Default.WbSunny,
+                                colorBg = Color.White,
+                                colorText = Color.Black,
+                                isSelected = readingMode == "normal",
+                                onSelect = {
+                                    viewModel.setReadingMode("normal")
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("reading_mode_normal_card")
+                            )
+
+                            // Card 2: ليلي
+                            ReadingModeCard(
+                                title = "ليلي",
+                                icon = Icons.Default.NightsStay,
+                                colorBg = Color(0xFF1D1B20),
+                                colorText = Color.White,
+                                isSelected = readingMode == "night",
+                                onSelect = {
+                                    viewModel.setReadingMode("night")
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("reading_mode_night_card")
+                            )
+
+                            // Card 3: بني (سيبيا)
+                            ReadingModeCard(
+                                title = "بني (سيبيا)",
+                                icon = Icons.Default.AutoAwesome,
+                                colorBg = Color(0xFFF5E6C8),
+                                colorText = Color(0xFF5C4033),
+                                isSelected = readingMode == "sepia",
+                                onSelect = {
+                                    viewModel.setReadingMode("sepia")
+                                },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .testTag("reading_mode_sepia_card")
+                            )
                         }
                     }
                 }
@@ -1257,4 +1346,46 @@ fun PDFView.findNext(forward: Boolean): Int {
 
 fun PDFView.resetSearch() {
     this.setTag(null)
+}
+
+@Composable
+fun ReadingModeCard(
+    title: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    colorBg: Color,
+    colorText: Color,
+    isSelected: Boolean,
+    onSelect: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        onClick = onSelect,
+        colors = CardDefaults.cardColors(containerColor = colorBg),
+        shape = RoundedCornerShape(12.dp),
+        border = if (isSelected) androidx.compose.foundation.BorderStroke(3.dp, AppPrimary) else null,
+        modifier = modifier
+            .height(100.dp)
+            .shadow(if (isSelected) 6.dp else 2.dp, RoundedCornerShape(12.dp))
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = title,
+                tint = colorText,
+                modifier = Modifier.size(28.dp)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = title,
+                color = colorText,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+    }
 }
