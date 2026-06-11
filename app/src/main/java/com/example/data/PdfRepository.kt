@@ -42,4 +42,17 @@ class PdfRepository(private val pdfDao: PdfDao) {
     suspend fun hasPageBookmark(pdfUri: String, pageNumber: Int): Boolean {
         return pdfDao.hasPageBookmark(pdfUri, pageNumber)
     }
+
+    // Highlights
+    fun getHighlightsForPdf(fileUri: String): Flow<List<HighlightEntity>> {
+        return pdfDao.getHighlightsForPdf(fileUri)
+    }
+
+    suspend fun insertHighlight(highlight: HighlightEntity) {
+        pdfDao.insertHighlight(highlight)
+    }
+
+    suspend fun deleteHighlight(id: Long) {
+        pdfDao.deleteHighlight(id)
+    }
 }

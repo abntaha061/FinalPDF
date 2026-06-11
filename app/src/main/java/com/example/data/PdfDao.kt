@@ -38,4 +38,14 @@ interface PdfDao {
 
     @Query("SELECT EXISTS(SELECT 1 FROM pdf_page_bookmarks WHERE pdfUri = :pdfUri AND pageNumber = :pageNumber)")
     suspend fun hasPageBookmark(pdfUri: String, pageNumber: Int): Boolean
+
+    // Highlights
+    @Query("SELECT * FROM pdf_highlights WHERE fileUri = :fileUri ORDER BY timestamp DESC")
+    fun getHighlightsForPdf(fileUri: String): Flow<List<HighlightEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertHighlight(highlight: HighlightEntity)
+
+    @Query("DELETE FROM pdf_highlights WHERE id = :id")
+    suspend fun deleteHighlight(id: Long)
 }

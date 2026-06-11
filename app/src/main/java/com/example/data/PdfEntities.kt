@@ -22,3 +22,13 @@ data class PdfPageBookmarkEntity(
     val label: String,
     val timestamp: Long = System.currentTimeMillis()
 )
+
+@Entity(tableName = "pdf_highlights")
+data class HighlightEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val fileUri: String,
+    val pageNumber: Int,
+    val text: String,
+    val color: String,
+    val timestamp: Long = System.currentTimeMillis()
+)

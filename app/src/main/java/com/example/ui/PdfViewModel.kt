@@ -6,6 +6,7 @@ import android.provider.OpenableColumns
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.example.data.HighlightEntity
 import com.example.data.PdfDocumentEntity
 import com.example.data.PdfPageBookmarkEntity
 import com.example.data.PdfRepository
@@ -60,6 +61,14 @@ class PdfViewModel(private val repository: PdfRepository) : ViewModel() {
     val activePageBookmarks: StateFlow<List<PdfPageBookmarkEntity>> = _selectedUri
         .flatMapLatest { uri ->
             if (uri != null) repository.getPageBookmarksForPdf(uri)
+            else flowOf(emptyList())
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val activeHighlights: StateFlow<List<HighlightEntity>> = _selectedUri
+        .flatMapLatest { uri ->
+            if (uri != null) repository.getHighlightsForPdf(uri)
             else flowOf(emptyList())
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -175,6 +184,18 @@ class PdfViewModel(private val repository: PdfRepository) : ViewModel() {
             if (_selectedUri.value == pdfUri && _currentPage.value == pageNumber) {
                 _isCurrentPageBookmarked.value = false
             }
+        }
+    }
+
+    fun insertHighlight(highlight: HighlightEntity) {
+        viewModelScope.launch {
+            repository.insertHighlight(highlight)
+        }
+    }
+
+    fun deleteHighlight(id: Long) {
+        viewModelScope.launch {
+            repository.deleteHighlight(id)
         }
     }
 

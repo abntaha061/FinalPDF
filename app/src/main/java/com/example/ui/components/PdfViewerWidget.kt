@@ -28,7 +28,8 @@ fun PdfViewerWidget(
     viewModel: PdfViewModel,
     modifier: Modifier = Modifier,
     onPdfViewCreated: ((PDFView) -> Unit)? = null,
-    onTap: (() -> Unit)? = null
+    onTap: (() -> Unit)? = null,
+    onLongPress: ((androidx.compose.ui.geometry.Offset) -> Unit)? = null
 ) {
     val context = LocalContext.current
     var isLoaded by remember { mutableStateOf(false) }
@@ -69,6 +70,23 @@ fun PdfViewerWidget(
             factory = { ctx ->
                 PDFView(ctx, null).apply {
                     onPdfViewCreated?.invoke(this)
+                    
+                    val gestureDetector = android.view.GestureDetector(ctx, object : android.view.GestureDetector.SimpleOnGestureListener() {
+                        override fun onSingleTapConfirmed(e: android.view.MotionEvent): Boolean {
+                            onTap?.invoke()
+                            return true
+                        }
+                        
+                        override fun onLongPress(e: android.view.MotionEvent) {
+                            onLongPress?.invoke(androidx.compose.ui.geometry.Offset(e.x, e.y))
+                        }
+                    })
+                    
+                    setOnTouchListener { _, event ->
+                        gestureDetector.onTouchEvent(event)
+                        false
+                    }
+
                     try {
                         val fileUri = Uri.parse(pdfUriString)
                         val configurator = fromUri(fileUri)

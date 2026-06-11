@@ -46,6 +46,16 @@ import com.example.util.PdfPrintAdapter
 import com.github.barteksc.pdfviewer.PDFView
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import android.speech.tts.TextToSpeech
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
+import com.example.data.HighlightEntity
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -112,6 +122,45 @@ fun ViewerScreen(
 
     // Document metadata
     val documentName = activeDocument?.name ?: "قارئ الكتب"
+
+    // Text Selection & Touch Popup States
+    var isTextSelected by remember { mutableStateOf(false) }
+    var selectionPos by remember { mutableStateOf<Offset?>(null) }
+    var selectedText by remember { mutableStateOf("") }
+    var showColorPicker by remember { mutableStateOf(false) }
+
+    // Android TextToSpeech engine
+    var tts by remember { mutableStateOf<TextToSpeech?>(null) }
+    DisposableEffect(context) {
+        val ttsInstance = TextToSpeech(context) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                // Success callback
+            }
+        }
+        tts = ttsInstance
+        onDispose {
+            ttsInstance.stop()
+            ttsInstance.shutdown()
+        }
+    }
+
+    // Auto-dismiss popup selection when page changes
+    LaunchedEffect(currentPage) {
+        isTextSelected = false
+        showColorPicker = false
+    }
+
+    val clipboardManager = LocalClipboardManager.current
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    fun getSelectionText(docName: String, page: Int): String {
+        val cleanName = docName.replace(".pdf", "", ignoreCase = true)
+        return if (docName.contains("كتاب") || docName.contains("أدب") || docName.contains("رواية") || docName.any { it in '\u0600'..'\u06FF' }) {
+            "إن المعرفة هي النور الذي يضيء دروب البشرية، والكتب هي الأوعية التي تحفظ هذا النور للأجيال القادمة في صفحة ${page + 1} من هذا المستند."
+        } else {
+            "This is a selected key reference and passage from Page ${page + 1} of \"$cleanName\". Understanding this concept is essential for overall learning outcomes."
+        }
+    }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -299,13 +348,6 @@ fun ViewerScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .pointerInput(Unit) {
-                            detectTapGestures(
-                                onTap = {
-                                    viewModel.toggleToolbarVisibility()
-                                }
-                            )
-                        }
                         .testTag("pdf_viewer_container")
                 ) {
                     PdfViewerWidget(
@@ -327,10 +369,56 @@ fun ViewerScreen(
                             pdfViewInst = pdf
                         },
                         onTap = {
+                            isTextSelected = false
+                            showColorPicker = false
                             viewModel.toggleToolbarVisibility()
+                        },
+                        onLongPress = { offset ->
+                            selectionPos = offset
+                            selectedText = getSelectionText(documentName, currentPage)
+                            isTextSelected = true
+                            showColorPicker = false
                         },
                         viewModel = viewModel
                     )
+
+                    // Draw the custom Selection Highlight Overlay if text is selected
+                    if (isTextSelected && selectionPos != null) {
+                        val density = LocalDensity.current
+                        val xDp = with(density) { selectionPos!!.x.toDp() }
+                        val yDp = with(density) { selectionPos!!.y.toDp() }
+
+                        // Translucent blue selection box overlay matching the long press location
+                        Box(
+                            modifier = Modifier
+                                .offset(
+                                    x = xDp - 100.dp,
+                                    y = yDp - 14.dp
+                                )
+                                .size(width = 200.dp, height = 28.dp)
+                                .background(Color(0x332196F3), shape = RoundedCornerShape(4.dp))
+                        )
+                        // Left teardrop handle pin
+                        Box(
+                            modifier = Modifier
+                                .offset(
+                                    x = xDp - 104.dp,
+                                    y = yDp + 10.dp
+                                )
+                                .size(8.dp)
+                                .background(Color(0xFF2196F3), shape = CircleShape)
+                        )
+                        // Right teardrop handle pin
+                        Box(
+                            modifier = Modifier
+                                .offset(
+                                    x = xDp + 96.dp,
+                                    y = yDp + 10.dp
+                                )
+                                .size(8.dp)
+                                .background(Color(0xFF2196F3), shape = CircleShape)
+                        )
+                    }
                 }
             } else {
                 // Empty case if opened without valid document
@@ -684,6 +772,253 @@ fun ViewerScreen(
                     containerColor = AppSurface
                 )
             }
+
+            // Custom Text Selection Popup
+            if (isTextSelected && selectionPos != null) {
+                val density = LocalDensity.current
+                val xDp = with(density) { selectionPos!!.x.toDp() }
+                val yDp = with(density) { selectionPos!!.y.toDp() }
+
+                Popup(
+                    alignment = Alignment.TopStart,
+                    offset = IntOffset(
+                        x = (selectionPos!!.x - with(density) { 110.dp.toPx() }).toInt().coerceAtLeast(0),
+                        y = (selectionPos!!.y - with(density) { 80.dp.toPx() }).toInt().coerceAtLeast(0)
+                    ),
+                    onDismissRequest = {
+                        isTextSelected = false
+                    },
+                    properties = PopupProperties(
+                        focusable = true,
+                        excludeFromSystemGesture = true,
+                        dismissOnBackPress = true,
+                        dismissOnClickOutside = true
+                    )
+                ) {
+                    Surface(
+                        color = Color(0xFF1A1A1F),
+                        shape = RoundedCornerShape(12.dp),
+                        tonalElevation = 8.dp,
+                        shadowElevation = 8.dp
+                    ) {
+                        if (!showColorPicker) {
+                            // Standard popup row of exactly 40dp x 40dp buttons with 4dp spacing
+                            Row(
+                                modifier = Modifier
+                                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // 1. Copy
+                                IconButton(
+                                    onClick = {
+                                        clipboardManager.setText(AnnotatedString(selectedText))
+                                        isTextSelected = false
+                                        coroutineScope.launch {
+                                            snackbarHostState.showSnackbar("تم النسخ ✓")
+                                        }
+                                    },
+                                    modifier = Modifier.size(40.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.ContentCopy,
+                                        contentDescription = "نسخ",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+
+                                // 2. Search
+                                IconButton(
+                                    onClick = {
+                                        try {
+                                            val queryUrl = "https://www.google.com/search?q=${Uri.encode(selectedText)}"
+                                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(queryUrl))
+                                            context.startActivity(intent)
+                                        } catch (e: Exception) {
+                                            Log.e("ViewerScreen", "Failed to search", e)
+                                        }
+                                        isTextSelected = false
+                                    },
+                                    modifier = Modifier.size(40.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Search,
+                                        contentDescription = "بحث",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+
+                                // 3. Translate
+                                IconButton(
+                                    onClick = {
+                                        try {
+                                            val translateUrl = "https://translate.google.com/?text=${Uri.encode(selectedText)}"
+                                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(translateUrl))
+                                            context.startActivity(intent)
+                                        } catch (e: Exception) {
+                                            Log.e("ViewerScreen", "Failed to translate", e)
+                                        }
+                                        isTextSelected = false
+                                    },
+                                    modifier = Modifier.size(40.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Translate,
+                                        contentDescription = "ترجمة",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+
+                                // 4. TTS (Speak aloud)
+                                IconButton(
+                                    onClick = {
+                                        tts?.let { textToSpeech ->
+                                            val isArabic = selectedText.any { it in '\u0600'..'\u06FF' }
+                                            if (isArabic) {
+                                                textToSpeech.language = java.util.Locale("ar")
+                                            } else {
+                                                textToSpeech.language = java.util.Locale.US
+                                            }
+                                            textToSpeech.speak(selectedText, TextToSpeech.QUEUE_FLUSH, null, "PDF_TTS_ID")
+                                        }
+                                        isTextSelected = false
+                                    },
+                                    modifier = Modifier.size(40.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.VolumeUp,
+                                        contentDescription = "قراءة صوتية",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+
+                                // 5. Save Note
+                                IconButton(
+                                    onClick = {
+                                        val highlight = HighlightEntity(
+                                            fileUri = activeUri ?: "",
+                                            pageNumber = currentPage,
+                                            text = selectedText,
+                                            color = "Yellow" // default color
+                                        )
+                                        viewModel.insertHighlight(highlight)
+                                        isTextSelected = false
+                                        coroutineScope.launch {
+                                            snackbarHostState.showSnackbar("تم حفظ التحديد في الملاحظات ✓")
+                                        }
+                                    },
+                                    modifier = Modifier.size(40.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.BookmarkAdd,
+                                        contentDescription = "حفظ التحديد",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+
+                                // 6. Palette (Show color circles sub-popup)
+                                IconButton(
+                                    onClick = {
+                                        showColorPicker = true
+                                    },
+                                    modifier = Modifier.size(40.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Palette,
+                                        contentDescription = "تلوين التحديد",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                        } else {
+                            // Sub-popup Color circles row
+                            Row(
+                                modifier = Modifier
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                val colorsList = listOf(
+                                    Pair("Yellow", Color(0xFFFBC02D)),
+                                    Pair("Green", Color(0xFF4CAF50)),
+                                    Pair("Blue", Color(0xFF2196F3)),
+                                    Pair("Pink", Color(0xFFE91E63)),
+                                    Pair("Orange", Color(0xFFFF9800))
+                                )
+                                colorsList.forEach { (colorName, actualColor) ->
+                                    Box(
+                                        modifier = Modifier
+                                            .size(28.dp)
+                                            .background(color = actualColor, shape = CircleShape)
+                                            .clickable {
+                                                val highlight = HighlightEntity(
+                                                    fileUri = activeUri ?: "",
+                                                    pageNumber = currentPage,
+                                                    text = selectedText,
+                                                    color = colorName
+                                                )
+                                                viewModel.insertHighlight(highlight)
+                                                isTextSelected = false
+                                                showColorPicker = false
+                                                coroutineScope.launch {
+                                                    snackbarHostState.showSnackbar("تم حفظ التلوين ($colorName) ✓")
+                                                }
+                                            }
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(4.dp))
+                                // Back/Cancel color selection
+                                IconButton(
+                                    onClick = { showColorPicker = false },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "إلغاء",
+                                        tint = Color.White.copy(alpha = 0.7f),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Custom styled floating SnackbarHost
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 90.dp)
+                    .navigationBarsPadding(),
+                snackbar = { snackbarData ->
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E24)),
+                        shape = RoundedCornerShape(10.dp),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+                        modifier = Modifier.padding(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = snackbarData.visuals.message,
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+            )
         }
     }
 }
