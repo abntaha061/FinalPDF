@@ -12,11 +12,14 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.animation.core.*
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -115,51 +118,6 @@ fun HomeScreen(
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                // 2. Row of 3 Stat Cards
-                val totalPdfs = recentPdfs.size
-                val lastOpenedDoc = recentPdfs.firstOrNull()
-                val lastOpenedName = lastOpenedDoc?.name ?: "—"
-                val lastOpenedPages = lastOpenedDoc?.totalPages?.let { if (it > 0) "$it" else "—" } ?: "—"
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    StatCard(
-                        title = "الملفات المفتوحة",
-                        value = "$totalPdfs",
-                        icon = Icons.Default.FolderOpen,
-                        iconColor = AppPrimary,
-                        modifier = Modifier.weight(1f)
-                    )
-                    StatCard(
-                        title = "آخر فتح",
-                        value = lastOpenedName,
-                        icon = Icons.Default.RemoveRedEye,
-                        iconColor = AppPrimaryVariant,
-                        modifier = Modifier.weight(1.2f)
-                    )
-                    StatCard(
-                        title = "الصفحات",
-                        value = lastOpenedPages,
-                        icon = Icons.Default.MenuBook,
-                        iconColor = AppPrimary,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(28.dp))
-
-                // Recent files title
-                Text(
-                    text = "الملفات الأخيرة",
-                    color = AppTextPrimary,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp,
-                    modifier = Modifier.padding(bottom = 12.dp)
-                )
-
-                // 3. Grid (LazyVerticalGrid, 2 columns) of recently opened files
                 if (recentPdfs.isEmpty()) {
                     Box(
                         modifier = Modifier
@@ -171,30 +129,118 @@ fun HomeScreen(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Center
                         ) {
+                            val pulseTransition = rememberInfiniteTransition(label = "FolderPulse")
+                            val folderScale by pulseTransition.animateFloat(
+                                initialValue = 1f,
+                                targetValue = 1.08f,
+                                animationSpec = infiniteRepeatable(
+                                    animation = tween(1000, easing = EaseInOut),
+                                    repeatMode = RepeatMode.Reverse
+                                ),
+                                label = "FolderScale"
+                            )
+
                             Icon(
-                                imageVector = Icons.Default.PictureAsPdf,
+                                imageVector = Icons.Outlined.FolderOpen,
                                 contentDescription = null,
-                                tint = AppPrimary.copy(alpha = 0.3f),
-                                modifier = Modifier.size(72.dp)
+                                tint = AppPrimary.copy(alpha = 0.4f),
+                                modifier = Modifier
+                                    .size(96.dp)
+                                    .scale(folderScale)
+                                    .testTag("empty_folder_icon")
                             )
-                            Spacer(modifier = Modifier.height(12.dp))
+
+                            Spacer(modifier = Modifier.height(20.dp))
+
                             Text(
-                                text = "لا توجد ملفات مفتوحة حالياً",
-                                color = AppTextSecondary,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Medium
+                                text = "لا توجد ملفات بعد",
+                                color = AppTextPrimary,
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.testTag("empty_title")
                             )
+
                             Spacer(modifier = Modifier.height(8.dp))
+
                             Text(
-                                text = "انقر على زر الزائد لفتح ملف PDF من جهازك",
-                                color = AppTextSecondary.copy(alpha = 0.7f),
-                                fontSize = 12.sp,
+                                text = "اضغط على زر + بالأسفل لفتح أول ملف PDF",
+                                color = AppTextSecondary,
+                                fontSize = 14.sp,
                                 textAlign = TextAlign.Center,
-                                modifier = Modifier.padding(horizontal = 24.dp)
+                                modifier = Modifier
+                                    .padding(horizontal = 48.dp)
+                                    .testTag("empty_subtitle")
+                            )
+
+                            Spacer(modifier = Modifier.height(40.dp))
+
+                            val arrowTransition = rememberInfiniteTransition(label = "ArrowBounce")
+                            val arrowOffsetY by arrowTransition.animateFloat(
+                                initialValue = 0f,
+                                targetValue = 12f,
+                                animationSpec = infiniteRepeatable(
+                                    animation = tween(400, easing = EaseInOut),
+                                    repeatMode = RepeatMode.Reverse
+                                ),
+                                label = "ArrowOffset"
+                            )
+
+                            Icon(
+                                imageVector = Icons.Default.KeyboardArrowDown,
+                                contentDescription = null,
+                                tint = AppPrimary,
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .offset(y = arrowOffsetY.dp)
+                                    .testTag("empty_arrow_down")
                             )
                         }
                     }
                 } else {
+                    // 2. Row of 3 Stat Cards
+                    val totalPdfs = recentPdfs.size
+                    val lastOpenedDoc = recentPdfs.firstOrNull()
+                    val lastOpenedName = lastOpenedDoc?.name ?: "—"
+                    val lastOpenedPages = lastOpenedDoc?.totalPages?.let { if (it > 0) "$it" else "—" } ?: "—"
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        StatCard(
+                            title = "الملفات المفتوحة",
+                            value = "$totalPdfs",
+                            icon = Icons.Default.FolderOpen,
+                            iconColor = AppPrimary,
+                            modifier = Modifier.weight(1f)
+                        )
+                        StatCard(
+                            title = "آخر فتح",
+                            value = lastOpenedName,
+                            icon = Icons.Default.RemoveRedEye,
+                            iconColor = AppPrimaryVariant,
+                            modifier = Modifier.weight(1.2f)
+                        )
+                        StatCard(
+                            title = "الصفحات",
+                            value = lastOpenedPages,
+                            icon = Icons.Default.MenuBook,
+                            iconColor = AppPrimary,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(28.dp))
+
+                    // Recent files title
+                    Text(
+                        text = "الملفات الأخيرة",
+                        color = AppTextPrimary,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp,
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
+
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(2),
                         horizontalArrangement = Arrangement.spacedBy(16.dp),

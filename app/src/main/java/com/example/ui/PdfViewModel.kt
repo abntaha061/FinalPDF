@@ -20,6 +20,7 @@ import kotlinx.coroutines.launch
 private val Context.dataStore by preferencesDataStore(name = "pdf_reader_settings")
 private val NIGHT_MODE_KEY = booleanPreferencesKey("is_night_mode")
 private val READING_MODE_KEY = androidx.datastore.preferences.core.stringPreferencesKey("reading_mode")
+private val ONBOARDING_DONE_KEY = booleanPreferencesKey("onboarding_done")
 
 class PdfViewModel(
     private val repository: PdfRepository,
@@ -28,6 +29,9 @@ class PdfViewModel(
 
     private val _isReady = MutableStateFlow(false)
     val isReady: StateFlow<Boolean> = _isReady.asStateFlow()
+
+    private val _isOnboardingDone = MutableStateFlow<Boolean?>(null)
+    val isOnboardingDone: StateFlow<Boolean?> = _isOnboardingDone.asStateFlow()
 
     init {
         viewModelScope.launch {
@@ -39,8 +43,24 @@ class PdfViewModel(
             }
         }
         viewModelScope.launch {
+            context.dataStore.data.map { preferences ->
+                preferences[ONBOARDING_DONE_KEY] == true
+            }.collect { done ->
+                _isOnboardingDone.value = done
+            }
+        }
+        viewModelScope.launch {
             recentDocuments.first()
+            _isOnboardingDone.filterNotNull().first()
             _isReady.value = true
+        }
+    }
+
+    fun completeOnboarding() {
+        viewModelScope.launch {
+            context.dataStore.edit { preferences ->
+                preferences[ONBOARDING_DONE_KEY] = true
+            }
         }
     }
 
@@ -63,6 +83,33 @@ class PdfViewModel(
 
     private val _isToolbarVisible = MutableStateFlow(true)
     val isToolbarVisible: StateFlow<Boolean> = _isToolbarVisible.asStateFlow()
+
+    private val _securityExceptionUri = MutableStateFlow<String?>(null)
+    val securityExceptionUri: StateFlow<String?> = _securityExceptionUri.asStateFlow()
+
+    private val _largeFileUriPending = MutableStateFlow<Pair<String, Long>?>(null) // Pair of Uri, size in MB
+    val largeFileUriPending: StateFlow<Pair<String, Long>?> = _largeFileUriPending.asStateFlow()
+
+    private val _showLargeFileWarningSnackbar = MutableStateFlow(false)
+    val showLargeFileWarningSnackbar: StateFlow<Boolean> = _showLargeFileWarningSnackbar.asStateFlow()
+
+    fun clearSecurityException() {
+        _securityExceptionUri.value = null
+    }
+
+    fun clearLargeFilePending() {
+        _largeFileUriPending.value = null
+    }
+
+    fun consumeLargeFileWarningSnackbar() {
+        _showLargeFileWarningSnackbar.value = false
+    }
+
+    fun selectDocumentForced(context: Context, uri: Uri) {
+        _largeFileUriPending.value = null
+        _showLargeFileWarningSnackbar.value = true
+        proceedWithLoading(context, uri)
+    }
 
     fun toggleToolbarVisibility() {
         _isToolbarVisible.value = !_isToolbarVisible.value
@@ -136,6 +183,33 @@ class PdfViewModel(
     }
 
     fun selectDocument(context: Context, uri: Uri) {
+        _errorState.value = null
+        _securityExceptionUri.value = null
+        _largeFileUriPending.value = null
+
+        // 1. Check for SecurityException / Permission Denied and File Size
+        try {
+            context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
+                val sizeBytes = pfd.statSize
+                // 2. Check for File Too Large (> 100MB)
+                if (sizeBytes > 100L * 1024L * 1024L) {
+                    val sizeMB = sizeBytes / (1024 * 1024)
+                    _largeFileUriPending.value = Pair(uri.toString(), sizeMB)
+                    return // Stop for user confirmation
+                }
+            }
+        } catch (e: SecurityException) {
+            _securityExceptionUri.value = uri.toString()
+            return // Stop and show permission denied dialog
+        } catch (e: Exception) {
+            // Ignore other exceptions during file prep checking
+        }
+
+        // Proceed normally
+        proceedWithLoading(context, uri)
+    }
+
+    private fun proceedWithLoading(context: Context, uri: Uri) {
         _selectedUri.value = uri.toString()
         _isViewerLoading.value = true
         

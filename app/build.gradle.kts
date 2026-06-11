@@ -91,6 +91,8 @@ dependencies {
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)
   implementation("androidx.core:core-splashscreen:1.0.1")
+  implementation("com.google.accompanist:accompanist-pager:0.32.0")
+  implementation("com.google.accompanist:accompanist-pager-indicators:0.32.0")
   implementation(libs.hilt.android)
   implementation(libs.coil.compose)
   implementation("com.github.mhiew:android-pdf-viewer:3.2.0-beta.1")

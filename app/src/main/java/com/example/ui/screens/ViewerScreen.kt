@@ -13,6 +13,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -93,12 +95,29 @@ fun ViewerScreen(
     val isSwipeHorizontal by viewModel.isSwipeHorizontal.collectAsState()
     val isPageBookmarked by viewModel.isCurrentPageBookmarked.collectAsState()
     val pageBookmarks by viewModel.activePageBookmarks.collectAsState()
+    val errorState by viewModel.errorState.collectAsState()
+    val showLargeFileWarningSnackbar by viewModel.showLargeFileWarningSnackbar.collectAsState()
     
     // Bottom Reader Bar visibility state connected to the ViewModel Flow
     val isToolbarVisible by viewModel.isToolbarVisible.collectAsState()
 
     // Keep reference to PDFView for zooming levels
     var pdfViewInst by remember { mutableStateOf<PDFView?>(null) }
+
+    val pdfPickerLauncher = rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+        onResult = { uri ->
+            if (uri != null) {
+                try {
+                    val takeFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    context.contentResolver.takePersistableUriPermission(uri, takeFlags)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+                viewModel.selectDocument(context, uri)
+            }
+        }
+    )
 
     // Fullscreen behavior implementation (hiding status/navigation bars safely)
     val activity = context as? Activity
@@ -133,6 +152,13 @@ fun ViewerScreen(
         showZoomBadge = true
         delay(2000)
         showZoomBadge = false
+    }
+
+    LaunchedEffect(showLargeFileWarningSnackbar) {
+        if (showLargeFileWarningSnackbar) {
+            snackbarHostState.showSnackbar("تنبيه: الملف كبير جداً وقد يستغرق التحميل وقتاً أطول.")
+            viewModel.consumeLargeFileWarningSnackbar()
+        }
     }
 
     // Search bar states
@@ -226,40 +252,122 @@ fun ViewerScreen(
                         .fillMaxSize()
                         .testTag("pdf_viewer_container")
                 ) {
-                    PdfViewerWidget(
-                        pdfUriString = activeUri!!,
-                        currentPage = currentPage,
-                        readingMode = readingMode,
-                        isSwipeHorizontal = isSwipeHorizontal,
-                        onPageChanged = { page, pageCount ->
-                            viewModel.updateProgress(activeUri!!, page, pageCount)
-                        },
-                        onLoadComplete = { pageCount ->
-                            viewModel.setViewerLoading(false)
-                            viewModel.updateProgress(activeUri!!, currentPage, pageCount)
-                        },
-                        onError = {
-                            viewModel.setViewerLoading(false)
-                        },
-                        onPdfViewCreated = { pdf ->
-                            pdfViewInst = pdf
-                        },
-                        onTap = {
-                            isTextSelected = false
-                            showColorPicker = false
-                            viewModel.toggleToolbarVisibility()
-                        },
-                        onLongPress = { offset ->
-                            selectionPos = offset
-                            selectedText = getSelectionText(documentName, currentPage)
-                            isTextSelected = true
-                            showColorPicker = false
-                        },
-                        onZoomChanged = { zoom ->
-                            zoomLevel = zoom
-                        },
-                        viewModel = viewModel
-                    )
+                    if (errorState != null) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(24.dp)
+                                .testTag("file_error_container")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.BrokenImage,
+                                contentDescription = null,
+                                tint = Color(0xFFFF6B6B),
+                                modifier = Modifier
+                                    .size(80.dp)
+                                    .testTag("error_broken_image_icon")
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                text = "تعذّر فتح الملف",
+                                color = AppTextPrimary,
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.testTag("error_title")
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = AppSurface,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 150.dp)
+                                    .testTag("error_box")
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .verticalScroll(rememberScrollState())
+                                        .padding(16.dp)
+                                ) {
+                                    Text(
+                                        text = errorState ?: "Unknown Error / Permission Denied",
+                                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                        fontSize = 12.sp,
+                                        color = AppTextSecondary,
+                                        modifier = Modifier.testTag("error_text")
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(24.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterHorizontally)
+                            ) {
+                                Button(
+                                    onClick = {
+                                        val uri = activeUri
+                                        if (uri != null) {
+                                            viewModel.setError(null)
+                                            viewModel.setViewerLoading(true)
+                                            viewModel.selectDocument(context, Uri.parse(uri))
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = AppPrimary),
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.testTag("error_retry_button")
+                                ) {
+                                    Text(text = "حاول مجدداً", color = Color.White, fontWeight = FontWeight.Bold)
+                                }
+                                OutlinedButton(
+                                    onClick = {
+                                        pdfPickerLauncher.launch(arrayOf("application/pdf"))
+                                    },
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, AppPrimary),
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.testTag("error_choose_another_button")
+                                ) {
+                                    Text(text = "اختر ملفاً آخر", color = AppPrimary, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    } else {
+                        PdfViewerWidget(
+                            pdfUriString = activeUri!!,
+                            currentPage = currentPage,
+                            readingMode = readingMode,
+                            isSwipeHorizontal = isSwipeHorizontal,
+                            onPageChanged = { page, pageCount ->
+                                viewModel.updateProgress(activeUri!!, page, pageCount)
+                            },
+                            onLoadComplete = { pageCount ->
+                                viewModel.setViewerLoading(false)
+                                viewModel.updateProgress(activeUri!!, currentPage, pageCount)
+                            },
+                            onError = {
+                                viewModel.setViewerLoading(false)
+                            },
+                            onPdfViewCreated = { pdf ->
+                                pdfViewInst = pdf
+                            },
+                            onTap = {
+                                isTextSelected = false
+                                showColorPicker = false
+                                viewModel.toggleToolbarVisibility()
+                            },
+                            onLongPress = { offset ->
+                                selectionPos = offset
+                                selectedText = getSelectionText(documentName, currentPage)
+                                isTextSelected = true
+                                showColorPicker = false
+                            },
+                            onZoomChanged = { zoom ->
+                                zoomLevel = zoom
+                            },
+                            viewModel = viewModel
+                        )
+                    }
 
                     // Draw automatic yellow text highlight overlay in the center area if search matches current page
                     if (isSearching && searchMatches.contains(currentPage)) {

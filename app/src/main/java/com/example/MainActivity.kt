@@ -26,6 +26,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
@@ -33,6 +34,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ViewModelProvider
+import androidx.compose.material3.TextButton
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -47,7 +49,11 @@ import com.example.ui.PdfViewModel
 import com.example.ui.PdfViewModelFactory
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.ViewerScreen
+import com.example.ui.screens.OnboardingScreen
 import com.example.ui.theme.MyApplicationTheme
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.core.tween
 
 class MainActivity : ComponentActivity() {
 
@@ -108,6 +114,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val isNightModeBySettings by viewModel.isNightMode.collectAsState()
+            val isOnboardingCompleted by viewModel.isOnboardingDone.collectAsState()
             
             MyApplicationTheme(
                 darkTheme = isNightModeBySettings
@@ -219,32 +226,122 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    val navController = rememberNavController()
-
-                    NavHost(
-                        navController = navController,
-                        startDestination = "home"
+                if (isOnboardingCompleted != null) {
+                    Surface(
+                        modifier = Modifier.fillMaxSize(),
+                        color = MaterialTheme.colorScheme.background
                     ) {
-                        composable("home") {
-                            HomeScreen(
-                                viewModel = viewModel,
-                                onPdfOpened = {
-                                    navController.navigate("viewer")
-                                }
+                        val navController = rememberNavController()
+                        val startDest = if (isOnboardingCompleted == true) "home" else "onboarding"
+
+                        val securityExceptionUri by viewModel.securityExceptionUri.collectAsState()
+                        val largeFileUriPending by viewModel.largeFileUriPending.collectAsState()
+
+                        if (securityExceptionUri != null) {
+                            AlertDialog(
+                                onDismissRequest = { viewModel.clearSecurityException() },
+                                title = { Text("لا يوجد إذن للوصول", fontWeight = FontWeight.Bold) },
+                                text = { Text("لا يملك التطبيق صلاحية قراءة هذا الملف. اذهب إلى الإعدادات وامنح الإذن يدوياً.") },
+                                confirmButton = {
+                                    Button(
+                                        onClick = {
+                                            viewModel.clearSecurityException()
+                                            try {
+                                                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                                    data = Uri.fromParts("package", packageName, null)
+                                                }
+                                                startActivity(intent)
+                                            } catch (e: Exception) {
+                                                // ignore
+                                            }
+                                        }
+                                    ) {
+                                        Text("فتح الإعدادات")
+                                    }
+                                },
+                                dismissButton = {
+                                    TextButton(
+                                        onClick = { viewModel.clearSecurityException() }
+                                    ) {
+                                        Text("إلغاء")
+                                    }
+                                },
+                                modifier = Modifier.testTag("permission_denied_dialog")
                             )
                         }
-                        
-                        composable("viewer") {
-                            ViewerScreen(
-                                viewModel = viewModel,
-                                onBack = {
-                                    navController.popBackStack()
-                                }
+
+                        if (largeFileUriPending != null) {
+                            val pendingUri = largeFileUriPending!!.first
+                            val sizeMB = largeFileUriPending!!.second
+                            AlertDialog(
+                                onDismissRequest = { viewModel.clearLargeFilePending() },
+                                title = { Text("الملف كبير جداً", fontWeight = FontWeight.Bold) },
+                                text = { Text("حجم الملف $sizeMB MB. قد يستغرق التحميل وقتاً أطول أو يسبب بطءاً. هل تريد المتابعة؟") },
+                                confirmButton = {
+                                    Button(
+                                        onClick = {
+                                            viewModel.selectDocumentForced(context, Uri.parse(pendingUri))
+                                            if (navController.currentBackStackEntry?.destination?.route != "viewer") {
+                                                navController.navigate("viewer")
+                                            }
+                                        }
+                                    ) {
+                                        Text("متابعة")
+                                    }
+                                },
+                                dismissButton = {
+                                    TextButton(
+                                        onClick = {
+                                            viewModel.clearLargeFilePending()
+                                            if (navController.currentBackStackEntry?.destination?.route == "viewer") {
+                                                navController.popBackStack("home", inclusive = false)
+                                            }
+                                        }
+                                    ) {
+                                        Text("إلغاء")
+                                    }
+                                },
+                                modifier = Modifier.testTag("file_too_large_dialog")
                             )
+                        }
+
+                        NavHost(
+                            navController = navController,
+                            startDestination = startDest
+                        ) {
+                            composable("onboarding") {
+                                OnboardingScreen(
+                                    onFinished = {
+                                        viewModel.completeOnboarding()
+                                        navController.navigate("home") {
+                                            popUpTo("onboarding") { inclusive = true }
+                                        }
+                                    }
+                                )
+                            }
+
+                            composable(
+                                route = "home",
+                                enterTransition = {
+                                    fadeIn(animationSpec = tween(450)) + slideInHorizontally(animationSpec = tween(450))
+                                }
+                            ) {
+                                HomeScreen(
+                                    viewModel = viewModel,
+                                    onPdfOpened = {
+                                        navController.navigate("viewer")
+                                    }
+                                )
+                            }
+                            
+                            composable("viewer") {
+                                ViewerScreen(
+                                    viewModel = viewModel,
+                                    onBack = {
+                                        navController.popBackStack()
+                                    }
+                                )
+                            }
                         }
                     }
                 }
