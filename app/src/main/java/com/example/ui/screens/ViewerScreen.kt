@@ -42,7 +42,7 @@ import androidx.core.view.WindowInsetsControllerCompat
 import com.example.ui.PdfViewModel
 import com.example.ui.components.BottomReaderBar
 import com.example.ui.components.PdfViewerWidget
-import com.example.ui.components.PdfPageThumbnail
+import com.example.ui.components.BookmarkDrawer
 import com.example.ui.theme.*
 import com.example.util.PdfPrintAdapter
 import com.github.barteksc.pdfviewer.PDFView
@@ -178,177 +178,17 @@ fun ViewerScreen(
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
-            ModalDrawerSheet(
-                drawerContainerColor = AppSurface,
-                modifier = Modifier.width(300.dp)
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(top = 24.dp)
-                ) {
-                    Text(
-                        text = "فهرس المستند",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        color = AppPrimary,
-                        modifier = Modifier.padding(horizontal = 24.dp)
-                    )
-                    Text(
-                        text = documentName,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = AppTextSecondary,
-                        modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 16.dp),
-                        maxLines = 1
-                    )
-
-                    // Drawer Tabs Selection
-                    TabRow(
-                        selectedTabIndex = selectedDrawerTab,
-                        containerColor = Color.Transparent,
-                        contentColor = AppPrimary,
-                        modifier = Modifier.padding(horizontal = 12.dp)
-                    ) {
-                        Tab(
-                            selected = selectedDrawerTab == 0,
-                            onClick = { selectedDrawerTab = 0 },
-                            text = { Text("الإشارات", fontSize = 13.sp) }
-                        )
-                        Tab(
-                            selected = selectedDrawerTab == 1,
-                            onClick = { selectedDrawerTab = 1 },
-                            text = { Text("المعاينة", fontSize = 13.sp) }
-                        )
-                    }
-
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(16.dp)
-                    ) {
-                        if (selectedDrawerTab == 0) {
-                            // Page Bookmarks items
-                            if (pageBookmarks.isEmpty()) {
-                                Box(
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = "لا توجد صفحات محفوظة.",
-                                        color = AppTextSecondary,
-                                        fontSize = 14.sp
-                                    )
-                                }
-                            } else {
-                                LazyColumn(
-                                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                                    modifier = Modifier.fillMaxSize()
-                                ) {
-                                    items(pageBookmarks) { bookmark ->
-                                        Card(
-                                            colors = CardDefaults.cardColors(
-                                                containerColor = AppBottomBarBg.copy(alpha = 0.5f)
-                                            ),
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clickable {
-                                                    viewModel.jumpToPage(bookmark.pageNumber)
-                                                    coroutineScope.launch { drawerState.close() }
-                                                }
-                                        ) {
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.SpaceBetween
-                                            ) {
-                                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                                    Icon(
-                                                        imageVector = Icons.Default.Bookmark,
-                                                        contentDescription = null,
-                                                        tint = AppPrimaryVariant,
-                                                        modifier = Modifier.size(20.dp)
-                                                    )
-                                                    Spacer(modifier = Modifier.width(12.dp))
-                                                    Text(
-                                                        text = "صفحة ${bookmark.pageNumber + 1}",
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = AppTextPrimary,
-                                                        fontSize = 14.sp
-                                                    )
-                                                }
-                                                IconButton(
-                                                    onClick = {
-                                                        viewModel.deletePageBookmark(bookmark.pdfUri, bookmark.pageNumber)
-                                                    },
-                                                    modifier = Modifier.size(24.dp)
-                                                ) {
-                                                    Icon(
-                                                        imageVector = Icons.Default.Delete,
-                                                        contentDescription = "حذف الإشارة",
-                                                        tint = Color.Red.copy(alpha = 0.7f),
-                                                        modifier = Modifier.size(16.dp)
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        } else {
-                            // Thumbnails previews grid list
-                            if (totalPages == 0) {
-                                Box(
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    CircularProgressIndicator(color = AppPrimary)
-                                }
-                            } else {
-                                androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
-                                    columns = androidx.compose.foundation.lazy.grid.GridCells.Fixed(2),
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                    verticalArrangement = Arrangement.spacedBy(14.dp),
-                                    modifier = Modifier.fillMaxSize()
-                                ) {
-                                    items(totalPages) { pageIndex ->
-                                        Column(
-                                            horizontalAlignment = Alignment.CenterHorizontally,
-                                            modifier = Modifier
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .clickable {
-                                                    viewModel.jumpToPage(pageIndex)
-                                                    coroutineScope.launch { drawerState.close() }
-                                                }
-                                                .background(
-                                                    if (currentPage == pageIndex) AppPrimary.copy(alpha = 0.15f)
-                                                    else Color.Transparent
-                                                )
-                                                .padding(6.dp)
-                                        ) {
-                                            PdfPageThumbnail(
-                                                pdfUriString = activeUri!!,
-                                                pageIndex = pageIndex,
-                                                modifier = Modifier
-                                                    .size(80.dp, 110.dp)
-                                                    .clip(RoundedCornerShape(6.dp))
-                                            )
-                                            Spacer(modifier = Modifier.height(4.dp))
-                                            Text(
-                                                text = "الصفحة ${pageIndex + 1}",
-                                                fontSize = 11.sp,
-                                                color = if (currentPage == pageIndex) AppPrimary else AppTextPrimary,
-                                                fontWeight = if (currentPage == pageIndex) FontWeight.Bold else FontWeight.Normal
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            BookmarkDrawer(
+                pdfUri = activeUri ?: "",
+                currentPage = currentPage,
+                totalPages = totalPages,
+                pageBookmarks = pageBookmarks,
+                pdfViewInst = pdfViewInst,
+                onJumpToPage = { index -> viewModel.jumpToPage(index) },
+                onAddBookmark = { label -> viewModel.addPageBookmark(activeUri ?: "", currentPage + 1, label) },
+                onDeleteBookmark = { bookmark -> viewModel.deletePageBookmark(bookmark.pdfUri, bookmark.pageNumber) },
+                onCloseDrawer = { coroutineScope.launch { drawerState.close() } }
+            )
         }
     ) {
         Box(

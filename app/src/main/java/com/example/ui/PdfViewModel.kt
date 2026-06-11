@@ -212,6 +212,20 @@ class PdfViewModel(
         }
     }
 
+    fun addPageBookmark(pdfUri: String, pageNumber: Int, label: String) {
+        viewModelScope.launch {
+            val bookmark = PdfPageBookmarkEntity(
+                pdfUri = pdfUri,
+                pageNumber = pageNumber,
+                label = label
+            )
+            repository.insertPageBookmark(bookmark)
+            if (_selectedUri.value == pdfUri && _currentPage.value == pageNumber) {
+                _isCurrentPageBookmarked.value = true
+            }
+        }
+    }
+
     fun insertHighlight(highlight: HighlightEntity) {
         viewModelScope.launch {
             repository.insertHighlight(highlight)
