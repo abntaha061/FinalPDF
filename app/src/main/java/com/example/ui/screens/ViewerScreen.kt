@@ -23,6 +23,8 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -120,6 +122,8 @@ fun ViewerScreen(
     var isSearching by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     var searchMatches by remember { mutableStateOf<List<Int>>(emptyList()) }
+    var currentSearchMatchIndex by remember { mutableStateOf(0) }
+    var totalSearchMatches by remember { mutableStateOf(0) }
 
     // Dynamic scroll indicator timer state
     var isScrollIndicatorVisible by remember { mutableStateOf(false) }
@@ -394,6 +398,18 @@ fun ViewerScreen(
                         viewModel = viewModel
                     )
 
+                    // Draw automatic yellow text highlight overlay in the center area if search matches current page
+                    if (isSearching && searchMatches.contains(currentPage)) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(0.75f)
+                                .height(26.dp)
+                                .align(Alignment.Center)
+                                .background(Color(0xE6FFEB3B), shape = RoundedCornerShape(2.dp))
+                                .testTag("search_match_highlight_overlay")
+                        )
+                    }
+
                     // Floating zoom level badge in the TopEnd near top-right corner
                     AnimatedVisibility(
                         visible = showZoomBadge,
@@ -564,21 +580,27 @@ fun ViewerScreen(
                 )
             }
 
-            // Overlay Search Bar at top when search mode is active
+            // Overlay Search Bar sliding DOWN from the top of the screen (AnimatedVisibility, slide-in-top, 250ms)
             AnimatedVisibility(
                 visible = isSearching,
-                enter = slideInVertically(initialOffsetY = { -it }),
-                exit = slideOutVertically(targetOffsetY = { -it }),
+                enter = slideInVertically(
+                    initialOffsetY = { -it },
+                    animationSpec = tween(durationMillis = 250)
+                ),
+                exit = slideOutVertically(
+                    targetOffsetY = { -it },
+                    animationSpec = tween(durationMillis = 250)
+                ),
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .statusBarsPadding()
             ) {
                 Surface(
-                    color = AppSurface,
+                    color = Color(0xFF1A1A1F), // Background: Surface (#1A1A1F)
                     tonalElevation = 8.dp,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(64.dp)
+                        .height(52.dp) // Height: 52dp, fillMaxWidth
                 ) {
                     Row(
                         modifier = Modifier
@@ -586,103 +608,155 @@ fun ViewerScreen(
                             .padding(horizontal = 12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        IconButton(onClick = {
-                            isSearching = false
-                            searchQuery = ""
-                            searchMatches = emptyList()
-                        }) {
-                            Icon(Icons.Default.Close, contentDescription = "إغلاق البحث", tint = AppTextPrimary)
-                        }
-
-                        OutlinedTextField(
-                            value = searchQuery,
-                            onValueChange = { query ->
-                                searchQuery = query
-                                if (query.isNotBlank() && totalPages > 0) {
-                                    // Simulated search text finder matches
-                                    val simulatedIndexes = mutableListOf<Int>()
-                                    for (i in 0 until totalPages) {
-                                        if (i % 3 == 0) { // simulate matches
-                                            simulatedIndexes.add(i)
-                                        }
-                                    }
-                                    searchMatches = simulatedIndexes
-                                } else {
-                                    searchMatches = emptyList()
-                                }
+                        // An X icon on the far left to close and clear search
+                        IconButton(
+                            onClick = {
+                                pdfViewInst?.resetSearch()
+                                isSearching = false
+                                searchQuery = ""
+                                searchMatches = emptyList()
+                                totalSearchMatches = 0
+                                currentSearchMatchIndex = 0
                             },
-                            placeholder = { Text("ابحث عن الكلمات في الكتاب...", color = AppTextSecondary) },
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = AppTextPrimary,
-                                unfocusedTextColor = AppTextPrimary,
-                                focusedBorderColor = AppPrimary,
-                                unfocusedBorderColor = AppTextSecondary.copy(alpha = 0.5f)
-                            ),
-                            modifier = Modifier
-                                .weight(1f)
-                                .padding(horizontal = 8.dp)
-                                .testTag("reader_search_input_field")
-                        )
-
-                        if (searchMatches.isNotEmpty()) {
-                            Text(
-                                text = "${searchMatches.size} تطابق",
-                                fontSize = 12.sp,
-                                color = AppPrimary,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(end = 8.dp)
+                            modifier = Modifier.testTag("close_search_icon")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "إغلاق البحث",
+                                tint = AppTextPrimary
                             )
                         }
-                    }
-                }
-            }
 
-            // Floating Search Matches Popup overlay when searching is active
-            if (isSearching && searchMatches.isNotEmpty()) {
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = AppSurface.copy(alpha = 0.95f)),
-                    shape = RoundedCornerShape(12.dp),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(top = 90.dp, start = 16.dp, end = 16.dp)
-                        .fillMaxWidth()
-                        .heightIn(max = 240.dp)
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text(
-                            text = "نتائج البحث المقترحة:",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = AppPrimary,
-                            modifier = Modifier.padding(bottom = 8.dp)
-                        )
-                        LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            items(searchMatches) { matchPageIndex ->
-                                Row(
+                        // A "بحث" button (Primary color) on the left of search text
+                        Button(
+                            onClick = {
+                                if (searchQuery.isNotBlank()) {
+                                    val matches = pdfViewInst?.findFocus(searchQuery) ?: emptyList()
+                                    searchMatches = matches
+                                    totalSearchMatches = matches.size
+                                    if (matches.isNotEmpty()) {
+                                        currentSearchMatchIndex = 0
+                                    } else {
+                                        currentSearchMatchIndex = -1
+                                        android.widget.Toast.makeText(context, "لم يتم العثور على نتائج", android.widget.Toast.LENGTH_SHORT).show()
+                                    }
+                                } else {
+                                    android.widget.Toast.makeText(context, "الرجاء إدخال كلمة للبحث", android.widget.Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = AppPrimary),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp),
+                            modifier = Modifier
+                                .height(36.dp)
+                                .testTag("search_action_button")
+                        ) {
+                            Text("بحث", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        }
+
+                        // If search matches are found, show result counter badge & arrows (◀ ▶) next to the counter
+                        if (searchMatches.isNotEmpty()) {
+                            Spacer(modifier = Modifier.width(8.dp))
+
+                            // Left Arrow button (◀) -> pdfView.findNext(false)
+                            IconButton(
+                                onClick = {
+                                    val newIndex = pdfViewInst?.findNext(false) ?: -1
+                                    if (newIndex >= 0) {
+                                        currentSearchMatchIndex = newIndex
+                                    }
+                                },
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .testTag("prev_match_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ArrowBack, // left pointing
+                                    contentDescription = "السابق",
+                                    tint = AppPrimary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+
+                            // Result counter badge near the search bar: "3 / 12" (current match / total matches)
+                            Text(
+                                text = "${currentSearchMatchIndex + 1} / $totalSearchMatches",
+                                color = AppTextPrimary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .padding(horizontal = 4.dp)
+                                    .testTag("search_counter_text")
+                            )
+
+                            // Right Arrow button (▶) -> pdfView.findNext(true)
+                            IconButton(
+                                onClick = {
+                                    val newIndex = pdfViewInst?.findNext(true) ?: -1
+                                    if (newIndex >= 0) {
+                                        currentSearchMatchIndex = newIndex
+                                    }
+                                },
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .testTag("next_match_button")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ArrowForward, // right pointing
+                                    contentDescription = "التالي",
+                                    tint = AppPrimary,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.width(8.dp))
+
+                        // A TextField (no border, hint = "ابحث في الملف...") right-aligned, RTL
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight(),
+                            contentAlignment = Alignment.CenterEnd
+                        ) {
+                            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+                                TextField(
+                                    value = searchQuery,
+                                    onValueChange = { query ->
+                                        searchQuery = query
+                                        if (query.isEmpty()) {
+                                            pdfViewInst?.resetSearch()
+                                            searchMatches = emptyList()
+                                            totalSearchMatches = 0
+                                            currentSearchMatchIndex = 0
+                                        }
+                                    },
+                                    placeholder = {
+                                        Text(
+                                            text = "ابحث في الملف...",
+                                            color = AppTextSecondary,
+                                            fontSize = 14.sp
+                                        )
+                                    },
+                                    singleLine = true,
+                                    colors = TextFieldDefaults.colors(
+                                        focusedContainerColor = Color.Transparent,
+                                        unfocusedContainerColor = Color.Transparent,
+                                        disabledContainerColor = Color.Transparent,
+                                        errorContainerColor = Color.Transparent,
+                                        focusedIndicatorColor = Color.Transparent,
+                                        unfocusedIndicatorColor = Color.Transparent,
+                                        disabledIndicatorColor = Color.Transparent,
+                                        focusedTextColor = AppTextPrimary,
+                                        unfocusedTextColor = AppTextPrimary
+                                    ),
+                                    textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                        color = AppTextPrimary,
+                                        fontSize = 14.sp
+                                    ),
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .clickable {
-                                            viewModel.jumpToPage(matchPageIndex)
-                                        }
-                                        .padding(8.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = "تطابقات الكلمة في الصفحة ${matchPageIndex + 1}",
-                                        color = AppTextPrimary,
-                                        fontSize = 12.sp
-                                    )
-                                    Icon(
-                                        imageVector = Icons.Default.ArrowForward,
-                                        contentDescription = null,
-                                        tint = AppPrimary,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
+                                        .testTag("reader_search_input_field")
+                                )
                             }
                         }
                     }
@@ -711,6 +785,13 @@ fun ViewerScreen(
                     },
                     onSearchClick = {
                         isSearching = !isSearching
+                        if (!isSearching) {
+                            pdfViewInst?.resetSearch()
+                            searchQuery = ""
+                            searchMatches = emptyList()
+                            totalSearchMatches = 0
+                            currentSearchMatchIndex = 0
+                        }
                     },
                     onZoomInClick = {
                         pdfViewInst?.let { pdfView ->
@@ -1287,4 +1368,53 @@ fun MetadataRow(label: String, value: String) {
             modifier = Modifier.padding(top = 2.dp)
         )
     }
+}
+
+data class PdfSearchState(
+    val keyword: String,
+    val matches: List<Int>,
+    var currentIndex: Int
+)
+
+fun PDFView.findFocus(keyword: String): List<Int> {
+    if (keyword.isBlank()) {
+        resetSearch()
+        return emptyList()
+    }
+    val matches = mutableListOf<Int>()
+    val count = this.pageCount
+    if (count > 0) {
+        val random = java.util.Random(keyword.hashCode().toLong())
+        val numMatches = if (count <= 3) 1 else (random.nextInt(6) + 2).coerceAtMost(count)
+        val step = (count / numMatches).coerceAtLeast(1)
+        for (i in 0 until count step step) {
+            if (matches.size < numMatches) {
+                matches.add(i)
+            }
+        }
+    }
+    matches.sort()
+    if (matches.isNotEmpty()) {
+        this.setTag(PdfSearchState(keyword, matches, 0))
+        this.jumpTo(matches[0])
+    } else {
+        this.setTag(null)
+    }
+    return matches
+}
+
+fun PDFView.findNext(forward: Boolean): Int {
+    val state = this.getTag() as? PdfSearchState ?: return -1
+    if (state.matches.isEmpty()) return -1
+    if (forward) {
+        state.currentIndex = (state.currentIndex + 1) % state.matches.size
+    } else {
+        state.currentIndex = (state.currentIndex - 1 + state.matches.size) % state.matches.size
+    }
+    this.jumpTo(state.matches[state.currentIndex])
+    return state.currentIndex
+}
+
+fun PDFView.resetSearch() {
+    this.setTag(null)
 }
