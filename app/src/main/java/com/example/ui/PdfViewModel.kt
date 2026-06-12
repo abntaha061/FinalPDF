@@ -13,6 +13,7 @@ import com.example.data.HighlightEntity
 import com.example.data.RecentFileEntity
 import com.example.data.BookmarkEntity
 import com.example.data.PdfRepository
+import com.example.util.PdfPrefetchManager
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -32,6 +33,7 @@ private val SCROLL_SPEED_KEY = androidx.datastore.preferences.core.floatPreferen
 private val LINK_OPEN_MODE_KEY = androidx.datastore.preferences.core.stringPreferencesKey("link_open_mode")
 private val AUTO_PLAY_AUDIO_KEY = booleanPreferencesKey("auto_play_audio")
 private val AUDIO_VOLUME_KEY = androidx.datastore.preferences.core.floatPreferencesKey("audio_volume")
+private val APP_LANGUAGE_KEY = androidx.datastore.preferences.core.stringPreferencesKey("app_language")
 
 private val SORT_MODE_KEY = androidx.datastore.preferences.core.stringPreferencesKey("sort_mode")
 private val FILTER_MIN_SIZE_KEY = androidx.datastore.preferences.core.floatPreferencesKey("filter_min_size")
@@ -176,6 +178,9 @@ class PdfViewModel(
     private val _audioVolume = MutableStateFlow(1.0f)
     val audioVolume: StateFlow<Float> = _audioVolume.asStateFlow()
 
+    private val _appLanguage = MutableStateFlow("ar")
+    val appLanguage: StateFlow<String> = _appLanguage.asStateFlow()
+
     init {
         viewModelScope.launch {
             context.dataStore.data.map { preferences ->
@@ -210,12 +215,28 @@ class PdfViewModel(
                 _filterMinPages.value = preferences[FILTER_MIN_PAGES_KEY] ?: 1
                 _filterMaxPages.value = preferences[FILTER_MAX_PAGES_KEY] ?: 500
                 _filterDateRange.value = preferences[FILTER_DATE_RANGE_KEY] ?: "الكل"
+                _appLanguage.value = preferences[APP_LANGUAGE_KEY] ?: "ar"
             }
         }
         viewModelScope.launch {
             recentDocuments.first()
             _isOnboardingDone.filterNotNull().first()
             _isReady.value = true
+        }
+        viewModelScope.launch {
+            currentPage
+                .debounce(200L)
+                .collect { page ->
+                    val fileUriString = _selectedUri.value
+                    if (fileUriString != null && _prefetchEnabled.value) {
+                        try {
+                            val fUri = Uri.parse(fileUriString)
+                            prefetchManager.prefetchAround(page, _totalPages.value, fUri, context)
+                        } catch (e: Exception) {
+                            // Silently ignore prefetch errors
+                        }
+                    }
+                }
         }
     }
 
@@ -242,6 +263,24 @@ class PdfViewModel(
     fun selectDocumentForced(context: Context, uri: Uri) {
         _largeFileUriPending.value = null
         _showLargeFileWarningSnackbar.value = true
+        _prefetchEnabled.value = false // disable prefetch for forced large files
+
+        // Validate magic bytes
+        try {
+            val stream = context.contentResolver.openInputStream(uri)
+            val header = ByteArray(4)
+            stream?.read(header)
+            stream?.close()
+            val isPdf = header.toString(Charsets.ISO_8859_1).startsWith("%PDF")
+            if (!isPdf) {
+                _errorState.value = "الملف ليس PDF صحيحاً أو تالف"
+                return
+            }
+        } catch (e: Exception) {
+            _errorState.value = "الملف ليس PDF صحيحاً أو تالف"
+            return
+        }
+
         proceedWithLoading(context, uri)
     }
 
@@ -275,6 +314,10 @@ class PdfViewModel(
 
     private val _tableOfContents = MutableStateFlow<List<com.shockwave.pdfium.PdfDocument.Bookmark>>(emptyList())
     val tableOfContents: StateFlow<List<com.shockwave.pdfium.PdfDocument.Bookmark>> = _tableOfContents.asStateFlow()
+
+    val prefetchManager = PdfPrefetchManager()
+    private val _prefetchEnabled = MutableStateFlow(true)
+    val prefetchEnabled: StateFlow<Boolean> = _prefetchEnabled.asStateFlow()
 
     fun setTableOfContents(toc: List<com.shockwave.pdfium.PdfDocument.Bookmark>) {
         _tableOfContents.value = toc
@@ -332,22 +375,49 @@ class PdfViewModel(
         _securityExceptionUri.value = null
         _largeFileUriPending.value = null
 
-        // 1. Check for SecurityException / Permission Denied and File Size
+        var sizeBytes = 0L
+        // 1. Get file size and Check thresholds
         try {
-            context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                val sizeBytes = pfd.statSize
-                // 2. Check for File Too Large (> 100MB)
-                if (sizeBytes > 100L * 1024L * 1024L) {
-                    val sizeMB = sizeBytes / (1024 * 1024)
-                    _largeFileUriPending.value = Pair(uri.toString(), sizeMB)
-                    return // Stop for user confirmation
-                }
-            }
+            val pfd = context.contentResolver.openFileDescriptor(uri, "r")
+            sizeBytes = pfd?.statSize ?: 0L
+            pfd?.close()
         } catch (e: SecurityException) {
             _securityExceptionUri.value = uri.toString()
             return // Stop and show permission denied dialog
         } catch (e: Exception) {
             // Ignore other exceptions during file prep checking
+        }
+
+        when {
+            sizeBytes > 500L * 1024L * 1024L -> { // > 500MB
+                _errorState.value = "الملف أكبر من 500 ميجابايت. هذا الحجم غير مدعوم."
+                return
+            }
+            sizeBytes > 100L * 1024L * 1024L -> { // > 100MB
+                _prefetchEnabled.value = false
+                val sizeMB = sizeBytes / (1024 * 1024)
+                _largeFileUriPending.value = Pair(uri.toString(), sizeMB)
+                return // Stop for user confirmation
+            }
+            else -> {
+                _prefetchEnabled.value = true
+            }
+        }
+
+        // Validate it's actually a PDF (check magic bytes):
+        try {
+            val stream = context.contentResolver.openInputStream(uri)
+            val header = ByteArray(4)
+            stream?.read(header)
+            stream?.close()
+            val isPdf = header.toString(Charsets.ISO_8859_1).startsWith("%PDF")
+            if (!isPdf) {
+                _errorState.value = "الملف ليس PDF صحيحاً أو تالف"
+                return
+            }
+        } catch (e: Exception) {
+            _errorState.value = "الملف ليس PDF صحيحاً أو تالف"
+            return
         }
 
         // Proceed normally
@@ -502,6 +572,14 @@ class PdfViewModel(
         viewModelScope.launch {
             context.dataStore.edit { preferences ->
                 preferences[AUDIO_VOLUME_KEY] = volume
+            }
+        }
+    }
+
+    fun setAppLanguage(lang: String) {
+        viewModelScope.launch {
+            context.dataStore.edit { preferences ->
+                preferences[APP_LANGUAGE_KEY] = lang
             }
         }
     }

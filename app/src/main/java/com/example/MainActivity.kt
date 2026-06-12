@@ -51,6 +51,8 @@ import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.ViewerScreen
 import com.example.ui.screens.OnboardingScreen
 import com.example.ui.screens.SettingsScreen
+import com.example.ui.screens.AboutScreen
+import com.example.ui.screens.LanguageScreen
 import com.example.ui.theme.MyApplicationTheme
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -60,6 +62,14 @@ import androidx.compose.animation.core.tween
 import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.material3.LocalTextStyle
+import androidx.datastore.preferences.preferencesDataStore
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.first
+import java.util.Locale
+
+private val Context.dataStore by preferencesDataStore(name = "pdf_reader_settings")
+private val APP_LANGUAGE_KEY = androidx.datastore.preferences.core.stringPreferencesKey("app_language")
 
 class MainActivity : ComponentActivity() {
 
@@ -87,6 +97,13 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        val savedLang = runBlocking { dataStore.data.map { it[APP_LANGUAGE_KEY] ?: "ar" }.first() }
+        val locale = Locale(savedLang)
+        Locale.setDefault(locale)
+        val config = resources.configuration
+        config.setLocale(locale)
+        resources.updateConfiguration(config, resources.displayMetrics)
+
         val splashScreen = installSplashScreen()
 
         super.onCreate(savedInstanceState)
@@ -374,6 +391,57 @@ class MainActivity : ComponentActivity() {
                                 }
                             ) {
                                 SettingsScreen(
+                                    viewModel = viewModel,
+                                    onBack = {
+                                        navController.popBackStack()
+                                    },
+                                    onNavigateToLanguage = {
+                                        navController.navigate("language")
+                                    },
+                                    onNavigateToAbout = {
+                                        navController.navigate("about")
+                                    }
+                                )
+                            }
+
+                            composable(
+                                route = "about",
+                                enterTransition = {
+                                    slideInHorizontally(
+                                        initialOffsetX = { it },
+                                        animationSpec = tween(300)
+                                    ) + fadeIn(animationSpec = tween(300))
+                                },
+                                exitTransition = {
+                                    slideOutHorizontally(
+                                        targetOffsetX = { it },
+                                        animationSpec = tween(300)
+                                    ) + fadeOut(animationSpec = tween(300))
+                                }
+                            ) {
+                                AboutScreen(
+                                    onBack = {
+                                        navController.popBackStack()
+                                    }
+                                )
+                            }
+
+                            composable(
+                                route = "language",
+                                enterTransition = {
+                                    slideInHorizontally(
+                                        initialOffsetX = { it },
+                                        animationSpec = tween(300)
+                                    ) + fadeIn(animationSpec = tween(300))
+                                },
+                                exitTransition = {
+                                    slideOutHorizontally(
+                                        targetOffsetX = { it },
+                                        animationSpec = tween(300)
+                                    ) + fadeOut(animationSpec = tween(300))
+                                }
+                            ) {
+                                LanguageScreen(
                                     viewModel = viewModel,
                                     onBack = {
                                         navController.popBackStack()

@@ -38,13 +38,18 @@ import kotlin.math.roundToInt
 @Composable
 fun SettingsScreen(
     viewModel: PdfViewModel,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onNavigateToLanguage: () -> Unit,
+    onNavigateToAbout: () -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
     // Collect settings states
+    val appLanguage by viewModel.appLanguage.collectAsState()
+    val displayLanguage = if (appLanguage == "en") "English" else "العربية"
+
     val defaultReadingMode by viewModel.defaultReadingMode.collectAsState()
     val primaryColorHex by viewModel.primaryColorHex.collectAsState()
     val uiFontSize by viewModel.uiFontSize.collectAsState()
@@ -107,6 +112,40 @@ fun SettingsScreen(
                 // SECTION 1: المظهر
                 item {
                     SectionHeader("المظهر")
+                }
+
+                // Setting 0: لغة التطبيق
+                item {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(64.dp)
+                            .padding(horizontal = 16.dp)
+                            .clickable { onNavigateToLanguage() },
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Language,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Column {
+                                Text("لغة التطبيق", color = AppTextPrimary, fontSize = 15.sp)
+                                Text(displayLanguage, color = AppTextSecondary, fontSize = 12.sp)
+                            }
+                        }
+
+                        Icon(
+                            imageVector = Icons.Default.ChevronLeft,
+                            contentDescription = "Navigate To Language",
+                            tint = AppTextSecondary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
                 }
 
                 // Setting 1: وضع القراءة الافتراضي
@@ -814,6 +853,43 @@ fun SettingsScreen(
                                     Text("إلغاء", color = AppTextPrimary)
                                 }
                             }
+                        )
+                    }
+                }
+
+                item {
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), thickness = 1.dp, color = AppSurface)
+                }
+
+                item {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(64.dp)
+                            .clickable { onNavigateToAbout() }
+                            .padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Column {
+                                Text("عن التطبيق", color = AppTextPrimary, fontSize = 15.sp)
+                                Text("معلومات المطور والمكتبات المستخدمة", color = AppTextSecondary, fontSize = 12.sp)
+                            }
+                        }
+
+                        Icon(
+                            imageVector = Icons.Default.ChevronLeft,
+                            contentDescription = "Navigate To About",
+                            tint = AppTextSecondary,
+                            modifier = Modifier.size(24.dp)
                         )
                     }
                 }
