@@ -199,7 +199,7 @@ fun HomeScreenEmptyState() {
 fun HomeScreenRealFiles(
     recentPdfs: List<RecentFileEntity>,
     viewModel: PdfViewModel,
-    onPdfOpened: () -> Unit
+    onPdfOpened: (Uri) -> Unit
 ) {
     val context = LocalContext.current
     val totalPdfs = recentPdfs.size
@@ -259,8 +259,9 @@ fun HomeScreenRealFiles(
                 PdfGridCard(
                     pdf = pdf,
                     onClick = {
-                        viewModel.selectDocument(context, Uri.parse(pdf.uri))
-                        onPdfOpened()
+                        val uri = Uri.parse(pdf.uri)
+                        viewModel.selectDocument(context, uri)
+                        onPdfOpened(uri)
                     },
                     onLongClick = {
                         // Optional submenu or delete
@@ -272,11 +273,31 @@ fun HomeScreenRealFiles(
     }
 }
 
+@Composable
+fun HomeScreen(navController: androidx.navigation.NavController) {
+    val context = LocalContext.current
+    val viewModel = remember(context) {
+        val activity = context as? androidx.activity.ComponentActivity
+            ?: throw IllegalStateException("Context must be ComponentActivity")
+        androidx.lifecycle.ViewModelProvider(activity)[PdfViewModel::class.java]
+    }
+    HomeScreen(
+        viewModel = viewModel,
+        onPdfOpened = { uri ->
+            val encodedUri = Uri.encode(uri.toString())
+            navController.navigate(com.example.ui.navigation.Screen.PdfReader.createRoute(encodedUri))
+        },
+        onNavigateToSettings = {
+            navController.navigate(com.example.ui.navigation.Screen.Settings.route)
+        }
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     viewModel: PdfViewModel,
-    onPdfOpened: () -> Unit,
+    onPdfOpened: (Uri) -> Unit,
     modifier: Modifier = Modifier,
     onNavigateToSettings: () -> Unit = {}
 ) {
@@ -338,7 +359,7 @@ fun HomeScreen(
                     e.printStackTrace()
                 }
                 viewModel.selectDocument(context, uri)
-                onPdfOpened()
+                onPdfOpened(uri)
             }
         }
     )

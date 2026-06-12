@@ -28,6 +28,22 @@ import com.example.ui.theme.AppTextPrimary
 import com.example.ui.theme.AppTextSecondary
 import java.util.Locale
 
+@Composable
+fun LanguageScreen(navController: androidx.navigation.NavController) {
+    val context = LocalContext.current
+    val viewModel = remember(context) {
+        val activity = context as? androidx.activity.ComponentActivity
+            ?: throw IllegalStateException("Context must be ComponentActivity")
+        androidx.lifecycle.ViewModelProvider(activity)[PdfViewModel::class.java]
+    }
+    LanguageScreen(
+        viewModel = viewModel,
+        onBack = {
+            navController.popBackStack()
+        }
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LanguageScreen(

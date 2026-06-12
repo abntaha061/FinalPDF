@@ -266,7 +266,6 @@ class MainActivity : ComponentActivity() {
                         color = MaterialTheme.colorScheme.background
                     ) {
                         val navController = rememberNavController()
-                        val startDest = if (isOnboardingCompleted == true) "home" else "onboarding"
 
                         val securityExceptionUri by viewModel.securityExceptionUri.collectAsState()
                         val largeFileUriPending by viewModel.largeFileUriPending.collectAsState()
@@ -315,8 +314,10 @@ class MainActivity : ComponentActivity() {
                                     Button(
                                         onClick = {
                                             viewModel.selectDocumentForced(context, Uri.parse(pendingUri))
-                                            if (navController.currentBackStackEntry?.destination?.route != "viewer") {
-                                                navController.navigate("viewer")
+                                            val currentRoute = navController.currentBackStackEntry?.destination?.route ?: ""
+                                            if (!currentRoute.startsWith("pdf_reader")) {
+                                                val encodedUri = Uri.encode(pendingUri)
+                                                navController.navigate(com.example.ui.navigation.Screen.PdfReader.createRoute(encodedUri))
                                             }
                                         }
                                     ) {
@@ -327,8 +328,9 @@ class MainActivity : ComponentActivity() {
                                     TextButton(
                                         onClick = {
                                             viewModel.clearLargeFilePending()
-                                            if (navController.currentBackStackEntry?.destination?.route == "viewer") {
-                                                navController.popBackStack("home", inclusive = false)
+                                            val currentRoute = navController.currentBackStackEntry?.destination?.route ?: ""
+                                            if (currentRoute.startsWith("pdf_reader")) {
+                                                navController.popBackStack(com.example.ui.navigation.Screen.Home.route, inclusive = false)
                                             }
                                         }
                                     ) {
@@ -339,155 +341,7 @@ class MainActivity : ComponentActivity() {
                             )
                         }
 
-                        NavHost(
-                            navController = navController,
-                            startDestination = startDest
-                        ) {
-                            composable("onboarding") {
-                                OnboardingScreen(
-                                    onFinished = {
-                                        viewModel.completeOnboarding()
-                                        navController.navigate("home") {
-                                            popUpTo("onboarding") { inclusive = true }
-                                        }
-                                    }
-                                )
-                            }
-
-                            composable(
-                                route = "home",
-                                enterTransition = {
-                                    fadeIn(animationSpec = tween(450)) + slideInHorizontally(animationSpec = tween(450))
-                                }
-                            ) {
-                                HomeScreen(
-                                    viewModel = viewModel,
-                                    onPdfOpened = {
-                                        navController.navigate("viewer")
-                                    },
-                                    onNavigateToSettings = {
-                                        navController.navigate("settings")
-                                    }
-                                )
-                            }
-                            
-                            composable("viewer") {
-                                ViewerScreen(
-                                    viewModel = viewModel,
-                                    onBack = {
-                                        navController.popBackStack()
-                                    },
-                                    onNavigateToWebView = { url ->
-                                        val encoded = java.net.URLEncoder.encode(url, "UTF-8")
-                                        navController.navigate("webview?url=$encoded")
-                                    }
-                                )
-                            }
-
-                            composable(
-                                route = "settings",
-                                enterTransition = {
-                                    slideInHorizontally(
-                                        initialOffsetX = { it },
-                                        animationSpec = tween(300)
-                                    ) + fadeIn(animationSpec = tween(300))
-                                },
-                                exitTransition = {
-                                    slideOutHorizontally(
-                                        targetOffsetX = { it },
-                                        animationSpec = tween(300)
-                                    ) + fadeOut(animationSpec = tween(300))
-                                }
-                            ) {
-                                SettingsScreen(
-                                    viewModel = viewModel,
-                                    onBack = {
-                                        navController.popBackStack()
-                                    },
-                                    onNavigateToLanguage = {
-                                        navController.navigate("language")
-                                    },
-                                    onNavigateToAbout = {
-                                        navController.navigate("about")
-                                    }
-                                )
-                            }
-
-                            composable(
-                                route = "about",
-                                enterTransition = {
-                                    slideInHorizontally(
-                                        initialOffsetX = { it },
-                                        animationSpec = tween(300)
-                                    ) + fadeIn(animationSpec = tween(300))
-                                },
-                                exitTransition = {
-                                    slideOutHorizontally(
-                                        targetOffsetX = { it },
-                                        animationSpec = tween(300)
-                                    ) + fadeOut(animationSpec = tween(300))
-                                }
-                            ) {
-                                AboutScreen(
-                                    onBack = {
-                                        navController.popBackStack()
-                                    }
-                                )
-                            }
-
-                            composable(
-                                route = "language",
-                                enterTransition = {
-                                    slideInHorizontally(
-                                        initialOffsetX = { it },
-                                        animationSpec = tween(300)
-                                    ) + fadeIn(animationSpec = tween(300))
-                                },
-                                exitTransition = {
-                                    slideOutHorizontally(
-                                        targetOffsetX = { it },
-                                        animationSpec = tween(300)
-                                    ) + fadeOut(animationSpec = tween(300))
-                                }
-                            ) {
-                                LanguageScreen(
-                                    viewModel = viewModel,
-                                    onBack = {
-                                        navController.popBackStack()
-                                    }
-                                )
-                            }
-
-                            composable(
-                                route = "webview?url={url}",
-                                arguments = listOf(navArgument("url") { type = NavType.StringType; defaultValue = "" }),
-                                enterTransition = {
-                                    slideInVertically(
-                                        initialOffsetY = { it },
-                                        animationSpec = tween(350)
-                                    ) + fadeIn(animationSpec = tween(350))
-                                },
-                                exitTransition = {
-                                    slideOutVertically(
-                                        targetOffsetY = { it },
-                                        animationSpec = tween(350)
-                                    ) + fadeOut(animationSpec = tween(350))
-                                }
-                            ) { backStackEntry ->
-                                val encodedUrl = backStackEntry.arguments?.getString("url") ?: ""
-                                val initialUrl = try {
-                                    java.net.URLDecoder.decode(encodedUrl, "UTF-8")
-                                } catch (e: Exception) {
-                                    encodedUrl
-                                }
-                                WebViewScreen(
-                                    initialUrl = initialUrl,
-                                    onBack = {
-                                        navController.popBackStack()
-                                    }
-                                )
-                            }
-                        }
+                        com.example.ui.navigation.AppNavGraph(navController = navController)
                     }
                 }
             }

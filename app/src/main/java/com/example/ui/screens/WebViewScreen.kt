@@ -72,6 +72,19 @@ class WebStateHolder(initialUrl: String) {
 
 @Composable
 fun WebViewScreen(
+    navController: androidx.navigation.NavController,
+    url: String
+) {
+    WebViewScreen(
+        initialUrl = url,
+        onBack = {
+            navController.popBackStack()
+        }
+    )
+}
+
+@Composable
+fun WebViewScreen(
     initialUrl: String,
     onBack: () -> Unit
 ) {

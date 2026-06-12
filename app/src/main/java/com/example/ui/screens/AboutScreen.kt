@@ -34,6 +34,15 @@ import com.example.ui.theme.AppSurface
 import com.example.ui.theme.AppTextPrimary
 import com.example.ui.theme.AppTextSecondary
 
+@Composable
+fun AboutScreen(navController: androidx.navigation.NavController) {
+    AboutScreen(
+        onBack = {
+            navController.popBackStack()
+        }
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AboutScreen(

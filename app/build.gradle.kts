@@ -94,6 +94,7 @@ dependencies {
   implementation("com.google.accompanist:accompanist-pager:0.32.0")
   implementation("com.google.accompanist:accompanist-pager-indicators:0.32.0")
   implementation(libs.hilt.android)
+  implementation(libs.hilt.navigation.compose)
   implementation(libs.coil.compose)
   implementation("com.github.mhiew:android-pdf-viewer:3.2.0-beta.1")
   implementation("androidx.documentfile:documentfile:1.0.1")

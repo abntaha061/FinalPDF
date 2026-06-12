@@ -28,6 +28,28 @@ import com.google.accompanist.pager.HorizontalPagerIndicator
 import com.google.accompanist.pager.rememberPagerState
 import kotlinx.coroutines.launch
 
+import androidx.compose.ui.platform.LocalContext
+import com.example.ui.PdfViewModel
+
+@Composable
+fun OnboardingScreen(navController: androidx.navigation.NavController) {
+    val context = LocalContext.current
+    val viewModel = remember(context) {
+        val activity = context as? androidx.activity.ComponentActivity
+            ?: throw IllegalStateException("Context must be ComponentActivity")
+        androidx.lifecycle.ViewModelProvider(activity)[PdfViewModel::class.java]
+    }
+    
+    OnboardingScreen(
+        onFinished = {
+            viewModel.completeOnboarding()
+            navController.navigate(com.example.ui.navigation.Screen.Home.route) {
+                popUpTo(com.example.ui.navigation.Screen.Onboarding.route) { inclusive = true }
+            }
+        }
+    )
+}
+
 @OptIn(ExperimentalPagerApi::class)
 @Composable
 fun OnboardingScreen(

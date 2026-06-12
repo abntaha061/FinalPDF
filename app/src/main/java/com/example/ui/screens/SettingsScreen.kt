@@ -34,6 +34,28 @@ import kotlinx.coroutines.launch
 import java.io.File
 import kotlin.math.roundToInt
 
+@Composable
+fun SettingsScreen(navController: androidx.navigation.NavController) {
+    val context = LocalContext.current
+    val viewModel = remember(context) {
+        val activity = context as? androidx.activity.ComponentActivity
+            ?: throw IllegalStateException("Context must be ComponentActivity")
+        androidx.lifecycle.ViewModelProvider(activity)[PdfViewModel::class.java]
+    }
+    SettingsScreen(
+        viewModel = viewModel,
+        onBack = {
+            navController.popBackStack()
+        },
+        onNavigateToLanguage = {
+            navController.navigate(com.example.ui.navigation.Screen.Language.route)
+        },
+        onNavigateToAbout = {
+            navController.navigate(com.example.ui.navigation.Screen.About.route)
+        }
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
