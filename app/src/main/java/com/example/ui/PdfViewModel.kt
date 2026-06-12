@@ -18,7 +18,11 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
-private val Context.dataStore by preferencesDataStore(name = "pdf_reader_settings")
+// تمت إزالة "private" من هذا السطر عمداً
+// لأن MainActivity.kt يحتاج لاستيراد (import) نفس الـ DataStore
+// لمنع وجود نسختين منفصلتين من DataStore تشيران لنفس الملف (وهو سبب الكراش)
+val Context.dataStore by preferencesDataStore(name = "pdf_reader_settings")
+
 private val NIGHT_MODE_KEY = booleanPreferencesKey("is_night_mode")
 private val READING_MODE_KEY = androidx.datastore.preferences.core.stringPreferencesKey("reading_mode")
 private val ONBOARDING_DONE_KEY = booleanPreferencesKey("onboarding_done")
