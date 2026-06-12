@@ -140,6 +140,29 @@ fun ViewerScreen(
         }
     }
 
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    val currentUriState = rememberUpdatedState(activeUri)
+    val currentPageState = rememberUpdatedState(currentPage)
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_PAUSE || event == androidx.lifecycle.Lifecycle.Event.ON_STOP) {
+                val currentUri = currentUriState.value
+                if (currentUri != null) {
+                    viewModel.saveLastPage(currentUri, currentPageState.value)
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            val currentUri = currentUriState.value
+            if (currentUri != null) {
+                viewModel.saveLastPage(currentUri, currentPageState.value)
+            }
+        }
+    }
+
     // Side drawer states
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     var selectedDrawerTab by remember { mutableStateOf(0) } // 0 = Bookmarks, 1 = Thumbnails
@@ -380,6 +403,19 @@ fun ViewerScreen(
                             onLoadComplete = { pageCount ->
                                 viewModel.setViewerLoading(false)
                                 viewModel.updateProgress(activeUri!!, currentPage, pageCount)
+                                if (currentPage > 0 && viewModel.shouldShowRestoreSnackbar(activeUri!!)) {
+                                    coroutineScope.launch {
+                                        val result = snackbarHostState.showSnackbar(
+                                            message = "استُؤنفت القراءة من الصفحة ${currentPage + 1}",
+                                            actionLabel = "البداية",
+                                            duration = SnackbarDuration.Short
+                                        )
+                                        if (result == SnackbarResult.ActionPerformed) {
+                                            pdfViewInst?.jumpTo(0)
+                                            viewModel.setCurrentPage(0)
+                                        }
+                                    }
+                                }
                             },
                             onError = {
                                 viewModel.setViewerLoading(false)

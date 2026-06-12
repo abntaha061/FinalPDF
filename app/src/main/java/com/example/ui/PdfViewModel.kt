@@ -129,6 +129,8 @@ class PdfViewModel(
     private val _currentPage = MutableStateFlow(0)
     val currentPage: StateFlow<Int> = _currentPage.asStateFlow()
 
+    val lastPageMap: MutableMap<String, Int> = mutableMapOf()
+
     private val _totalPages = MutableStateFlow(0)
     val totalPages: StateFlow<Int> = _totalPages.asStateFlow()
 
@@ -225,22 +227,42 @@ class PdfViewModel(
             val metadata = getUriMetadata(context, uri)
             var doc = repository.getPdfByUri(uri.toString())
             
+            val key = androidx.datastore.preferences.core.intPreferencesKey("last_page_${uri.toString().hashCode()}")
+            var savedPage = 0
+            try {
+                savedPage = context.dataStore.data.map { it[key] ?: 0 }.first()
+            } catch (e: Exception) {
+                // Ignore
+            }
+
+            if (savedPage <= 0 && doc != null) {
+                savedPage = doc.currentPage
+            }
+
+            if (savedPage < 0) {
+                savedPage = 0
+            }
+
             if (doc == null) {
                 doc = RecentFileEntity(
                     uri = uri.toString(),
                     name = metadata.first,
                     sizeBytes = metadata.second,
-                    currentPage = 0,
-                    totalPages = 0
+                    currentPage = savedPage,
+                    totalPages = 0,
+                    lastOpenedAt = System.currentTimeMillis()
                 )
                 repository.insertPdf(doc)
             } else {
                 // Update access timestamp
-                doc = doc.copy(lastOpenedAt = System.currentTimeMillis())
+                doc = doc.copy(
+                    lastOpenedAt = System.currentTimeMillis(),
+                    currentPage = savedPage
+                )
                 repository.insertPdf(doc)
-                _currentPage.value = doc.currentPage
             }
             
+            _currentPage.value = savedPage
             _currentDocument.value = doc
             checkIfCurrentPageIsBookmarked()
         }
@@ -281,6 +303,7 @@ class PdfViewModel(
         _totalPages.value = 0
         _isCurrentPageBookmarked.value = false
         _isViewerLoading.value = false
+        hasShownRestoreSnackbarForUri = null
     }
 
     fun toggleCurrentPageBookmark() {
@@ -349,12 +372,34 @@ class PdfViewModel(
         _isViewerLoading.value = isLoading
     }
 
+    private var hasShownRestoreSnackbarForUri: String? = null
+
+    fun shouldShowRestoreSnackbar(uri: String): Boolean {
+        if (hasShownRestoreSnackbarForUri == uri) {
+            return false
+        }
+        hasShownRestoreSnackbarForUri = uri
+        return true
+    }
+
+    fun saveLastPage(uri: String, page: Int) {
+        lastPageMap[uri] = page
+        viewModelScope.launch {
+            val key = androidx.datastore.preferences.core.intPreferencesKey("last_page_${uri.hashCode()}")
+            context.dataStore.edit { preferences ->
+                preferences[key] = page
+            }
+            repository.updatePdfProgress(uri, page, _totalPages.value)
+        }
+    }
+
     fun setTotalPages(total: Int) {
         _totalPages.value = total
         val uri = _selectedUri.value
         if (uri != null) {
             viewModelScope.launch {
                 repository.updatePdfProgress(uri, _currentPage.value, total)
+                _currentDocument.value = _currentDocument.value?.copy(totalPages = total)
             }
         }
     }
@@ -363,8 +408,14 @@ class PdfViewModel(
         _currentPage.value = page
         val uri = _selectedUri.value
         if (uri != null) {
+            lastPageMap[uri] = page
             viewModelScope.launch {
+                val key = androidx.datastore.preferences.core.intPreferencesKey("last_page_${uri.hashCode()}")
+                context.dataStore.edit { preferences ->
+                    preferences[key] = page
+                }
                 repository.updatePdfProgress(uri, page, _totalPages.value)
+                _currentDocument.value = _currentDocument.value?.copy(currentPage = page)
             }
             checkIfCurrentPageIsBookmarked()
         }
