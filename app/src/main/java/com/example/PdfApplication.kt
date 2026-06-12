@@ -4,9 +4,7 @@ import android.app.Application
 import android.content.ComponentCallbacks2
 import com.example.util.PdfPrefetchManager
 import com.github.barteksc.pdfviewer.util.Constants
-import dagger.hilt.android.HiltAndroidApp
 
-@HiltAndroidApp
 class PdfApplication : Application() {
     override fun onCreate() {
         super.onCreate()

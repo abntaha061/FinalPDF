@@ -28,6 +28,17 @@ import com.github.barteksc.pdfviewer.CustomLinkHandler
 import com.github.barteksc.pdfviewer.scroll.DefaultScrollHandle
 import com.github.barteksc.pdfviewer.util.FitPolicy
 import kotlinx.coroutines.launch
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+import androidx.compose.material3.Surface
+import androidx.compose.foundation.layout.padding
 
 @Composable
 fun PdfViewerWidget(
@@ -35,6 +46,8 @@ fun PdfViewerWidget(
     currentPage: Int,
     readingMode: String,
     isSwipeHorizontal: Boolean,
+    readingScrollMode: String,
+    fitMode: String,
     onPageChanged: (Int, Int) -> Unit,
     onLoadComplete: (Int) -> Unit,
     onError: (Throwable) -> Unit,
@@ -91,7 +104,39 @@ fun PdfViewerWidget(
         }
     }
 
-    Box(modifier = modifier.fillMaxSize()) {
+    var localPdfViewRef by remember { mutableStateOf<PDFView?>(null) }
+    var showFastScrollBadge by remember { mutableStateOf(false) }
+
+    LaunchedEffect(showFastScrollBadge) {
+        if (showFastScrollBadge) {
+            kotlinx.coroutines.delay(1000)
+            showFastScrollBadge = false
+        }
+    }
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        if (event.changes.size == 2) {
+                            val activeChanges = event.changes.filter { it.pressed }
+                            if (activeChanges.size == 2) {
+                                val deltaY = event.changes.map { it.position.y - it.previousPosition.y }
+                                                 .average().toFloat()
+                                if (Math.abs(deltaY) > 0.5f) {
+                                    showFastScrollBadge = true
+                                    localPdfViewRef?.moveRelativeTo(0f, deltaY * 3f)
+                                }
+                                event.changes.forEach { it.consume() }
+                            }
+                        }
+                    }
+                }
+            }
+    ) {
         if (!isLoaded && loadError == null) {
             CircularProgressIndicator(
                 modifier = Modifier
@@ -99,6 +144,30 @@ fun PdfViewerWidget(
                     .align(Alignment.Center),
                 color = MaterialTheme.colorScheme.primary
             )
+        }
+
+        // CenterTop Badge for Fast Scroll
+        AnimatedVisibility(
+            visible = showFastScrollBadge,
+            enter = fadeIn(tween(200)),
+            exit = fadeOut(tween(200)),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 80.dp)
+        ) {
+            Surface(
+                color = MaterialTheme.colorScheme.primary,
+                shape = CircleShape,
+                shadowElevation = 6.dp
+            ) {
+                Text(
+                    text = "تمرير سريع ⚡",
+                    color = Color.White,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                )
+            }
         }
 
         if (loadError != null) {
@@ -110,10 +179,11 @@ fun PdfViewerWidget(
             }
         }
 
-        key(readingMode, isSwipeHorizontal, pdfUriString, pageSpacing) {
+        key(readingMode, isSwipeHorizontal, pdfUriString, pageSpacing, readingScrollMode, fitMode) {
             AndroidView(
                 factory = { ctx ->
                     PDFView(ctx, null).apply {
+                        localPdfViewRef = this
                         onPdfViewCreated?.invoke(this)
                         
                         // Set min, mid, and max zoom limits as requested
@@ -167,15 +237,23 @@ fun PdfViewerWidget(
                                 configurator.pages(*pagesList)
                             }
 
+                            val isPaged = (readingScrollMode == "paged")
+
                             // 2. Exact configured properties
                             configurator
-                                .enableSwipe(true)                        // vertical scroll enabled
-                                .swipeHorizontal(isSwipeHorizontal)       // scroll direction = configured (default vertical)
+                                .enableSwipe(true)
+                                .swipeHorizontal(if (isPaged) true else false)
+                                .pageSnap(if (isPaged) true else false)
+                                .autoSpacing(if (isPaged) true else false)
+                                .pageFling(if (isPaged) true else false)
                                 .enableDoubletap(true)                    // native double tap zoom enabled
                                 .defaultPage(currentPage)                 // start from current page
                                 .onLoad { totalPages ->
                                     isLoaded = true
                                     viewModel.setTotalPages(totalPages)
+                                    if (fitMode == "actual") {
+                                        this@apply.zoomTo(1.0f)
+                                    }
                                     try {
                                         val toc = tableOfContents
                                         if (toc != null) {
@@ -214,8 +292,7 @@ fun PdfViewerWidget(
                                 .enableAnnotationRendering(true)          // renders PDF annotations
                                 .enableAntialiasing(true)                 // smooth rendering, no pixelation
                                 .spacing(pageSpacing.toInt())                               // custom space between pages
-                                .autoSpacing(false)
-                                .pageFitPolicy(FitPolicy.WIDTH)           // fit width of screen
+                                .pageFitPolicy(if (fitMode == "height") FitPolicy.HEIGHT else FitPolicy.WIDTH)
                                 .nightMode(readingMode == "night")
                                 .scrollHandle(DefaultScrollHandle(ctx))
                                 .linkHandler(CustomLinkHandler(context, this, onLinkTapped, onNavigateToWebView)) // Custom link handler

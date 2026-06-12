@@ -24,6 +24,7 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
@@ -49,6 +50,12 @@ fun BottomReaderBar(
     onResetRotationClick: () -> Unit,
     isScreenRotationLocked: Boolean,
     onToggleLockScreenRotation: () -> Unit,
+    readingScrollMode: String,
+    onReadingScrollModeToggle: () -> Unit,
+    fitMode: String,
+    onFitModeChange: (String) -> Unit,
+    isDoublePageMode: Boolean,
+    onDoublePageModeToggle: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -208,6 +215,14 @@ fun BottomReaderBar(
                 testTag = "reader_share_button"
             )
 
+            // 7b. Scroll mode scroll button toggle
+            BarIconButton(
+                icon = if (readingScrollMode == "continuous") Icons.Default.SwapVert else Icons.Default.SwapHoriz,
+                contentDescription = "تبديل وضع التمرير",
+                onClick = onReadingScrollModeToggle,
+                testTag = "reader_scroll_mode_toggle_button"
+            )
+
             // 8. More vertically options dropdown
             Box(contentAlignment = Alignment.TopCenter) {
                 BarIconButton(
@@ -305,6 +320,79 @@ fun BottomReaderBar(
                             onToggleLockScreenRotation()
                         },
                         modifier = Modifier.testTag("lock_rotation_option")
+                    )
+                    DropdownMenuItem(
+                        text = { 
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("وضع الصفحتين", color = AppTextPrimary, fontSize = 14.sp)
+                                if (isDoublePageMode) {
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("✓", color = AppPrimary, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        },
+                        leadingIcon = { Icon(Icons.Default.MenuBook, contentDescription = null, tint = if (isDoublePageMode) AppPrimary else AppTextSecondary) },
+                        onClick = {
+                            showMoreMenu = false
+                            onDoublePageModeToggle()
+                        },
+                        modifier = Modifier.testTag("double_page_mode_option")
+                    )
+                    HorizontalDivider(color = AppTextSecondary.copy(alpha = 0.2f), thickness = 1.dp)
+                    Text(
+                        text = "ملاءمة الصفحة:",
+                        color = AppTextSecondary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                    )
+                    DropdownMenuItem(
+                        text = { 
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("ملاءمة العرض", color = AppTextPrimary, fontSize = 14.sp)
+                                if (fitMode == "width") {
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("✓", color = AppPrimary, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        },
+                        leadingIcon = { Icon(Icons.Default.FitScreen, contentDescription = null, tint = if (fitMode == "width") AppPrimary else AppTextSecondary) },
+                        onClick = {
+                            showMoreMenu = false
+                            onFitModeChange("width")
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { 
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("ملاءمة الارتفاع", color = AppTextPrimary, fontSize = 14.sp)
+                                if (fitMode == "height") {
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("✓", color = AppPrimary, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        },
+                        leadingIcon = { Icon(Icons.Default.AspectRatio, contentDescription = null, tint = if (fitMode == "height") AppPrimary else AppTextSecondary) },
+                        onClick = {
+                            showMoreMenu = false
+                            onFitModeChange("height")
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { 
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text("الحجم الفعلي (١٠٠٪)", color = AppTextPrimary, fontSize = 14.sp)
+                                if (fitMode == "actual") {
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("✓", color = AppPrimary, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        },
+                        leadingIcon = { Icon(Icons.Default.ZoomOut, contentDescription = null, tint = if (fitMode == "actual") AppPrimary else AppTextSecondary) },
+                        onClick = {
+                            showMoreMenu = false
+                            onFitModeChange("actual")
+                        }
                     )
                 }
             }

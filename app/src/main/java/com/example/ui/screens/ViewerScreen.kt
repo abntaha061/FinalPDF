@@ -22,6 +22,10 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -41,6 +45,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -111,6 +116,9 @@ fun ViewerScreen(
     val showLargeFileWarningSnackbar by viewModel.showLargeFileWarningSnackbar.collectAsState()
     val tableOfContents by viewModel.tableOfContents.collectAsState()
     val showPageIndicator by viewModel.showPageIndicator.collectAsState()
+    val readingScrollMode by viewModel.readingScrollMode.collectAsState()
+    val fitMode by viewModel.fitMode.collectAsState()
+    val isDoublePageMode by viewModel.isDoublePageMode.collectAsState()
     
     // Bottom Reader Bar visibility state connected to the ViewModel Flow
     val isToolbarVisible by viewModel.isToolbarVisible.collectAsState()
@@ -414,55 +422,158 @@ fun ViewerScreen(
                             }
                         }
                     } else {
-                        PdfViewerWidget(
-                            pdfUriString = activeUri!!,
-                            currentPage = currentPage,
-                            readingMode = readingMode,
-                            isSwipeHorizontal = isSwipeHorizontal,
-                            onPageChanged = { page, pageCount ->
-                                viewModel.updateProgress(activeUri!!, page, pageCount)
-                            },
-                            onLoadComplete = { pageCount ->
-                                viewModel.setViewerLoading(false)
-                                viewModel.updateProgress(activeUri!!, currentPage, pageCount)
-                                if (currentPage > 0 && viewModel.shouldShowRestoreSnackbar(activeUri!!)) {
-                                    coroutineScope.launch {
-                                        val result = snackbarHostState.showSnackbar(
-                                            message = "استُؤنفت القراءة من الصفحة ${currentPage + 1}",
-                                            actionLabel = "البداية",
-                                            duration = SnackbarDuration.Short
-                                        )
-                                        if (result == SnackbarResult.ActionPerformed) {
-                                            pdfViewInst?.jumpTo(0)
-                                            viewModel.setCurrentPage(0)
+                        val configuration = LocalConfiguration.current
+                        val isTabletOrLandscape = configuration.screenWidthDp >= 600 || configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+
+                        if (isDoublePageMode && isTabletOrLandscape) {
+                            val pageGroups = remember(totalPages) {
+                                val pairs = mutableListOf<List<Int>>()
+                                if (totalPages > 0) {
+                                    if (totalPages % 2 != 0) {
+                                        pairs.add(listOf(0))
+                                        var i = 1
+                                        while (i < totalPages) {
+                                            if (i + 1 < totalPages) {
+                                                pairs.add(listOf(i, i + 1))
+                                            } else {
+                                                pairs.add(listOf(i))
+                                            }
+                                            i += 2
+                                        }
+                                    } else {
+                                        var i = 0
+                                        while (i < totalPages) {
+                                            if (i + 1 < totalPages) {
+                                                pairs.add(listOf(i, i + 1))
+                                            } else {
+                                                pairs.add(listOf(i))
+                                            }
+                                            i += 2
                                         }
                                     }
                                 }
-                            },
-                            onError = {
-                                viewModel.setViewerLoading(false)
-                            },
-                            onPdfViewCreated = { pdf ->
-                                pdfViewInst = pdf
-                            },
-                            onTap = {
-                                isTextSelected = false
-                                showColorPicker = false
-                                viewModel.toggleToolbarVisibility()
-                            },
-                            onLongPress = { offset ->
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                selectionPos = offset
-                                selectedText = getSelectionText(documentName, currentPage)
-                                isTextSelected = true
-                                showColorPicker = false
-                            },
-                            onZoomChanged = { zoom ->
-                                zoomLevel = zoom
-                            },
-                            viewModel = viewModel,
-                            onNavigateToWebView = onNavigateToWebView
-                        )
+                                pairs
+                            }
+
+                            val doublePageLazyState = rememberLazyListState()
+                            LaunchedEffect(doublePageLazyState) {
+                                snapshotFlow { doublePageLazyState.firstVisibleItemIndex }.collect { index ->
+                                    val group = pageGroups.getOrNull(index)
+                                    if (group != null && group.isNotEmpty()) {
+                                        val pageIndex = group.first()
+                                        viewModel.setCurrentPage(pageIndex)
+                                    }
+                                }
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(if (isNightMode) Color(0xFF0D0D0F) else Color(0xFFECEFF1)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                LazyRow(
+                                    state = doublePageLazyState,
+                                    modifier = Modifier.fillMaxSize(),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    items(pageGroups) { group ->
+                                        Row(
+                                            modifier = Modifier
+                                                .fillMaxHeight()
+                                                .width(if (isTabletOrLandscape) 750.dp else 450.dp)
+                                                .padding(16.dp),
+                                            horizontalArrangement = Arrangement.Center,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            group.forEach { pageIdx ->
+                                                Box(
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .fillMaxHeight()
+                                                        .padding(horizontal = 8.dp)
+                                                        .shadow(4.dp, shape = RoundedCornerShape(4.dp))
+                                                ) {
+                                                    PdfPageImage(
+                                                        pdfUriString = activeUri!!,
+                                                        pageNumber = pageIdx,
+                                                        readingMode = readingMode,
+                                                        modifier = Modifier.fillMaxSize()
+                                                    )
+                                                    
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .align(Alignment.BottomEnd)
+                                                            .padding(8.dp)
+                                                            .background(Color.Black.copy(alpha = 0.6f), shape = RoundedCornerShape(4.dp))
+                                                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = "${pageIdx + 1}",
+                                                            color = Color.White,
+                                                            fontSize = 11.sp
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            PdfViewerWidget(
+                                pdfUriString = activeUri!!,
+                                currentPage = currentPage,
+                                readingMode = readingMode,
+                                isSwipeHorizontal = isSwipeHorizontal,
+                                readingScrollMode = readingScrollMode,
+                                fitMode = fitMode,
+                                onPageChanged = { page, pageCount ->
+                                    viewModel.updateProgress(activeUri!!, page, pageCount)
+                                },
+                                onLoadComplete = { pageCount ->
+                                    viewModel.setViewerLoading(false)
+                                    viewModel.updateProgress(activeUri!!, currentPage, pageCount)
+                                    if (currentPage > 0 && viewModel.shouldShowRestoreSnackbar(activeUri!!)) {
+                                        coroutineScope.launch {
+                                            val result = snackbarHostState.showSnackbar(
+                                                message = "استُؤنفت القراءة من الصفحة ${currentPage + 1}",
+                                                actionLabel = "البداية",
+                                                duration = SnackbarDuration.Short
+                                            )
+                                            if (result == SnackbarResult.ActionPerformed) {
+                                                pdfViewInst?.jumpTo(0)
+                                                viewModel.setCurrentPage(0)
+                                            }
+                                        }
+                                    }
+                                },
+                                onError = {
+                                    viewModel.setViewerLoading(false)
+                                },
+                                onPdfViewCreated = { pdf ->
+                                    pdfViewInst = pdf
+                                },
+                                onTap = {
+                                    isTextSelected = false
+                                    showColorPicker = false
+                                    viewModel.toggleToolbarVisibility()
+                                },
+                                onLongPress = { offset ->
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    selectionPos = offset
+                                    selectedText = getSelectionText(documentName, currentPage)
+                                    isTextSelected = true
+                                    showColorPicker = false
+                                },
+                                onZoomChanged = { zoom ->
+                                    zoomLevel = zoom
+                                },
+                                viewModel = viewModel,
+                                onNavigateToWebView = onNavigateToWebView
+                            )
+                        }
                     }
 
                     // Draw automatic yellow text highlight overlay in the center area if search matches current page
@@ -537,6 +648,69 @@ fun ViewerScreen(
                                 .size(8.dp)
                                 .background(Color(0xFF2196F3), shape = CircleShape)
                         )
+                    }
+
+                    // Floating Left and Right Navigation Arrow Overlays for Page-by-Page Mode
+                    val isPagedMode = (readingScrollMode == "paged")
+
+                    AnimatedVisibility(
+                        visible = isPagedMode && currentPage < totalPages - 1 && errorState == null,
+                        enter = fadeIn(tween(200)),
+                        exit = fadeOut(tween(200)),
+                        modifier = Modifier
+                            .align(Alignment.CenterStart)
+                            .padding(start = 8.dp)
+                    ) {
+                        IconButton(
+                            onClick = {
+                                pdfViewInst?.let { pdfView ->
+                                    val targetPage = (currentPage + 1).coerceAtMost(totalPages - 1)
+                                    pdfView.jumpTo(targetPage, true)
+                                    viewModel.setCurrentPage(targetPage)
+                                }
+                            },
+                            modifier = Modifier
+                                .size(48.dp)
+                                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f), shape = CircleShape)
+                                .testTag("left_paged_arrow")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ChevronLeft,
+                                contentDescription = "الصفحة التالية",
+                                tint = AppPrimary,
+                                modifier = Modifier.size(32.dp)
+                            )
+                        }
+                    }
+
+                    AnimatedVisibility(
+                        visible = isPagedMode && currentPage > 0 && errorState == null,
+                        enter = fadeIn(tween(200)),
+                        exit = fadeOut(tween(200)),
+                        modifier = Modifier
+                            .align(Alignment.CenterEnd)
+                            .padding(end = 8.dp)
+                    ) {
+                        IconButton(
+                            onClick = {
+                                pdfViewInst?.let { pdfView ->
+                                    val targetPage = (currentPage - 1).coerceAtLeast(0)
+                                    pdfView.jumpTo(targetPage, true)
+                                    viewModel.setCurrentPage(targetPage)
+                                }
+                            },
+                            modifier = Modifier
+                                .size(48.dp)
+                                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f), shape = CircleShape)
+                                .testTag("right_paged_arrow")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ChevronRight,
+                                contentDescription = "الصفحة السابقة",
+                                tint = AppPrimary,
+                                modifier = Modifier.size(32.dp)
+                            )
+                        }
                     }
                 }
             } else {
@@ -962,6 +1136,47 @@ fun ViewerScreen(
                                 coroutineScope.launch {
                                     snackbarHostState.showSnackbar("تم فتح قفل الاتجاه")
                                 }
+                            }
+                        }
+                    },
+                    readingScrollMode = readingScrollMode,
+                    onReadingScrollModeToggle = {
+                        val nextMode = if (readingScrollMode == "continuous") "paged" else "continuous"
+                        viewModel.setReadingScrollMode(nextMode)
+                        coroutineScope.launch {
+                            snackbarHostState.showSnackbar(
+                                if (nextMode == "continuous") "تم تفعيل التمرير المستمر" else "تم تفعيل التمرير صفحة بصفحة"
+                            )
+                        }
+                    },
+                    fitMode = fitMode,
+                    onFitModeChange = { newFit ->
+                        viewModel.setFitMode(newFit)
+                        coroutineScope.launch {
+                            snackbarHostState.showSnackbar(
+                                when (newFit) {
+                                    "width" -> "ملاءمة العرض"
+                                    "height" -> "ملاءمة الارتفاع"
+                                    else -> "الحجم الفعلي"
+                                }
+                            )
+                        }
+                    },
+                    isDoublePageMode = isDoublePageMode,
+                    onDoublePageModeToggle = {
+                        val configState = context.resources.configuration
+                        val isTabletOrLandscapeState = configState.screenWidthDp >= 600 || configState.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+                        if (!isTabletOrLandscapeState) {
+                            coroutineScope.launch {
+                                snackbarHostState.showSnackbar("وضع الصفحتين متاح في الوضع الأفقي فقط")
+                            }
+                        } else {
+                            val nextDoubleVal = !isDoublePageMode
+                            viewModel.setDoublePageMode(nextDoubleVal)
+                            coroutineScope.launch {
+                                snackbarHostState.showSnackbar(
+                                    if (nextDoubleVal) "تم تفعيل وضع الصفحتين" else "تم إلغاء وضع الصفحتين"
+                                )
                             }
                         }
                     }
@@ -1964,4 +2179,30 @@ fun MiniAudioBar(
             }
         }
     }
+}
+
+@Composable
+fun PdfPageImage(
+    pdfUriString: String,
+    pageNumber: Int,
+    readingMode: String,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    AndroidView(
+        factory = { ctx ->
+            PDFView(ctx, null).apply {
+                val fileUri = Uri.parse(pdfUriString)
+                fromUri(fileUri)
+                    .pages(pageNumber)
+                    .enableSwipe(false)
+                    .enableDoubletap(true)
+                    .enableAntialiasing(true)
+                    .enableAnnotationRendering(true)
+                    .nightMode(readingMode == "night")
+                    .load()
+            }
+        },
+        modifier = modifier
+    )
 }
