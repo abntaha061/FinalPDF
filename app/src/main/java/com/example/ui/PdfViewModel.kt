@@ -5,6 +5,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.*
+import androidx.datastore.preferences.preferencesDataStore
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -22,7 +23,7 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.io.File
 
-// 🌟 بناء DataStore آمن لا ينهار أمامه المترجم KSP 🌟
+// بناء DataStore آمن لمنع تعارض KSP
 object SettingsDataStore {
     @Volatile
     private var INSTANCE: DataStore<Preferences>? = null
@@ -63,6 +64,7 @@ private val READING_SCROLL_MODE_KEY: Preferences.Key<String> = stringPreferences
 private val FIT_MODE_KEY: Preferences.Key<String> = stringPreferencesKey("fit_mode")
 private val DOUBLE_PAGE_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("double_page_mode")
 
+// كلاسات مساعدة واضحة النوع
 data class FilterParams(
     val minSize: Float,
     val maxSize: Float,
@@ -85,7 +87,6 @@ class PdfViewModel @Inject constructor(
 
     private val dataStore = SettingsDataStore.getInstance(context)
 
-    // 1. تعريف كل المتغيرات أولاً (Variable Declarations FIRST)
     private val _isReady: MutableStateFlow<Boolean> = MutableStateFlow(false)
     val isReady: StateFlow<Boolean> = _isReady.asStateFlow()
 
@@ -198,7 +199,6 @@ class PdfViewModel @Inject constructor(
     private val _currentDocument: MutableStateFlow<RecentFileEntity?> = MutableStateFlow(null)
     val currentDocument: StateFlow<RecentFileEntity?> = _currentDocument.asStateFlow()
 
-    // 🌟 هذا هو المتغير الذي كان يسبب الكراش لأنه كان معرفاً بعد הـ init 🌟
     private val _currentPage: MutableStateFlow<Int> = MutableStateFlow(0)
     val currentPage: StateFlow<Int> = _currentPage.asStateFlow()
 
@@ -211,8 +211,9 @@ class PdfViewModel @Inject constructor(
     private val _isViewerLoading: MutableStateFlow<Boolean> = MutableStateFlow(false)
     val isViewerLoading: StateFlow<Boolean> = _isViewerLoading.asStateFlow()
 
-    private val _tableOfContents: MutableStateFlow<List<Any>> = MutableStateFlow(emptyList())
-    val tableOfContents: StateFlow<List<Any>> = _tableOfContents.asStateFlow()
+    // 🌟 التعديل المطلوب: List<String> 🌟
+    private val _tableOfContents: MutableStateFlow<List<String>> = MutableStateFlow(emptyList())
+    val tableOfContents: StateFlow<List<String>> = _tableOfContents.asStateFlow()
 
     val prefetchManager: PdfPrefetchManager = PdfPrefetchManager()
     
@@ -225,7 +226,6 @@ class PdfViewModel @Inject constructor(
     private val _errorState: MutableStateFlow<String?> = MutableStateFlow(null)
     val errorState: StateFlow<String?> = _errorState.asStateFlow()
 
-    // 2. بلوك الـ init الآن بأمان في الأسفل (جميع المتغيرات أصبحت جاهزة للعمل)
     init {
         @OptIn(ExperimentalCoroutinesApi::class)
         viewModelScope.launch {
@@ -300,7 +300,6 @@ class PdfViewModel @Inject constructor(
 
         @OptIn(FlowPreview::class)
         viewModelScope.launch {
-            // الآن currentPage معرفة مسبقاً ولن تسبب NullPointerException
             currentPage.debounce(200L).collect { page ->
                 val fileUriString = _selectedUri.value
                 if (fileUriString != null && _prefetchEnabled.value) {
@@ -310,7 +309,6 @@ class PdfViewModel @Inject constructor(
         }
     }
 
-    // 3. الدوال التابعة للكلاس
     private fun triggerFilterUpdate() {
         var count = 0
         if (_filterMinSize.value > 0f || _filterMaxSize.value < 100f) count++
@@ -344,7 +342,9 @@ class PdfViewModel @Inject constructor(
 
     fun toggleToolbarVisibility() { _isToolbarVisible.value = !_isToolbarVisible.value }
     fun setToolbarVisibility(visible: Boolean) { _isToolbarVisible.value = visible }
-    fun setTableOfContents(toc: List<Any>) { _tableOfContents.value = toc }
+    
+    // 🌟 التعديل المطلوب: List<String> 🌟
+    fun setTableOfContents(toc: List<String>) { _tableOfContents.value = toc }
 
     fun toggleNightMode() {
         val nextValue = !_isNightMode.value
