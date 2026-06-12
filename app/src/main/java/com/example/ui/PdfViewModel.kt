@@ -27,7 +27,6 @@ import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
-// 🌟 الحل الجذري: تحديد النوع الصريح DataStore<Preferences> يمنع انهيار KSP 🌟
 val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "pdf_reader_settings")
 
 private val NIGHT_MODE_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("is_night_mode")
@@ -72,7 +71,6 @@ class PdfViewModel @Inject constructor(
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
-    // 🌟 تم تحديد النوع (Explicit Type) لكل سطر لعدم ترك مجال لتخمين المترجم 🌟
     private val _isReady: MutableStateFlow<Boolean> = MutableStateFlow(false)
     val isReady: StateFlow<Boolean> = _isReady.asStateFlow()
 
@@ -104,16 +102,17 @@ class PdfViewModel @Inject constructor(
         FilterParams(0f, 100f, 1, 500, "الكل", "الأحدث أولاً")
     )
 
-    private val _recentDocuments: MutableStateFlow<List<RecentFileEntity>> = MutableStateFlow(emptyList())
+    // 💥 الدواء السحري لـ KSP: كتابة الأنواع صراحة داخل دوال emptyList وغيرها 💥
+    private val _recentDocuments: MutableStateFlow<List<RecentFileEntity>> = MutableStateFlow(emptyList<RecentFileEntity>())
     val recentDocuments: StateFlow<List<RecentFileEntity>> = _recentDocuments.asStateFlow()
 
-    private val _favoriteDocuments: MutableStateFlow<List<RecentFileEntity>> = MutableStateFlow(emptyList())
+    private val _favoriteDocuments: MutableStateFlow<List<RecentFileEntity>> = MutableStateFlow(emptyList<RecentFileEntity>())
     val favoriteDocuments: StateFlow<List<RecentFileEntity>> = _favoriteDocuments.asStateFlow()
 
-    private val _activePageBookmarks: MutableStateFlow<List<BookmarkEntity>> = MutableStateFlow(emptyList())
+    private val _activePageBookmarks: MutableStateFlow<List<BookmarkEntity>> = MutableStateFlow(emptyList<BookmarkEntity>())
     val activePageBookmarks: StateFlow<List<BookmarkEntity>> = _activePageBookmarks.asStateFlow()
 
-    private val _activeHighlights: MutableStateFlow<List<HighlightEntity>> = MutableStateFlow(emptyList())
+    private val _activeHighlights: MutableStateFlow<List<HighlightEntity>> = MutableStateFlow(emptyList<HighlightEntity>())
     val activeHighlights: StateFlow<List<HighlightEntity>> = _activeHighlights.asStateFlow()
 
     private val _isNightMode: MutableStateFlow<Boolean> = MutableStateFlow(false)
@@ -188,8 +187,9 @@ class PdfViewModel @Inject constructor(
     private val _currentPage: MutableStateFlow<Int> = MutableStateFlow(0)
     val currentPage: StateFlow<Int> = _currentPage.asStateFlow()
 
-    val lastPageMap: MutableMap<String, Int> = mutableMapOf()
-    val pageRotations: MutableMap<Int, Int> = mutableMapOf()
+    // 💥 الدواء السحري لـ KSP: إعطاء Map النوع الصريح جداً 💥
+    val lastPageMap: MutableMap<String, Int> = mutableMapOf<String, Int>()
+    val pageRotations: MutableMap<Int, Int> = mutableMapOf<Int, Int>()
 
     private val _totalPages: MutableStateFlow<Int> = MutableStateFlow(0)
     val totalPages: StateFlow<Int> = _totalPages.asStateFlow()
@@ -197,7 +197,8 @@ class PdfViewModel @Inject constructor(
     private val _isViewerLoading: MutableStateFlow<Boolean> = MutableStateFlow(false)
     val isViewerLoading: StateFlow<Boolean> = _isViewerLoading.asStateFlow()
 
-    private val _tableOfContents: MutableStateFlow<List<com.shockwave.pdfium.PdfDocument.Bookmark>> = MutableStateFlow(emptyList())
+    // 💥 إجبار الأنواع الصريحة في القوائم الداخلية 💥
+    private val _tableOfContents: MutableStateFlow<List<com.shockwave.pdfium.PdfDocument.Bookmark>> = MutableStateFlow(emptyList<com.shockwave.pdfium.PdfDocument.Bookmark>())
     val tableOfContents: StateFlow<List<com.shockwave.pdfium.PdfDocument.Bookmark>> = _tableOfContents.asStateFlow()
 
     val prefetchManager: PdfPrefetchManager = PdfPrefetchManager()
@@ -211,7 +212,7 @@ class PdfViewModel @Inject constructor(
     init {
         @OptIn(ExperimentalCoroutinesApi::class)
         viewModelScope.launch {
-            _currentFilterParams.flatMapLatest { params ->
+            _currentFilterParams.flatMapLatest { params: FilterParams ->
                 val minSizeL = (params.minSize * 1024 * 1024).toLong()
                 val maxSizeL = if (params.maxSize >= 100f) Long.MAX_VALUE else (params.maxSize * 1024 * 1024).toLong()
                 val minPagesI = params.minPages
@@ -223,7 +224,7 @@ class PdfViewModel @Inject constructor(
                     else -> 0L
                 }
 
-                repository.getFilteredPdfs(minSizeL, maxSizeL, minPagesI, maxPagesI, minDateL).map { list ->
+                repository.getFilteredPdfs(minSizeL, maxSizeL, minPagesI, maxPagesI, minDateL).map { list: List<RecentFileEntity> ->
                     when (params.sortMode) {
                         "الأقدم أولاً" -> list.sortedBy { it.lastOpenedAt }
                         "الاسم (أ → ي)" -> list.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
@@ -242,8 +243,8 @@ class PdfViewModel @Inject constructor(
 
         @OptIn(ExperimentalCoroutinesApi::class)
         viewModelScope.launch {
-            _selectedUri.flatMapLatest { uri ->
-                if (uri != null) repository.getPageBookmarksForPdf(uri) else flowOf(emptyList())
+            _selectedUri.flatMapLatest { uri: String? ->
+                if (uri != null) repository.getPageBookmarksForPdf(uri) else flowOf(emptyList<BookmarkEntity>()) // 🔥 نوع صريح للـ Flow فارغ
             }.collect {
                 _activePageBookmarks.value = it
             }
@@ -251,8 +252,8 @@ class PdfViewModel @Inject constructor(
 
         @OptIn(ExperimentalCoroutinesApi::class)
         viewModelScope.launch {
-            _selectedUri.flatMapLatest { uri ->
-                if (uri != null) repository.getHighlightsForPdf(uri) else flowOf(emptyList())
+            _selectedUri.flatMapLatest { uri: String? ->
+                if (uri != null) repository.getHighlightsForPdf(uri) else flowOf(emptyList<HighlightEntity>()) // 🔥 نوع صريح للـ Flow فارغ
             }.collect {
                 _activeHighlights.value = it
             }
