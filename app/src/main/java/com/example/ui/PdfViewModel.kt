@@ -33,6 +33,35 @@ class PdfViewModel(
     private val _isOnboardingDone = MutableStateFlow<Boolean?>(null)
     val isOnboardingDone: StateFlow<Boolean?> = _isOnboardingDone.asStateFlow()
 
+    // Document States
+    val recentDocuments: StateFlow<List<RecentFileEntity>> = repository.allRecentPdfs
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val favoriteDocuments: StateFlow<List<RecentFileEntity>> = repository.bookmarkedPdfs
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // Settings States
+    private val _isNightMode = MutableStateFlow(false)
+    val isNightMode: StateFlow<Boolean> = _isNightMode.asStateFlow()
+
+    private val _readingMode = MutableStateFlow("normal")
+    val readingMode: StateFlow<String> = _readingMode.asStateFlow()
+
+    private val _isSwipeHorizontal = MutableStateFlow(false)
+    val isSwipeHorizontal: StateFlow<Boolean> = _isSwipeHorizontal.asStateFlow()
+
+    private val _isToolbarVisible = MutableStateFlow(true)
+    val isToolbarVisible: StateFlow<Boolean> = _isToolbarVisible.asStateFlow()
+
+    private val _securityExceptionUri = MutableStateFlow<String?>(null)
+    val securityExceptionUri: StateFlow<String?> = _securityExceptionUri.asStateFlow()
+
+    private val _largeFileUriPending = MutableStateFlow<Pair<String, Long>?>(null) // Pair of Uri, size in MB
+    val largeFileUriPending: StateFlow<Pair<String, Long>?> = _largeFileUriPending.asStateFlow()
+
+    private val _showLargeFileWarningSnackbar = MutableStateFlow(false)
+    val showLargeFileWarningSnackbar: StateFlow<Boolean> = _showLargeFileWarningSnackbar.asStateFlow()
+
     init {
         viewModelScope.launch {
             context.dataStore.data.map { preferences ->
@@ -63,35 +92,6 @@ class PdfViewModel(
             }
         }
     }
-
-    // Document States
-    val recentDocuments: StateFlow<List<RecentFileEntity>> = repository.allRecentPdfs
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    val favoriteDocuments: StateFlow<List<RecentFileEntity>> = repository.bookmarkedPdfs
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    // Settings States
-    private val _isNightMode = MutableStateFlow(false)
-    val isNightMode: StateFlow<Boolean> = _isNightMode.asStateFlow()
-
-    private val _readingMode = MutableStateFlow("normal")
-    val readingMode: StateFlow<String> = _readingMode.asStateFlow()
-
-    private val _isSwipeHorizontal = MutableStateFlow(false)
-    val isSwipeHorizontal: StateFlow<Boolean> = _isSwipeHorizontal.asStateFlow()
-
-    private val _isToolbarVisible = MutableStateFlow(true)
-    val isToolbarVisible: StateFlow<Boolean> = _isToolbarVisible.asStateFlow()
-
-    private val _securityExceptionUri = MutableStateFlow<String?>(null)
-    val securityExceptionUri: StateFlow<String?> = _securityExceptionUri.asStateFlow()
-
-    private val _largeFileUriPending = MutableStateFlow<Pair<String, Long>?>(null) // Pair of Uri, size in MB
-    val largeFileUriPending: StateFlow<Pair<String, Long>?> = _largeFileUriPending.asStateFlow()
-
-    private val _showLargeFileWarningSnackbar = MutableStateFlow(false)
-    val showLargeFileWarningSnackbar: StateFlow<Boolean> = _showLargeFileWarningSnackbar.asStateFlow()
 
     fun clearSecurityException() {
         _securityExceptionUri.value = null
