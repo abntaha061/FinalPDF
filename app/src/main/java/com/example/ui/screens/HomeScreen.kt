@@ -276,7 +276,8 @@ fun HomeScreenRealFiles(
 fun HomeScreen(
     viewModel: PdfViewModel,
     onPdfOpened: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onNavigateToSettings: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val recentPdfs by viewModel.recentDocuments.collectAsState()
@@ -344,15 +345,33 @@ fun HomeScreen(
                     .padding(innerPadding)
                     .padding(horizontal = 20.dp, vertical = 16.dp)
             ) {
-                // 1. App Title and Subtitle area
-                Text(
-                    text = "قارئ PDF",
-                    color = AppTextPrimary,
-                    fontWeight = FontWeight.ExtraBold,
-                    fontSize = 28.sp,
+                // 1. App Title and Settings Icon Row
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    textAlign = TextAlign.Start
-                )
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "قارئ PDF",
+                        color = AppTextPrimary,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 28.sp,
+                        textAlign = TextAlign.Start
+                    )
+                    IconButton(
+                        onClick = onNavigateToSettings,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .testTag("settings_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "Settings",
+                            tint = AppTextPrimary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                }
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = "افتح ملفاتك بجودة عالية",

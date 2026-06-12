@@ -50,10 +50,16 @@ import com.example.ui.PdfViewModelFactory
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.ViewerScreen
 import com.example.ui.screens.OnboardingScreen
+import com.example.ui.screens.SettingsScreen
 import com.example.ui.theme.MyApplicationTheme
 import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.core.tween
+import androidx.compose.ui.unit.sp
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.material3.LocalTextStyle
 
 class MainActivity : ComponentActivity() {
 
@@ -115,12 +121,18 @@ class MainActivity : ComponentActivity() {
         setContent {
             val isNightModeBySettings by viewModel.isNightMode.collectAsState()
             val isOnboardingCompleted by viewModel.isOnboardingDone.collectAsState()
+            val primaryColorHex by viewModel.primaryColorHex.collectAsState()
+            val uiFontSize by viewModel.uiFontSize.collectAsState()
             
             MyApplicationTheme(
-                darkTheme = isNightModeBySettings
+                darkTheme = isNightModeBySettings,
+                primaryColorHex = primaryColorHex
             ) {
-                val context = LocalContext.current
-                var hasPermission by remember { mutableStateOf(hasRequiredPermission(context)) }
+                CompositionLocalProvider(
+                    LocalTextStyle provides LocalTextStyle.current.copy(fontSize = uiFontSize.sp)
+                ) {
+                    val context = LocalContext.current
+                    var hasPermission by remember { mutableStateOf(hasRequiredPermission(context)) }
                 var showRationaleDialog by remember { mutableStateOf(!hasPermission) }
                 var showDeniedDialog by remember { mutableStateOf(false) }
 
@@ -330,6 +342,9 @@ class MainActivity : ComponentActivity() {
                                     viewModel = viewModel,
                                     onPdfOpened = {
                                         navController.navigate("viewer")
+                                    },
+                                    onNavigateToSettings = {
+                                        navController.navigate("settings")
                                     }
                                 )
                             }
@@ -342,10 +357,34 @@ class MainActivity : ComponentActivity() {
                                     }
                                 )
                             }
+
+                            composable(
+                                route = "settings",
+                                enterTransition = {
+                                    slideInHorizontally(
+                                        initialOffsetX = { it },
+                                        animationSpec = tween(300)
+                                    ) + fadeIn(animationSpec = tween(300))
+                                },
+                                exitTransition = {
+                                    slideOutHorizontally(
+                                        targetOffsetX = { it },
+                                        animationSpec = tween(300)
+                                    ) + fadeOut(animationSpec = tween(300))
+                                }
+                            ) {
+                                SettingsScreen(
+                                    viewModel = viewModel,
+                                    onBack = {
+                                        navController.popBackStack()
+                                    }
+                                )
+                            }
                         }
                     }
                 }
             }
         }
+    }
     }
 }

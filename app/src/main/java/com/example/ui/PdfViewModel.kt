@@ -22,6 +22,17 @@ private val NIGHT_MODE_KEY = booleanPreferencesKey("is_night_mode")
 private val READING_MODE_KEY = androidx.datastore.preferences.core.stringPreferencesKey("reading_mode")
 private val ONBOARDING_DONE_KEY = booleanPreferencesKey("onboarding_done")
 
+private val DEFAULT_READING_MODE_KEY = androidx.datastore.preferences.core.stringPreferencesKey("default_reading_mode")
+private val PRIMARY_COLOR_KEY = androidx.datastore.preferences.core.stringPreferencesKey("primary_color")
+private val UI_FONT_SIZE_KEY = androidx.datastore.preferences.core.floatPreferencesKey("ui_font_size")
+private val AUTO_SAVE_POSITION_KEY = booleanPreferencesKey("auto_save_position")
+private val SHOW_PAGE_INDICATOR_KEY = booleanPreferencesKey("show_page_indicator")
+private val PAGE_SPACING_KEY = androidx.datastore.preferences.core.floatPreferencesKey("page_spacing")
+private val SCROLL_SPEED_KEY = androidx.datastore.preferences.core.floatPreferencesKey("scroll_speed")
+private val LINK_OPEN_MODE_KEY = androidx.datastore.preferences.core.stringPreferencesKey("link_open_mode")
+private val AUTO_PLAY_AUDIO_KEY = booleanPreferencesKey("auto_play_audio")
+private val AUDIO_VOLUME_KEY = androidx.datastore.preferences.core.floatPreferencesKey("audio_volume")
+
 class PdfViewModel(
     private val repository: PdfRepository,
     private val context: Context
@@ -62,10 +73,41 @@ class PdfViewModel(
     private val _showLargeFileWarningSnackbar = MutableStateFlow(false)
     val showLargeFileWarningSnackbar: StateFlow<Boolean> = _showLargeFileWarningSnackbar.asStateFlow()
 
+    // Custom M3 Settings
+    private val _defaultReadingMode = MutableStateFlow("normal")
+    val defaultReadingMode: StateFlow<String> = _defaultReadingMode.asStateFlow()
+
+    private val _primaryColorHex = MutableStateFlow("#6C63FF")
+    val primaryColorHex: StateFlow<String> = _primaryColorHex.asStateFlow()
+
+    private val _uiFontSize = MutableStateFlow(15f)
+    val uiFontSize: StateFlow<Float> = _uiFontSize.asStateFlow()
+
+    private val _autoSavePosition = MutableStateFlow(true)
+    val autoSavePosition: StateFlow<Boolean> = _autoSavePosition.asStateFlow()
+
+    private val _showPageIndicator = MutableStateFlow(true)
+    val showPageIndicator: StateFlow<Boolean> = _showPageIndicator.asStateFlow()
+
+    private val _pageSpacing = MutableStateFlow(8f)
+    val pageSpacing: StateFlow<Float> = _pageSpacing.asStateFlow()
+
+    private val _scrollSpeed = MutableStateFlow(1.0f)
+    val scrollSpeed: StateFlow<Float> = _scrollSpeed.asStateFlow()
+
+    private val _linkOpenMode = MutableStateFlow("المتصفح الافتراضي")
+    val linkOpenMode: StateFlow<String> = _linkOpenMode.asStateFlow()
+
+    private val _autoPlayAudio = MutableStateFlow(true)
+    val autoPlayAudio: StateFlow<Boolean> = _autoPlayAudio.asStateFlow()
+
+    private val _audioVolume = MutableStateFlow(1.0f)
+    val audioVolume: StateFlow<Float> = _audioVolume.asStateFlow()
+
     init {
         viewModelScope.launch {
             context.dataStore.data.map { preferences ->
-                preferences[READING_MODE_KEY] ?: if (preferences[NIGHT_MODE_KEY] == true) "night" else "normal"
+                preferences[READING_MODE_KEY] ?: preferences[DEFAULT_READING_MODE_KEY] ?: if (preferences[NIGHT_MODE_KEY] == true) "night" else "normal"
             }.collect { mode ->
                 _readingMode.value = mode
                 _isNightMode.value = (mode == "night")
@@ -76,6 +118,20 @@ class PdfViewModel(
                 preferences[ONBOARDING_DONE_KEY] == true
             }.collect { done ->
                 _isOnboardingDone.value = done
+            }
+        }
+        viewModelScope.launch {
+            context.dataStore.data.collect { preferences ->
+                _defaultReadingMode.value = preferences[DEFAULT_READING_MODE_KEY] ?: "normal"
+                _primaryColorHex.value = preferences[PRIMARY_COLOR_KEY] ?: "#6C63FF"
+                _uiFontSize.value = preferences[UI_FONT_SIZE_KEY] ?: 15f
+                _autoSavePosition.value = preferences[AUTO_SAVE_POSITION_KEY] ?: true
+                _showPageIndicator.value = preferences[SHOW_PAGE_INDICATOR_KEY] ?: true
+                _pageSpacing.value = preferences[PAGE_SPACING_KEY] ?: 8f
+                _scrollSpeed.value = preferences[SCROLL_SPEED_KEY] ?: 1.0f
+                _linkOpenMode.value = preferences[LINK_OPEN_MODE_KEY] ?: "المتصفح الافتراضي"
+                _autoPlayAudio.value = preferences[AUTO_PLAY_AUDIO_KEY] ?: true
+                _audioVolume.value = preferences[AUDIO_VOLUME_KEY] ?: 1.0f
             }
         }
         viewModelScope.launch {
@@ -281,9 +337,113 @@ class PdfViewModel(
         _currentPage.value = page
         _totalPages.value = total
         viewModelScope.launch {
-            repository.updatePdfProgress(uri, page, total)
-            _currentDocument.value = _currentDocument.value?.copy(currentPage = page, totalPages = total)
+            if (_autoSavePosition.value) {
+                repository.updatePdfProgress(uri, page, total)
+                _currentDocument.value = _currentDocument.value?.copy(currentPage = page, totalPages = total)
+            }
             checkIfCurrentPageIsBookmarked()
+        }
+    }
+
+    // Setters for Settings
+    fun setDefaultReadingMode(mode: String) {
+        viewModelScope.launch {
+            context.dataStore.edit { preferences ->
+                preferences[DEFAULT_READING_MODE_KEY] = mode
+                // Also update the active reading mode immediately
+                preferences[READING_MODE_KEY] = mode
+            }
+        }
+    }
+
+    fun setPrimaryColorHex(hex: String) {
+        viewModelScope.launch {
+            context.dataStore.edit { preferences ->
+                preferences[PRIMARY_COLOR_KEY] = hex
+            }
+        }
+    }
+
+    fun setUiFontSize(size: Float) {
+        viewModelScope.launch {
+            context.dataStore.edit { preferences ->
+                preferences[UI_FONT_SIZE_KEY] = size
+            }
+        }
+    }
+
+    fun setAutoSavePosition(b: Boolean) {
+        viewModelScope.launch {
+            context.dataStore.edit { preferences ->
+                preferences[AUTO_SAVE_POSITION_KEY] = b
+            }
+        }
+    }
+
+    fun setShowPageIndicator(b: Boolean) {
+        viewModelScope.launch {
+            context.dataStore.edit { preferences ->
+                preferences[SHOW_PAGE_INDICATOR_KEY] = b
+            }
+        }
+    }
+
+    fun setPageSpacing(spacing: Float) {
+        viewModelScope.launch {
+            context.dataStore.edit { preferences ->
+                preferences[PAGE_SPACING_KEY] = spacing
+            }
+        }
+    }
+
+    fun setScrollSpeed(speed: Float) {
+        viewModelScope.launch {
+            context.dataStore.edit { preferences ->
+                preferences[SCROLL_SPEED_KEY] = speed
+            }
+        }
+    }
+
+    fun setLinkOpenMode(mode: String) {
+        viewModelScope.launch {
+            context.dataStore.edit { preferences ->
+                preferences[LINK_OPEN_MODE_KEY] = mode
+            }
+        }
+    }
+
+    fun setAutoPlayAudio(b: Boolean) {
+        viewModelScope.launch {
+            context.dataStore.edit { preferences ->
+                preferences[AUTO_PLAY_AUDIO_KEY] = b
+            }
+        }
+    }
+
+    fun setAudioVolume(volume: Float) {
+        viewModelScope.launch {
+            context.dataStore.edit { preferences ->
+                preferences[AUDIO_VOLUME_KEY] = volume
+            }
+        }
+    }
+
+    // DB clear operations
+    fun clearAllRecentFiles() {
+        viewModelScope.launch {
+            repository.clearAllRecentFiles()
+        }
+    }
+
+    fun clearAllBookmarks() {
+        viewModelScope.launch {
+            repository.clearAllBookmarks()
+        }
+    }
+
+    fun clearAllHighlights() {
+        viewModelScope.launch {
+            repository.clearAllHighlights()
         }
     }
 

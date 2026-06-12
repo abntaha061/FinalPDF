@@ -22,6 +22,9 @@ interface RecentFileDao {
 
     @Query("UPDATE recent_files SET isBookmarked = :isBookmarked WHERE uri = :uri")
     suspend fun updateBookmarkState(uri: String, isBookmarked: Boolean)
+
+    @Query("DELETE FROM recent_files")
+    suspend fun deleteAll()
 }
 
 @Dao
@@ -43,6 +46,9 @@ interface BookmarkDao {
 
     @Query("SELECT EXISTS(SELECT 1 FROM bookmarks WHERE fileUri = :fileUri AND pageNumber = :pageNumber)")
     suspend fun hasBookmark(fileUri: String, pageNumber: Int): Boolean
+
+    @Query("DELETE FROM bookmarks")
+    suspend fun deleteAll()
 }
 
 @Dao
@@ -61,4 +67,7 @@ interface HighlightDao {
 
     @Query("DELETE FROM highlights WHERE id = :id")
     suspend fun deleteById(id: Int)
+
+    @Query("DELETE FROM highlights")
+    suspend fun deleteAll()
 }

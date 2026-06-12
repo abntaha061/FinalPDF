@@ -16,7 +16,7 @@ object AudioPlayerManager {
     private val _audioState = MutableStateFlow<AudioState>(AudioState.Idle)
     val audioState: StateFlow<AudioState> = _audioState
 
-    fun play(context: Context, url: String) {
+    fun play(context: Context, url: String, volume: Float = 1.0f) {
         Log.d(TAG, "Playing URL: $url")
         _audioState.value = AudioState.Loading
         
@@ -31,6 +31,8 @@ object AudioPlayerManager {
                         .setUsage(AudioAttributes.USAGE_MEDIA)
                         .build()
                 )
+                
+                setVolume(volume, volume)
                 
                 try {
                     setDataSource(context, Uri.parse(url))

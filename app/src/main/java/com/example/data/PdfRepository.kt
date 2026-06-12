@@ -70,4 +70,16 @@ class PdfRepository @Inject constructor(
     suspend fun deleteHighlight(id: Int) = withContext(Dispatchers.IO) {
         highlightDao.deleteById(id)
     }
+
+    suspend fun clearAllRecentFiles() = withContext(Dispatchers.IO) {
+        recentFileDao.deleteAll()
+    }
+
+    suspend fun clearAllBookmarks() = withContext(Dispatchers.IO) {
+        bookmarkDao.deleteAll()
+    }
+
+    suspend fun clearAllHighlights() = withContext(Dispatchers.IO) {
+        highlightDao.deleteAll()
+    }
 }

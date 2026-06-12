@@ -8,6 +8,11 @@ import android.graphics.RectF
 import com.example.util.AudioPlayerManager
 import com.github.barteksc.pdfviewer.link.LinkHandler
 import com.github.barteksc.pdfviewer.model.LinkTapEvent
+import androidx.datastore.preferences.preferencesDataStore
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
+
+private val Context.settingsStore by preferencesDataStore(name = "pdf_reader_settings")
 
 class CustomLinkHandler(
     private val context: Context,
@@ -63,25 +68,91 @@ class CustomLinkHandler(
 
         if (!uriString.isNullOrEmpty()) {
             val lowerUri = uriString.lowercase()
+
+            // Read preferences synchronously
+            val (autoPlayAudio, audioVolume, linkOpenMode) = try {
+                val preferences = runBlocking { context.settingsStore.data.first() }
+                val autoPlay = preferences[androidx.datastore.preferences.core.booleanPreferencesKey("auto_play_audio")] ?: true
+                val vol = preferences[androidx.datastore.preferences.core.floatPreferencesKey("audio_volume")] ?: 1.0f
+                val mode = preferences[androidx.datastore.preferences.core.stringPreferencesKey("link_open_mode")] ?: "المتصفح الافتراضي"
+                Triple(autoPlay, vol, mode)
+            } catch (e: Exception) {
+                Log.e("CustomLinkHandler", "Error reading datastore in custom link handler", e)
+                Triple(true, 1.0f, "المتصفح الافتراضي")
+            }
+
             // If the link contains audio file URL (mp3, wav, ogg, m4a, aac)
             if (lowerUri.endsWith(".mp3") || lowerUri.endsWith(".wav") || lowerUri.endsWith(".ogg") ||
                 lowerUri.endsWith(".m4a") || lowerUri.endsWith(".aac")) {
-                Log.d("CustomLinkHandler", "Tapped audio URL, sending to AudioPlayerManager: $uriString")
-                AudioPlayerManager.play(context, uriString)
+                Log.d("CustomLinkHandler", "Tapped audio URL, sending to AudioPlayerManager: $uriString with autoPlay: $autoPlayAudio, vol: $audioVolume")
+                if (autoPlayAudio) {
+                    AudioPlayerManager.play(context, uriString, audioVolume)
+                } else {
+                    android.app.AlertDialog.Builder(context)
+                        .setTitle("تشغيل الصوت")
+                        .setMessage("هل تريد تشغيل هذا الملف الصوتي؟")
+                        .setPositiveButton("تشغيل") { _, _ ->
+                            AudioPlayerManager.play(context, uriString, audioVolume)
+                        }
+                        .setNegativeButton("إلغاء", null)
+                        .show()
+                }
             } else if (uriString.startsWith("http://") || uriString.startsWith("https://")) {
-                Log.d("CustomLinkHandler", "Tapped http/https URI, launching system browser: $uriString")
-                try {
-                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(uriString)).apply {
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                Log.d("CustomLinkHandler", "Tapped http/https URI: $uriString with mode: $linkOpenMode")
+                when (linkOpenMode) {
+                    "داخل التطبيق (WebView)" -> {
+                        openWebViewInDialog(context, uriString)
                     }
-                    context.startActivity(intent)
-                } catch (e: Exception) {
-                    Log.e("CustomLinkHandler", "Error launching system browser intent for: $uriString", e)
+                    "اسأل في كل مرة" -> {
+                        android.app.AlertDialog.Builder(context)
+                            .setTitle("فتح الرابط")
+                            .setMessage("اختر طريقة فتح الرابط:\n$uriString")
+                            .setPositiveButton("داخل التطبيق") { _, _ ->
+                                openWebViewInDialog(context, uriString)
+                            }
+                            .setNegativeButton("المتصفح الخارجي") { _, _ ->
+                                launchExternalBrowser(context, uriString)
+                            }
+                            .setNeutralButton("إلغاء", null)
+                            .show()
+                    }
+                    else -> { // "المتصفح الافتراضي"
+                        launchExternalBrowser(context, uriString)
+                    }
                 }
             }
         } else if (destPageIdx != null) {
             Log.d("CustomLinkHandler", "Tapped internal destination page index: $destPageIdx, jumping PDFView")
             pdfView.jumpTo(destPageIdx)
+        }
+    }
+
+    private fun openWebViewInDialog(context: Context, url: String) {
+        try {
+            val webView = android.webkit.WebView(context).apply {
+                settings.javaScriptEnabled = true
+                settings.domStorageEnabled = true
+                webViewClient = android.webkit.WebViewClient()
+                loadUrl(url)
+            }
+            android.app.AlertDialog.Builder(context)
+                .setView(webView)
+                .setPositiveButton("إغلاق", null)
+                .show()
+        } catch (e: Exception) {
+            Log.e("CustomLinkHandler", "Failed to show webView dialog", e)
+            launchExternalBrowser(context, url)
+        }
+    }
+
+    private fun launchExternalBrowser(context: Context, url: String) {
+        try {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        } catch (e: Exception) {
+            Log.e("CustomLinkHandler", "Error launching system browser intent", e)
         }
     }
 }

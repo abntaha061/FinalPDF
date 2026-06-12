@@ -109,6 +109,7 @@ fun ViewerScreen(
     val errorState by viewModel.errorState.collectAsState()
     val showLargeFileWarningSnackbar by viewModel.showLargeFileWarningSnackbar.collectAsState()
     val tableOfContents by viewModel.tableOfContents.collectAsState()
+    val showPageIndicator by viewModel.showPageIndicator.collectAsState()
     
     // Bottom Reader Bar visibility state connected to the ViewModel Flow
     val isToolbarVisible by viewModel.isToolbarVisible.collectAsState()
@@ -561,7 +562,7 @@ fun ViewerScreen(
 
             // Always Visible Floating Scroll Pill Page Indicator
             AnimatedVisibility(
-                visible = isScrollIndicatorVisible && totalPages > 0,
+                visible = showPageIndicator && isScrollIndicatorVisible && totalPages > 0,
                 enter = fadeIn(animationSpec = tween(300)),
                 exit = fadeOut(animationSpec = tween(300)),
                 modifier = Modifier

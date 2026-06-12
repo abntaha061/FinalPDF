@@ -41,15 +41,38 @@ private val LightColorScheme = lightColorScheme(
 fun MyApplicationTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
     dynamicColor: Boolean = false, // Disable to preserve custom brand styles
+    primaryColorHex: String? = null,
     content: @Composable () -> Unit,
 ) {
+    val parsedColor = androidx.compose.runtime.remember(primaryColorHex, darkTheme) {
+        if (!primaryColorHex.isNullOrEmpty()) {
+            try {
+                Color(android.graphics.Color.parseColor(primaryColorHex))
+            } catch (e: Exception) {
+                null
+            }
+        } else null
+    }
+
     val colorScheme = when {
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
             val context = LocalContext.current
             if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
         }
-        darkTheme -> DarkColorScheme
-        else -> LightColorScheme
+        darkTheme -> {
+            if (parsedColor != null) {
+                DarkColorScheme.copy(primary = parsedColor)
+            } else {
+                DarkColorScheme
+            }
+        }
+        else -> {
+            if (parsedColor != null) {
+                LightColorScheme.copy(primary = parsedColor)
+            } else {
+                LightColorScheme
+            }
+        }
     }
 
     MaterialTheme(
