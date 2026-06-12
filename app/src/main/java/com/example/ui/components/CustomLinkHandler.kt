@@ -1,17 +1,18 @@
-package com.example.ui.components
+package com.github.barteksc.pdfviewer
 
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.util.Log
+import android.graphics.RectF
 import com.example.util.AudioPlayerManager
-import com.github.barteksc.pdfviewer.PDFView
 import com.github.barteksc.pdfviewer.link.LinkHandler
 import com.github.barteksc.pdfviewer.model.LinkTapEvent
 
 class CustomLinkHandler(
     private val context: Context,
-    private val pdfView: PDFView
+    private val pdfView: PDFView,
+    private val onLinkTapped: (RectF) -> Unit
 ) : LinkHandler {
 
     override fun handleLinkEvent(event: LinkTapEvent) {
@@ -25,6 +26,40 @@ class CustomLinkHandler(
         val destPageIdx = link.destPageIdx
 
         Log.d("CustomLinkHandler", "PDF Link tapped for debug: uri = $uriString, destPageIdx = $destPageIdx")
+
+        // Map link bounds to screen coordinate RectF using the library's getMappedLinkRect via reflection
+        val page = pdfView.currentPage
+        var mappedRect: RectF? = null
+        try {
+            val pdfFile = pdfView.pdfFile
+            if (pdfFile != null) {
+                val methods = pdfFile.javaClass.declaredMethods
+                for (m in methods) {
+                    if (m.name.contains("rect", ignoreCase = true) || m.name.contains("link", ignoreCase = true)) {
+                        Log.d("CustomLinkHandler", "PdfFile method: ${m.name}(${m.parameterTypes.joinToString { it.simpleName }})")
+                    }
+                }
+                val targetMethod = methods.firstOrNull { 
+                    (it.name.contains("MappedLink", ignoreCase = true) || it.name.contains("LinkRect", ignoreCase = true)) &&
+                    it.parameterTypes.size == 2
+                }
+                if (targetMethod != null) {
+                    Log.d("CustomLinkHandler", "Invoking mapping method dynamically: ${targetMethod.name}")
+                    targetMethod.isAccessible = true
+                    mappedRect = targetMethod.invoke(pdfFile, page, link) as? RectF
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("CustomLinkHandler", "Error mapping link via reflection", e)
+        }
+
+        val finalRect = mappedRect ?: RectF(
+            event.originalX - 25f, 
+            event.originalY - 25f, 
+            event.originalX + 25f, 
+            event.originalY + 25f
+        )
+        onLinkTapped(finalRect)
 
         if (!uriString.isNullOrEmpty()) {
             val lowerUri = uriString.lowercase()

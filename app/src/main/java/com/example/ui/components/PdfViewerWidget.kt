@@ -2,9 +2,12 @@ package com.example.ui.components
 
 import android.net.Uri
 import android.util.Log
+import android.graphics.RectF
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.offset
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -12,12 +15,19 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.ui.PdfViewModel
 import com.github.barteksc.pdfviewer.PDFView
+import com.github.barteksc.pdfviewer.CustomLinkHandler
 import com.github.barteksc.pdfviewer.scroll.DefaultScrollHandle
 import com.github.barteksc.pdfviewer.util.FitPolicy
+import kotlinx.coroutines.launch
 
 @Composable
 fun PdfViewerWidget(
@@ -38,6 +48,21 @@ fun PdfViewerWidget(
     val context = LocalContext.current
     var isLoaded by remember { mutableStateOf(false) }
     var loadError by remember { mutableStateOf<String?>(null) }
+
+    var activeLinkHighlight by remember { mutableStateOf<RectF?>(null) }
+    val highlightAlpha = remember { Animatable(0f) }
+    val coroutineScope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
+
+    val onLinkTapped: (RectF) -> Unit = { rect ->
+        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        coroutineScope.launch {
+            activeLinkHighlight = rect
+            highlightAlpha.snapTo(1f)
+            highlightAlpha.animateTo(0f, animationSpec = tween(400))
+            activeLinkHighlight = null
+        }
+    }
 
     // Pre-calculate page count for the .pages(...) configuration
     val pageCount = remember(pdfUriString) {
@@ -104,11 +129,6 @@ fun PdfViewerWidget(
                         }
                         
                         val gestureDetector = android.view.GestureDetector(ctx, object : android.view.GestureDetector.SimpleOnGestureListener() {
-                            override fun onSingleTapConfirmed(e: android.view.MotionEvent): Boolean {
-                                onTap?.invoke()
-                                return true
-                            }
-                            
                             override fun onLongPress(e: android.view.MotionEvent) {
                                 onLongPress?.invoke(androidx.compose.ui.geometry.Offset(e.x, e.y))
                             }
@@ -181,7 +201,7 @@ fun PdfViewerWidget(
                                 .pageFitPolicy(FitPolicy.WIDTH)           // fit width of screen
                                 .nightMode(readingMode == "night")
                                 .scrollHandle(DefaultScrollHandle(ctx))
-                                .linkHandler(CustomLinkHandler(context, this)) // Custom link handler
+                                .linkHandler(CustomLinkHandler(context, this, onLinkTapped)) // Custom link handler
                                 .load()
 
                         } catch (e: Exception) {
@@ -205,6 +225,21 @@ fun PdfViewerWidget(
                     }
                 },
                 modifier = Modifier.fillMaxSize()
+            )
+        }
+
+        val density = LocalDensity.current
+        activeLinkHighlight?.let { rect ->
+            val leftDp = with(density) { rect.left.toDp() }
+            val topDp = with(density) { rect.top.toDp() }
+            val widthDp = with(density) { (rect.right - rect.left).toDp() }
+            val heightDp = with(density) { (rect.bottom - rect.top).toDp() }
+
+            Box(
+                modifier = Modifier
+                    .offset(x = leftDp, y = topDp)
+                    .size(width = widthDp, height = heightDp)
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.25f * highlightAlpha.value))
             )
         }
     }
