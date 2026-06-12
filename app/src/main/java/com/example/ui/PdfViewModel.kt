@@ -83,63 +83,23 @@ class PdfViewModel @Inject constructor(
     private val _filterDateRange = MutableStateFlow("الكل")
     val filterDateRange: StateFlow<String> = _filterDateRange.asStateFlow()
 
-    // الحل الجذري والأقوى: دمج التدفقات بشكل ثنائي متسلسل لمنع تكوين أي Star Projection يحطم معالج KSP
-    private val filterStep1: Flow<KspParamsStep1> = _filterMinSize.combine(_filterMaxSize) { minS, maxS ->
-        KspParamsStep1(minS, maxS)
-    }
+    // 🌟 التغيير الجوهري هنا: تعريفات بسيطة جداً لتجاوز فشل معالج KSP 🌟
+    private val _activeFilterCount = MutableStateFlow(0)
+    val activeFilterCount: StateFlow<Int> = _activeFilterCount.asStateFlow()
 
-    private val filterStep2: Flow<KspParamsStep2> = filterStep1.combine(_filterMinPages) { s1, minP ->
-        KspParamsStep2(s1.minSize, s1.maxSize, minP)
-    }
+    private val _recentDocuments = MutableStateFlow<List<RecentFileEntity>>(emptyList())
+    val recentDocuments: StateFlow<List<RecentFileEntity>> = _recentDocuments.asStateFlow()
 
-    private val filterStep3: Flow<KspParamsStep3> = filterStep2.combine(_filterMaxPages) { s2, maxP ->
-        KspParamsStep3(s2.minSize, s2.maxSize, s2.minPages, maxP)
-    }
+    private val _favoriteDocuments = MutableStateFlow<List<RecentFileEntity>>(emptyList())
+    val favoriteDocuments: StateFlow<List<RecentFileEntity>> = _favoriteDocuments.asStateFlow()
 
-    private val filterStep4: Flow<KspParamsStep4> = filterStep3.combine(_filterDateRange) { s3, date ->
-        KspParamsStep4(s3.minSize, s3.maxSize, s3.minPages, s3.maxPages, date)
-    }
+    private val _activePageBookmarks = MutableStateFlow<List<BookmarkEntity>>(emptyList())
+    val activePageBookmarks: StateFlow<List<BookmarkEntity>> = _activePageBookmarks.asStateFlow()
 
-    private val finalParamsFlow: Flow<KspFilterAndSortParams> = filterStep4.combine(_sortMode) { s4, sort ->
-        KspFilterAndSortParams(s4.minSize, s4.maxSize, s4.minPages, s4.maxPages, s4.dateRange, sort)
-    }
+    private val _activeHighlights = MutableStateFlow<List<HighlightEntity>>(emptyList())
+    val activeHighlights: StateFlow<List<HighlightEntity>> = _activeHighlights.asStateFlow()
 
-    // حساب العداد والفلترة مباشرة من التدفق الموحد صريح النوع وثابت الاستقرار
-    val activeFilterCount: StateFlow<Int> = finalParamsFlow.map { params ->
-        var count = 0
-        if (params.minSize > 0f || params.maxSize < 100f) count++
-        if (params.minPages > 1 || params.maxPages < 500) count++
-        if (params.dateRange != "الكل") count++
-        count
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
-
-    @OptIn(ExperimentalCoroutinesApi::class)
-    val recentDocuments: StateFlow<List<RecentFileEntity>> = finalParamsFlow.flatMapLatest { params ->
-        val minSize = (params.minSize * 1024 * 1024).toLong()
-        val maxSize = if (params.maxSize >= 100f) Long.MAX_VALUE else (params.maxSize * 1024 * 1024).toLong()
-        val minPages = params.minPages
-        val maxPages = if (params.maxPages >= 500) Int.MAX_VALUE else params.maxPages
-        val minDate = when (params.dateRange) {
-            "24 ساعة" -> System.currentTimeMillis() - 24 * 60 * 60 * 1000L
-            "أسبوع" -> System.currentTimeMillis() - 7 * 24 * 60 * 60 * 1000L
-            "شهر" -> System.currentTimeMillis() - 30 * 24 * 60 * 60 * 1000L
-            else -> 0L
-        }
-        
-        repository.getFilteredPdfs(minSize, maxSize, minPages, maxPages, minDate)
-            .map { list ->
-                when (params.sortMode) {
-                    "الأقدم أولاً" -> list.sortedBy { it.lastOpenedAt }
-                    "الاسم (أ → ي)" -> list.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
-                    "الحجم (الأكبر أولاً)" -> list.sortedByDescending { it.sizeBytes }
-                    else -> list.sortedByDescending { it.lastOpenedAt }
-                }
-            }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    val favoriteDocuments: StateFlow<List<RecentFileEntity>> = repository.bookmarkedPdfs
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
+    // خصائص إعدادات القراءة
     private val _isNightMode = MutableStateFlow(false)
     val isNightMode: StateFlow<Boolean> = _isNightMode.asStateFlow()
 
@@ -203,7 +163,108 @@ class PdfViewModel @Inject constructor(
     private val _appLanguage = MutableStateFlow("ar")
     val appLanguage: StateFlow<String> = _appLanguage.asStateFlow()
 
+    // القارئ
+    private val _selectedUri = MutableStateFlow<String?>(null)
+    val selectedUri: StateFlow<String?> = _selectedUri.asStateFlow()
+
+    private val _currentDocument = MutableStateFlow<RecentFileEntity?>(null)
+    val currentDocument: StateFlow<RecentFileEntity?> = _currentDocument.asStateFlow()
+
+    private val _currentPage = MutableStateFlow(0)
+    val currentPage: StateFlow<Int> = _currentPage.asStateFlow()
+
+    val lastPageMap: MutableMap<String, Int> = mutableMapOf()
+    val pageRotations: MutableMap<Int, Int> = mutableMapOf()
+
+    private val _totalPages = MutableStateFlow(0)
+    val totalPages: StateFlow<Int> = _totalPages.asStateFlow()
+
+    private val _isViewerLoading = MutableStateFlow(false)
+    val isViewerLoading: StateFlow<Boolean> = _isViewerLoading.asStateFlow()
+
+    private val _tableOfContents = MutableStateFlow<List<com.shockwave.pdfium.PdfDocument.Bookmark>>(emptyList())
+    val tableOfContents: StateFlow<List<com.shockwave.pdfium.PdfDocument.Bookmark>> = _tableOfContents.asStateFlow()
+
+    val prefetchManager = PdfPrefetchManager()
+    private val _prefetchEnabled = MutableStateFlow(true)
+    val prefetchEnabled: StateFlow<Boolean> = _prefetchEnabled.asStateFlow()
+
+    private val _isCurrentPageBookmarked = MutableStateFlow(false)
+    val isCurrentPageBookmarked: StateFlow<Boolean> = _isCurrentPageBookmarked.asStateFlow()
+
     init {
+        // إخفاء الـ Combine المعقد عن المترجم KSP بوضعه داخل الـ init
+        viewModelScope.launch {
+            val flowA = combine(_filterMinSize, _filterMaxSize, _filterMinPages) { minS, maxS, minP ->
+                Triple(minS, maxS, minP)
+            }
+            val flowB = combine(_filterMaxPages, _filterDateRange, _sortMode) { maxP, date, sort ->
+                Triple(maxP, date, sort)
+            }
+
+            @OptIn(ExperimentalCoroutinesApi::class)
+            combine(flowA, flowB) { a, b ->
+                FilterParams(a.first, a.second, a.third, b.first, b.second, b.third)
+            }.flatMapLatest { params ->
+                
+                // تحديث العداد
+                var count = 0
+                if (params.minSize > 0f || params.maxSize < 100f) count++
+                if (params.minPages > 1 || params.maxPages < 500) count++
+                if (params.dateRange != "الكل") count++
+                _activeFilterCount.value = count
+
+                // جلب وترتيب المستندات
+                val minSizeL = (params.minSize * 1024 * 1024).toLong()
+                val maxSizeL = if (params.maxSize >= 100f) Long.MAX_VALUE else (params.maxSize * 1024 * 1024).toLong()
+                val minPagesI = params.minPages
+                val maxPagesI = if (params.maxPages >= 500) Int.MAX_VALUE else params.maxPages
+                val minDateL = when (params.dateRange) {
+                    "24 ساعة" -> System.currentTimeMillis() - 24 * 60 * 60 * 1000L
+                    "أسبوع" -> System.currentTimeMillis() - 7 * 24 * 60 * 60 * 1000L
+                    "شهر" -> System.currentTimeMillis() - 30 * 24 * 60 * 60 * 1000L
+                    else -> 0L
+                }
+
+                repository.getFilteredPdfs(minSizeL, maxSizeL, minPagesI, maxPagesI, minDateL).map { list ->
+                    when (params.sortMode) {
+                        "الأقدم أولاً" -> list.sortedBy { it.lastOpenedAt }
+                        "الاسم (أ → ي)" -> list.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
+                        "الحجم (الأكبر أولاً)" -> list.sortedByDescending { it.sizeBytes }
+                        else -> list.sortedByDescending { it.lastOpenedAt }
+                    }
+                }
+            }.collect { sortedList ->
+                _recentDocuments.value = sortedList
+            }
+        }
+
+        // المفضلة
+        viewModelScope.launch {
+            repository.bookmarkedPdfs.collect { _favoriteDocuments.value = it }
+        }
+
+        // الإشارات المرجعية
+        @OptIn(ExperimentalCoroutinesApi::class)
+        viewModelScope.launch {
+            _selectedUri.flatMapLatest { uri ->
+                if (uri != null) repository.getPageBookmarksForPdf(uri) else flowOf(emptyList())
+            }.collect {
+                _activePageBookmarks.value = it
+            }
+        }
+
+        // التظليل
+        @OptIn(ExperimentalCoroutinesApi::class)
+        viewModelScope.launch {
+            _selectedUri.flatMapLatest { uri ->
+                if (uri != null) repository.getHighlightsForPdf(uri) else flowOf(emptyList())
+            }.collect {
+                _activeHighlights.value = it
+            }
+        }
+
+        // الإعدادات وقراءة DataStore
         viewModelScope.launch {
             context.dataStore.data.map { preferences ->
                 preferences[READING_MODE_KEY] ?: preferences[DEFAULT_READING_MODE_KEY] ?: if (preferences[NIGHT_MODE_KEY] == true) "night" else "normal"
@@ -244,11 +305,10 @@ class PdfViewModel @Inject constructor(
             }
         }
         viewModelScope.launch {
-            recentDocuments.first()
-            _isOnboardingDone.filterNotNull().first()
             _isReady.value = true
         }
         viewModelScope.launch {
+            @OptIn(FlowPreview::class)
             currentPage
                 .debounce(200L)
                 .collect { page ->
@@ -267,23 +327,13 @@ class PdfViewModel @Inject constructor(
 
     fun completeOnboarding() {
         viewModelScope.launch {
-            context.dataStore.edit { preferences ->
-                preferences[ONBOARDING_DONE_KEY] = true
-            }
+            context.dataStore.edit { preferences -> preferences[ONBOARDING_DONE_KEY] = true }
         }
     }
 
-    fun clearSecurityException() {
-        _securityExceptionUri.value = null
-    }
-
-    fun clearLargeFilePending() {
-        _largeFileUriPending.value = null
-    }
-
-    fun consumeLargeFileWarningSnackbar() {
-        _showLargeFileWarningSnackbar.value = false
-    }
+    fun clearSecurityException() { _securityExceptionUri.value = null }
+    fun clearLargeFilePending() { _largeFileUriPending.value = null }
+    fun consumeLargeFileWarningSnackbar() { _showLargeFileWarningSnackbar.value = false }
 
     fun selectDocumentForced(context: Context, uri: Uri) {
         _largeFileUriPending.value = null
@@ -308,61 +358,12 @@ class PdfViewModel @Inject constructor(
         proceedWithLoading(context, uri)
     }
 
-    fun toggleToolbarVisibility() {
-        _isToolbarVisible.value = !_isToolbarVisible.value
-    }
-
-    fun setToolbarVisibility(visible: Boolean) {
-        _isToolbarVisible.value = visible
-    }
-
-    private val _selectedUri = MutableStateFlow<String?>(null)
-    val selectedUri: StateFlow<String?> = _selectedUri.asStateFlow()
-
-    private val _currentDocument = MutableStateFlow<RecentFileEntity?>(null)
-    val currentDocument: StateFlow<RecentFileEntity?> = _currentDocument.asStateFlow()
-
-    private val _currentPage = MutableStateFlow(0)
-    val currentPage: StateFlow<Int> = _currentPage.asStateFlow()
-
-    val lastPageMap: MutableMap<String, Int> = mutableMapOf()
-    val pageRotations: MutableMap<Int, Int> = mutableMapOf()
-
-    private val _totalPages = MutableStateFlow(0)
-    val totalPages: StateFlow<Int> = _totalPages.asStateFlow()
-
-    private val _isViewerLoading = MutableStateFlow(false)
-    val isViewerLoading: StateFlow<Boolean> = _isViewerLoading.asStateFlow()
-
-    private val _tableOfContents = MutableStateFlow<List<com.shockwave.pdfium.PdfDocument.Bookmark>>(emptyList())
-    val tableOfContents: StateFlow<List<com.shockwave.pdfium.PdfDocument.Bookmark>> = _tableOfContents.asStateFlow()
-
-    val prefetchManager = PdfPrefetchManager()
-    private val _prefetchEnabled = MutableStateFlow(true)
-    val prefetchEnabled: StateFlow<Boolean> = _prefetchEnabled.asStateFlow()
+    fun toggleToolbarVisibility() { _isToolbarVisible.value = !_isToolbarVisible.value }
+    fun setToolbarVisibility(visible: Boolean) { _isToolbarVisible.value = visible }
 
     fun setTableOfContents(toc: List<com.shockwave.pdfium.PdfDocument.Bookmark>) {
         _tableOfContents.value = toc
     }
-
-    @OptIn(ExperimentalCoroutinesApi::class)
-    val activePageBookmarks: StateFlow<List<BookmarkEntity>> = _selectedUri
-        .flatMapLatest { uri ->
-            if (uri != null) repository.getPageBookmarksForPdf(uri)
-            else flowOf(emptyList())
-        }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    @OptIn(ExperimentalCoroutinesApi::class)
-    val activeHighlights: StateFlow<List<HighlightEntity>> = _selectedUri
-        .flatMapLatest { uri ->
-            if (uri != null) repository.getHighlightsForPdf(uri)
-            else flowOf(emptyList())
-        }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    private val _isCurrentPageBookmarked = MutableStateFlow(false)
-    val isCurrentPageBookmarked: StateFlow<Boolean> = _isCurrentPageBookmarked.asStateFlow()
 
     fun toggleNightMode() {
         val nextValue = !_isNightMode.value
@@ -388,36 +389,22 @@ class PdfViewModel @Inject constructor(
         }
     }
 
-    fun toggleSwipeHorizontal() {
-        _isSwipeHorizontal.value = !_isSwipeHorizontal.value
-    }
+    fun toggleSwipeHorizontal() { _isSwipeHorizontal.value = !_isSwipeHorizontal.value }
 
     fun setReadingScrollMode(mode: String) {
         _readingScrollMode.value = mode
-        viewModelScope.launch {
-            context.dataStore.edit { preferences ->
-                preferences[READING_SCROLL_MODE_KEY] = mode
-            }
-        }
+        viewModelScope.launch { context.dataStore.edit { it[READING_SCROLL_MODE_KEY] = mode } }
     }
 
     fun setFitMode(mode: String) {
         _fitMode.value = mode
-        viewModelScope.launch {
-            context.dataStore.edit { preferences ->
-                preferences[FIT_MODE_KEY] = mode
-            }
-        }
+        viewModelScope.launch { context.dataStore.edit { it[FIT_MODE_KEY] = mode } }
     }
 
     fun toggleDoublePageMode() {
         val nextValue = !_isDoublePageEnabled.value
         _isDoublePageEnabled.value = nextValue
-        viewModelScope.launch {
-            context.dataStore.edit { preferences ->
-                preferences[DOUBLE_PAGE_KEY] = nextValue
-            }
-        }
+        viewModelScope.launch { context.dataStore.edit { it[DOUBLE_PAGE_KEY] = nextValue } }
     }
 
     fun selectDocument(context: Context, uri: Uri) {
@@ -433,9 +420,7 @@ class PdfViewModel @Inject constructor(
         } catch (e: SecurityException) {
             _securityExceptionUri.value = uri.toString()
             return
-        } catch (e: Exception) {
-            // ignore
-        }
+        } catch (e: Exception) {}
 
         when {
             sizeBytes > 500L * 1024L * 1024L -> {
@@ -479,24 +464,16 @@ class PdfViewModel @Inject constructor(
             try {
                 val flags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
                 context.contentResolver.takePersistableUriPermission(uri, flags)
-            } catch (e: Exception) {
-                // ignore
-            }
+            } catch (e: Exception) {}
 
             val metadata = getUriMetadata(context, uri)
             var doc = repository.getPdfByUri(uri.toString())
             
             val key = intPreferencesKey("last_page_${uri.toString().hashCode()}")
             var savedPage = 0
-            try {
-                savedPage = context.dataStore.data.map { it[key] ?: 0 }.first()
-            } catch (e: Exception) {
-                // ignore
-            }
+            try { savedPage = context.dataStore.data.map { it[key] ?: 0 }.first() } catch (e: Exception) {}
 
-            if (savedPage <= 0 && doc != null) {
-                savedPage = doc.currentPage
-            }
+            if (savedPage <= 0 && doc != null) savedPage = doc.currentPage
             if (savedPage < 0) savedPage = 0
 
             if (doc == null) {
@@ -537,104 +514,56 @@ class PdfViewModel @Inject constructor(
 
     fun setDefaultReadingMode(mode: String) {
         viewModelScope.launch {
-            context.dataStore.edit { preferences ->
-                preferences[DEFAULT_READING_MODE_KEY] = mode
-                preferences[READING_MODE_KEY] = mode
+            context.dataStore.edit { 
+                it[DEFAULT_READING_MODE_KEY] = mode
+                it[READING_MODE_KEY] = mode
             }
         }
     }
 
     fun setPrimaryColorHex(hex: String) {
-        viewModelScope.launch {
-            context.dataStore.edit { preferences ->
-                preferences[PRIMARY_COLOR_KEY] = hex
-            }
-        }
+        viewModelScope.launch { context.dataStore.edit { it[PRIMARY_COLOR_KEY] = hex } }
     }
 
     fun setUiFontSize(size: Float) {
-        viewModelScope.launch {
-            context.dataStore.edit { preferences ->
-                preferences[UI_FONT_SIZE_KEY] = size
-            }
-        }
+        viewModelScope.launch { context.dataStore.edit { it[UI_FONT_SIZE_KEY] = size } }
     }
 
     fun setAutoSavePosition(b: Boolean) {
-        viewModelScope.launch {
-            context.dataStore.edit { preferences ->
-                preferences[AUTO_SAVE_POSITION_KEY] = b
-            }
-        }
+        viewModelScope.launch { context.dataStore.edit { it[AUTO_SAVE_POSITION_KEY] = b } }
     }
 
     fun setShowPageIndicator(b: Boolean) {
-        viewModelScope.launch {
-            context.dataStore.edit { preferences ->
-                preferences[SHOW_PAGE_INDICATOR_KEY] = b
-            }
-        }
+        viewModelScope.launch { context.dataStore.edit { it[SHOW_PAGE_INDICATOR_KEY] = b } }
     }
 
     fun setPageSpacing(spacing: Float) {
-        viewModelScope.launch {
-            context.dataStore.edit { preferences ->
-                preferences[PAGE_SPACING_KEY] = spacing
-            }
-        }
+        viewModelScope.launch { context.dataStore.edit { it[PAGE_SPACING_KEY] = spacing } }
     }
 
     fun setScrollSpeed(speed: Float) {
-        viewModelScope.launch {
-            context.dataStore.edit { preferences ->
-                preferences[SCROLL_SPEED_KEY] = speed
-            }
-        }
+        viewModelScope.launch { context.dataStore.edit { it[SCROLL_SPEED_KEY] = speed } }
     }
 
     fun setLinkOpenMode(mode: String) {
-        viewModelScope.launch {
-            context.dataStore.edit { preferences ->
-                preferences[LINK_OPEN_MODE_KEY] = mode
-            }
-        }
+        viewModelScope.launch { context.dataStore.edit { it[LINK_OPEN_MODE_KEY] = mode } }
     }
 
     fun setAutoPlayAudio(b: Boolean) {
-        viewModelScope.launch {
-            context.dataStore.edit { preferences ->
-                preferences[AUTO_PLAY_AUDIO_KEY] = b
-            }
-        }
+        viewModelScope.launch { context.dataStore.edit { it[AUTO_PLAY_AUDIO_KEY] = b } }
     }
 
     fun setAudioVolume(volume: Float) {
-        viewModelScope.launch {
-            context.dataStore.edit { preferences ->
-                preferences[AUDIO_VOLUME_KEY] = volume
-            }
-        }
+        viewModelScope.launch { context.dataStore.edit { it[AUDIO_VOLUME_KEY] = volume } }
     }
 
     fun setAppLanguage(lang: String) {
-        viewModelScope.launch {
-            context.dataStore.edit { preferences ->
-                preferences[APP_LANGUAGE_KEY] = lang
-            }
-        }
+        viewModelScope.launch { context.dataStore.edit { it[APP_LANGUAGE_KEY] = lang } }
     }
 
-    fun clearAllRecentFiles() {
-        viewModelScope.launch { repository.clearAllRecentFiles() }
-    }
-
-    fun clearAllBookmarks() {
-        viewModelScope.launch { repository.clearAllBookmarks() }
-    }
-
-    fun clearAllHighlights() {
-        viewModelScope.launch { repository.clearAllHighlights() }
-    }
+    fun clearAllRecentFiles() { viewModelScope.launch { repository.clearAllRecentFiles() } }
+    fun clearAllBookmarks() { viewModelScope.launch { repository.clearAllBookmarks() } }
+    fun clearAllHighlights() { viewModelScope.launch { repository.clearAllHighlights() } }
 
     fun toggleFavorite(uri: String, isFavorite: Boolean) {
         viewModelScope.launch {
@@ -648,9 +577,7 @@ class PdfViewModel @Inject constructor(
     fun deleteDocument(uri: String) {
         viewModelScope.launch {
             repository.deletePdf(uri)
-            if (_selectedUri.value == uri) {
-                closeDocument()
-            }
+            if (_selectedUri.value == uri) closeDocument()
         }
     }
 
@@ -724,9 +651,7 @@ class PdfViewModel @Inject constructor(
         checkIfCurrentPageIsBookmarked()
     }
 
-    fun setViewerLoading(isLoading: Boolean) {
-        _isViewerLoading.value = isLoading
-    }
+    fun setViewerLoading(isLoading: Boolean) { _isViewerLoading.value = isLoading }
 
     private var hasShownRestoreSnackbarForUri: String? = null
 
@@ -740,9 +665,7 @@ class PdfViewModel @Inject constructor(
         lastPageMap[uri] = page
         viewModelScope.launch {
             val key = intPreferencesKey("last_page_${uri.hashCode()}")
-            context.dataStore.edit { preferences ->
-                preferences[key] = page
-            }
+            context.dataStore.edit { it[key] = page }
             repository.updatePdfProgress(uri, page, _totalPages.value)
         }
     }
@@ -765,9 +688,7 @@ class PdfViewModel @Inject constructor(
             lastPageMap[uri] = page
             viewModelScope.launch {
                 val key = intPreferencesKey("last_page_${uri.hashCode()}")
-                context.dataStore.edit { preferences ->
-                    preferences[key] = page
-                }
+                context.dataStore.edit { it[key] = page }
                 repository.updatePdfProgress(uri, page, _totalPages.value)
                 _currentDocument.value = _currentDocument.value?.copy(currentPage = page)
             }
@@ -778,9 +699,7 @@ class PdfViewModel @Inject constructor(
     private val _errorState = MutableStateFlow<String?>(null)
     val errorState: StateFlow<String?> = _errorState.asStateFlow()
 
-    fun setError(error: String?) {
-        _errorState.value = error
-    }
+    fun setError(error: String?) { _errorState.value = error }
 
     private fun checkIfCurrentPageIsBookmarked() {
         val uri = _selectedUri.value ?: return
@@ -810,27 +729,27 @@ class PdfViewModel @Inject constructor(
     }
 
     fun setSortMode(mode: String) {
-        viewModelScope.launch { context.dataStore.edit { preferences -> preferences[SORT_MODE_KEY] = mode } }
+        viewModelScope.launch { context.dataStore.edit { it[SORT_MODE_KEY] = mode } }
     }
 
     fun setFilterMinSize(size: Float) {
-        viewModelScope.launch { context.dataStore.edit { preferences -> preferences[FILTER_MIN_SIZE_KEY] = size } }
+        viewModelScope.launch { context.dataStore.edit { it[FILTER_MIN_SIZE_KEY] = size } }
     }
 
     fun setFilterMaxSize(size: Float) {
-        viewModelScope.launch { context.dataStore.edit { preferences -> preferences[FILTER_MAX_SIZE_KEY] = size } }
+        viewModelScope.launch { context.dataStore.edit { it[FILTER_MAX_SIZE_KEY] = size } }
     }
 
     fun setFilterMinPages(pages: Int) {
-        viewModelScope.launch { context.dataStore.edit { preferences -> preferences[FILTER_MIN_PAGES_KEY] = pages } }
+        viewModelScope.launch { context.dataStore.edit { it[FILTER_MIN_PAGES_KEY] = pages } }
     }
 
     fun setFilterMaxPages(pages: Int) {
-        viewModelScope.launch { context.dataStore.edit { preferences -> preferences[FILTER_MAX_PAGES_KEY] = pages } }
+        viewModelScope.launch { context.dataStore.edit { it[FILTER_MAX_PAGES_KEY] = pages } }
     }
 
     fun setFilterDateRange(range: String) {
-        viewModelScope.launch { context.dataStore.edit { preferences -> preferences[FILTER_DATE_RANGE_KEY] = range } }
+        viewModelScope.launch { context.dataStore.edit { it[FILTER_DATE_RANGE_KEY] = range } }
     }
 
     fun resetFilters() {
@@ -846,26 +765,12 @@ class PdfViewModel @Inject constructor(
     }
 }
 
-// كلاسات صريحة ومغلقة النوع لمنع تداخل الاستدلال النجمي المحطم لمعالج KSP
-private data class KspParamsStep1(val minSize: Float, val maxSize: Float)
-private data class KspParamsStep2(val minSize: Float, val maxSize: Float, val minPages: Int)
-private data class KspParamsStep3(val minSize: Float, val maxSize: Float, val minPages: Int, val maxPages: Int)
-private data class KspParamsStep4(val minSize: Float, val maxSize: Float, val minPages: Int, val maxPages: Int, val dateRange: String)
-private data class KspFilterAndSortParams(
+private data class FilterParams(
     val minSize: Float,
     val maxSize: Float,
     val minPages: Int,
     val maxPages: Int,
     val dateRange: String,
-    val sortMode: String
-)
-
-private data class FilterParams(
-    val minSize: Long,
-    val maxSize: Long,
-    val minPages: Int,
-    val maxPages: Int,
-    val minDate: Long,
     val sortMode: String
 )
 
