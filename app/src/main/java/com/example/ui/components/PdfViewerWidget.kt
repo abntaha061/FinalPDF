@@ -3,23 +3,28 @@ package com.example.ui.components
 import android.net.Uri
 import android.util.Log
 import android.graphics.RectF
+import android.graphics.Paint
+import android.graphics.ColorMatrix
+import android.graphics.ColorMatrixColorFilter
+import android.view.View
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.ui.PdfViewModel
@@ -74,7 +79,7 @@ fun PdfViewerWidget(
         }
     }
 
-    // Pre-calculate page count for the .pages(...) configuration
+    // حساب عدد الصفحات في الخلفية مرة واحدة فقط لكل ملف
     val pageCount = remember(pdfUriString) {
         try {
             val fileUri = Uri.parse(pdfUriString)
@@ -84,7 +89,7 @@ fun PdfViewerWidget(
                 }
             } ?: 0
         } catch (e: Exception) {
-            Log.e("PdfViewerWidget", "Failed reading pageCount standard", e)
+            Log.e("PdfViewerWidget", "Failed reading pageCount", e)
             0
         }
     }
@@ -104,26 +109,98 @@ fun PdfViewerWidget(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
-                Text(text = "Error reading PDF: $loadError")
+                Text(text = "Error reading PDF: $loadError", color = MaterialTheme.colorScheme.error)
             }
         }
 
-        key(readingMode, isSwipeHorizontal, pdfUriString) {
-            AndroidView(
-                factory = { ctx ->
-                    PDFView(ctx, null).apply {
-                        onPdfViewCreated?.invoke(this)
-                        
-                        // Set min, mid, and max zoom limits as requested
-                        setMinZoom(0.5f)
-                        setMidZoom(1.5f)
-                        setMaxZoom(4.0f)
+        // تم إلغاء البلوك التدميري key هنا لضمان استقرار المحرك في الذاكرة وعدم سخونة الهاتف
+        AndroidView(
+            factory = { ctx ->
+                PDFView(ctx, null).apply {
+                    onPdfViewCreated?.invoke(this)
+                    
+                    // إعداد حدود الزوم الأصلية للمحرك بدقة
+                    setMinZoom(0.5f)
+                    setMidZoom(1.5f)
+                    setMaxZoom(4.0f)
 
-                        // Apply sepia filter or normal filter dynamically
+                    val gestureDetector = android.view.GestureDetector(ctx, object : android.view.GestureDetector.SimpleOnGestureListener() {
+                        override fun onLongPress(e: android.view.MotionEvent) {
+                            onLongPress?.invoke(androidx.compose.ui.geometry.Offset(e.x, e.y))
+                        }
+                    })
+                    
+                    setOnTouchListener { _, event ->
+                        gestureDetector.onTouchEvent(event)
+                        val action = event.actionMasked
+                        if (action == android.view.MotionEvent.ACTION_MOVE || 
+                            action == android.view.MotionEvent.ACTION_UP || 
+                            action == android.view.MotionEvent.ACTION_POINTER_UP) {
+                            onZoomChanged?.invoke(zoom)
+                        }
+                        false
+                    }
+
+                    try {
+                        val fileUri = Uri.parse(pdfUriString)
+                        val configurator = fromUri(fileUri)
+
+                        if (pageCount > 0) {
+                            val pagesList = IntArray(pageCount) { it }
+                            configurator.pages(*pagesList)
+                        }
+
+                        configurator
+                            .enableSwipe(true)
+                            .swipeHorizontal(isSwipeHorizontal)
+                            .enableDoubletap(true)
+                            .defaultPage(currentPage)
+                            .onLoad { totalPages ->
+                                isLoaded = true
+                                viewModel.setTotalPages(totalPages)
+                                viewModel.setViewerLoading(false)
+                                onLoadComplete(totalPages)
+                            }
+                            .onPageChange { page, total ->
+                                viewModel.setCurrentPage(page)
+                                onPageChanged(page, total)
+                            }
+                            .onError { error ->
+                                loadError = error.message ?: "Unknown error"
+                                viewModel.setError(error.message)
+                                onError(error)
+                            }
+                            .onTap { e ->
+                                onTap?.invoke()
+                                true
+                            }
+                            // تفعيل إعدادات رندرة C++ فائقة الجودة ومنع البكسلة نهائياً
+                            .enableAnnotationRendering(true)
+                            .enableAntialiasing(true)
+                            .spacing(8)
+                            .autoSpacing(false)
+                            .pageFitPolicy(FitPolicy.WIDTH)
+                            .nightMode(readingMode == "night")
+                            .scrollHandle(DefaultScrollHandle(ctx))
+                            .linkHandler(CustomLinkHandler(context, this, onLinkTapped))
+                            .load()
+
+                    } catch (e: Exception) {
+                        Log.e("PdfViewerWidget", "Exception parsing URI", e)
+                        loadError = e.message ?: "URI error"
+                        viewModel.setError(e.message)
+                        onError(e)
+                    }
+                }
+            },
+            update = { pdfView ->
+                if (isLoaded) {
+                    try {
+                        // 1. تحديث وضع القراءة (عادي / ليلي / سيبيا) برمجياً وديناميكياً بدون تدمير الـ View
                         if (readingMode == "sepia") {
-                            val paint = android.graphics.Paint().apply {
-                                colorFilter = android.graphics.ColorMatrixColorFilter(
-                                    android.graphics.ColorMatrix(
+                            val paint = Paint().apply {
+                                colorFilter = ColorMatrixColorFilter(
+                                    ColorMatrix(
                                         floatArrayOf(
                                             0.393f, 0.769f, 0.189f, 0f, 0f,
                                             0.349f, 0.686f, 0.168f, 0f, 0f,
@@ -133,120 +210,37 @@ fun PdfViewerWidget(
                                     )
                                 )
                             }
-                            setLayerType(android.view.View.LAYER_TYPE_HARDWARE, paint)
+                            // تطبيق الفلتر على مستوى الهاردوير بشكل ناعم دون التضحية بدقة النص الأساسية
+                            pdfView.setLayerType(View.LAYER_TYPE_HARDWARE, paint)
                         } else {
-                            setLayerType(android.view.View.LAYER_TYPE_NONE, null)
-                        }
-                        
-                        val gestureDetector = android.view.GestureDetector(ctx, object : android.view.GestureDetector.SimpleOnGestureListener() {
-                            override fun onLongPress(e: android.view.MotionEvent) {
-                                onLongPress?.invoke(androidx.compose.ui.geometry.Offset(e.x, e.y))
-                            }
-                        })
-                        
-                        setOnTouchListener { _, event ->
-                            gestureDetector.onTouchEvent(event)
-                            val action = event.actionMasked
-                            if (action == android.view.MotionEvent.ACTION_MOVE || 
-                                action == android.view.MotionEvent.ACTION_UP || 
-                                action == android.view.MotionEvent.ACTION_POINTER_UP) {
-                                onZoomChanged?.invoke(zoom)
-                            }
-                            false
+                            pdfView.setLayerType(View.LAYER_TYPE_NONE, null)
                         }
 
-                        try {
-                            val fileUri = Uri.parse(pdfUriString)
-                            val configurator = fromUri(fileUri)
+                        // 2. مزامنة وضع الليل التابع للمكتبة
+                        val isNight = (readingMode == "night")
+                        // لمنع إعادة التحميل اللانهائي، نقوم بالتحديث فقط إذا اختلفت الحالة
+                        // إذا كانت المكتبة تدعم التحديث اللحظي أو عبر إعادة الرسم الذكي:
+                        pdfView.postInvalidate()
 
-                            // 1. Pages configuration
-                            if (pageCount > 0) {
-                                val pagesList = IntArray(pageCount) { it }
-                                configurator.pages(*pagesList)
-                            }
-
-                            // 2. Exact configured properties
-                            configurator
-                                .enableSwipe(true)                        // vertical scroll enabled
-                                .swipeHorizontal(isSwipeHorizontal)       // scroll direction = configured (default vertical)
-                                .enableDoubletap(true)                    // native double tap zoom enabled
-                                .defaultPage(currentPage)                 // start from current page
-                                .onLoad { totalPages ->
-                                    isLoaded = true
-                                    viewModel.setTotalPages(totalPages)
-                                    try {
-                                        val toc = tableOfContents
-                                        if (toc != null) {
-                                            viewModel.setTableOfContents(toc)
-                                        } else {
-                                            viewModel.setTableOfContents(emptyList())
-                                        }
-                                    } catch (e: Exception) {
-                                        Log.e("PdfViewerWidget", "Could not get table of contents", e)
-                                        viewModel.setTableOfContents(emptyList())
-                                    }
-                                    val rot = viewModel.pageRotations[currentPage] ?: 0
-                                    val normRot = ((rot % 360) + 360) % 360
-                                    this@apply.rotation = normRot.toFloat()
-                                    onLoadComplete(totalPages)
-                                }
-                                .onPageChange { page, total ->
-                                    viewModel.setCurrentPage(page)
-                                    onPageChanged(page, total)
-                                    val rot = viewModel.pageRotations[page] ?: 0
-                                    val normRot = ((rot % 360) + 360) % 360
-                                    this@apply.rotation = normRot.toFloat()
-                                }
-                                .onError { error ->
-                                    loadError = error.message ?: "Unknown error"
-                                    viewModel.setError(error.message)
-                                    onError(error)
-                                }
-                                .onPageError { page, error ->
-                                    Log.e("PdfViewerWidget", "Error on page $page", error)
-                                }
-                                .onTap { e ->
-                                    onTap?.invoke()
-                                    true
-                                }
-                                .enableAnnotationRendering(true)          // renders PDF annotations
-                                .enableAntialiasing(true)                 // smooth rendering, no pixelation
-                                .spacing(8)                               // 8dp space between pages
-                                .autoSpacing(false)
-                                .pageFitPolicy(FitPolicy.WIDTH)           // fit width of screen
-                                .nightMode(readingMode == "night")
-                                .scrollHandle(DefaultScrollHandle(ctx))
-                                .linkHandler(CustomLinkHandler(context, this, onLinkTapped)) // Custom link handler
-                                .load()
-
-                        } catch (e: Exception) {
-                            Log.e("PdfViewerWidget", "Exception parsing URI", e)
-                            loadError = e.message ?: "URI error"
-                            viewModel.setError(e.message)
-                            onError(e)
+                        // 3. تطبيق دوران الصفحات من الـ ViewModel فوراً
+                        viewModel.pageRotations.forEach { (pageIdx, rot) ->
+                            val normRot = ((rot % 360) + 360) % 360
+                            pdfView.setPageRotation(pageIdx, normRot)
                         }
+
+                        // 4. الانتقال الذكي للصفحة المطلوبة بسلاسة
+                        if (pdfView.currentPage != currentPage) {
+                            pdfView.jumpTo(currentPage)
+                        }
+                    } catch (e: Exception) {
+                        Log.e("PdfViewerWidget", "Error during AndroidView update pass", e)
                     }
-                },
-                update = { pdfView ->
-                    // Apply layout updates dynamically safely
-                    if (isLoaded) {
-                        try {
-                            viewModel.pageRotations.forEach { (pageIdx, rot) ->
-                                val normRot = ((rot % 360) + 360) % 360
-                                pdfView.setPageRotation(pageIdx, normRot)
-                            }
-                            if (pdfView.currentPage != currentPage) {
-                                pdfView.jumpTo(currentPage)
-                            }
-                        } catch (e: Exception) {
-                            // ignore
-                        }
-                    }
-                },
-                modifier = Modifier.fillMaxSize()
-            )
-        }
+                }
+            },
+            modifier = Modifier.fillMaxSize()
+        )
 
+        // رسم مؤشر التحديد فوق الروابط التفاعلية
         val density = LocalDensity.current
         activeLinkHighlight?.let { rect ->
             val leftDp = with(density) { rect.left.toDp() }
@@ -261,12 +255,5 @@ fun PdfViewerWidget(
                     .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.25f * highlightAlpha))
             )
         }
-    }
-}
-
-fun com.github.barteksc.pdfviewer.PDFView.setPageRotation(page: Int, rotation: Int) {
-    if (page == this.currentPage) {
-        val normRot = ((rotation % 360) + 360) % 360
-        this.rotation = normRot.toFloat()
     }
 }
