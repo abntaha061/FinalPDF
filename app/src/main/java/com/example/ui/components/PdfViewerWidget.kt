@@ -18,7 +18,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -50,17 +50,27 @@ fun PdfViewerWidget(
     var loadError by remember { mutableStateOf<String?>(null) }
 
     var activeLinkHighlight by remember { mutableStateOf<RectF?>(null) }
-    val highlightAlpha = remember { Animatable(0f) }
+    var targetAlpha by remember { mutableStateOf(0f) }
+    val highlightAlpha by animateFloatAsState(
+        targetValue = targetAlpha,
+        animationSpec = tween(400),
+        label = "HighlightAlpha",
+        finishedListener = { alpha ->
+            if (alpha == 0f) {
+                activeLinkHighlight = null
+            }
+        }
+    )
     val coroutineScope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
 
     val onLinkTapped: (RectF) -> Unit = { rect ->
         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        activeLinkHighlight = rect
+        targetAlpha = 1f
         coroutineScope.launch {
-            activeLinkHighlight = rect
-            highlightAlpha.snapTo(1f)
-            highlightAlpha.animateTo(0f, animationSpec = tween(400))
-            activeLinkHighlight = null
+            kotlinx.coroutines.delay(100)
+            targetAlpha = 0f
         }
     }
 
@@ -132,18 +142,6 @@ fun PdfViewerWidget(
                             override fun onLongPress(e: android.view.MotionEvent) {
                                 onLongPress?.invoke(androidx.compose.ui.geometry.Offset(e.x, e.y))
                             }
-
-                            override fun onDoubleTap(e: android.view.MotionEvent): Boolean {
-                                val currentZoom = zoom
-                                val targetZoom = when {
-                                    currentZoom < 1.45f -> 1.5f
-                                    currentZoom < 2.95f -> 3.0f
-                                    else -> 1.0f
-                                }
-                                zoomWithAnimation(e.x, e.y, targetZoom)
-                                onZoomChanged?.invoke(targetZoom)
-                                return true
-                            }
                         })
                         
                         setOnTouchListener { _, event ->
@@ -171,7 +169,7 @@ fun PdfViewerWidget(
                             configurator
                                 .enableSwipe(true)                        // vertical scroll enabled
                                 .swipeHorizontal(isSwipeHorizontal)       // scroll direction = configured (default vertical)
-                                .enableDoubletap(false)                   // custom double tap managed manually above
+                                .enableDoubletap(true)                    // native double tap zoom enabled
                                 .defaultPage(currentPage)                 // start from current page
                                 .onLoad { totalPages ->
                                     isLoaded = true
@@ -239,7 +237,7 @@ fun PdfViewerWidget(
                 modifier = Modifier
                     .offset(x = leftDp, y = topDp)
                     .size(width = widthDp, height = heightDp)
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.25f * highlightAlpha.value))
+                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.25f * highlightAlpha))
             )
         }
     }
