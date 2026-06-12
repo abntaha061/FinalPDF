@@ -83,6 +83,7 @@ fun ViewerScreen(
 ) {
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
+    val snackbarHostState = remember { SnackbarHostState() }
     
     val audioViewModel: AudioViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
     val audioState by audioViewModel.audioState.collectAsState()
@@ -106,19 +107,18 @@ fun ViewerScreen(
     var pdfViewInst by remember { mutableStateOf<PDFView?>(null) }
 
     val pdfPickerLauncher = rememberLauncherForActivityResult(
-        contract = androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
-        onResult = { uri ->
-            if (uri != null) {
-                try {
-                    val takeFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION
-                    context.contentResolver.takePersistableUriPermission(uri, takeFlags)
-                } catch (e: Exception) {
-                    e.printStackTrace()
-                }
-                viewModel.selectDocument(context, uri)
+        contract = androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            try {
+                val takeFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+                context.contentResolver.takePersistableUriPermission(uri, takeFlags)
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
+            viewModel.selectDocument(context, uri)
         }
-    )
+    }
 
     // Fullscreen behavior implementation (hiding status/navigation bars safely)
     val activity = context as? Activity
@@ -208,7 +208,6 @@ fun ViewerScreen(
     }
 
     val clipboardManager = LocalClipboardManager.current
-    val snackbarHostState = remember { SnackbarHostState() }
 
     fun getSelectionText(docName: String, page: Int): String {
         val cleanName = docName.replace(".pdf", "", ignoreCase = true)
