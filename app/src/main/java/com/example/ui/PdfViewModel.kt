@@ -1,4 +1,3 @@
-@file:OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
 package com.example.ui
 
 import android.content.Context
@@ -14,7 +13,6 @@ import com.example.data.RecentFileEntity
 import com.example.data.BookmarkEntity
 import com.example.data.PdfRepository
 import com.example.util.PdfPrefetchManager
-import com.shockwave.pdfium.PdfDocument // 🌟 الحل السحري لمنع انهيار KSP 🌟
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -52,7 +50,6 @@ private val READING_SCROLL_MODE_KEY = stringPreferencesKey("reading_scroll_mode"
 private val FIT_MODE_KEY = stringPreferencesKey("fit_mode")
 private val DOUBLE_PAGE_KEY = booleanPreferencesKey("double_page_mode")
 
-// كلاسات صريحة لحماية المترجم من الفشل
 data class FilterParams(
     val minSize: Float,
     val maxSize: Float,
@@ -76,7 +73,7 @@ class PdfViewModel @Inject constructor(
     private val _isReady = MutableStateFlow(false)
     val isReady: StateFlow<Boolean> = _isReady.asStateFlow()
 
-    private val _isOnboardingDone = MutableStateFlow<Boolean?>(null)
+    private val _isOnboardingDone: MutableStateFlow<Boolean?> = MutableStateFlow(null)
     val isOnboardingDone: StateFlow<Boolean?> = _isOnboardingDone.asStateFlow()
 
     private val _sortMode = MutableStateFlow("الأحدث أولاً")
@@ -138,8 +135,7 @@ class PdfViewModel @Inject constructor(
     private val _securityExceptionUri = MutableStateFlow<String?>(null)
     val securityExceptionUri: StateFlow<String?> = _securityExceptionUri.asStateFlow()
 
-    // 🌟 حماية إضافية: تم تحويل الـ Pair إلى Class صريح 🌟
-    private val _largeFileUriPending = MutableStateFlow<LargeFileWarning?>(null)
+    private val _largeFileUriPending: MutableStateFlow<LargeFileWarning?> = MutableStateFlow(null)
     val largeFileUriPending: StateFlow<LargeFileWarning?> = _largeFileUriPending.asStateFlow()
 
     private val _showLargeFileWarningSnackbar = MutableStateFlow(false)
@@ -196,9 +192,9 @@ class PdfViewModel @Inject constructor(
     private val _isViewerLoading = MutableStateFlow(false)
     val isViewerLoading: StateFlow<Boolean> = _isViewerLoading.asStateFlow()
 
-    // 🌟 الحل الجذري لمنع KSP Crash باستخدام نوع محلي مبسط 🌟
-    private val _tableOfContents = MutableStateFlow<List<PdfDocument.Bookmark>>(emptyList())
-    val tableOfContents: StateFlow<List<PdfDocument.Bookmark>> = _tableOfContents.asStateFlow()
+    // 🌟 اللغم تم تفكيكه: أصبحنا نستخدم List<Any> لكي لا ينهار KSP 🌟
+    private val _tableOfContents = MutableStateFlow<List<Any>>(emptyList())
+    val tableOfContents: StateFlow<List<Any>> = _tableOfContents.asStateFlow()
 
     val prefetchManager = PdfPrefetchManager()
     
@@ -209,6 +205,7 @@ class PdfViewModel @Inject constructor(
     val isCurrentPageBookmarked: StateFlow<Boolean> = _isCurrentPageBookmarked.asStateFlow()
 
     init {
+        @OptIn(ExperimentalCoroutinesApi::class)
         viewModelScope.launch {
             _currentFilterParams.flatMapLatest { params ->
                 val minSizeL = (params.minSize * 1024 * 1024).toLong()
@@ -233,20 +230,16 @@ class PdfViewModel @Inject constructor(
             }
         }
 
+        viewModelScope.launch { repository.bookmarkedPdfs.collect { _favoriteDocuments.value = it } }
+
+        @OptIn(ExperimentalCoroutinesApi::class)
         viewModelScope.launch {
-            repository.bookmarkedPdfs.collect { _favoriteDocuments.value = it }
+            _selectedUri.flatMapLatest { uri -> if (uri != null) repository.getPageBookmarksForPdf(uri) else flowOf(emptyList()) }.collect { _activePageBookmarks.value = it }
         }
 
+        @OptIn(ExperimentalCoroutinesApi::class)
         viewModelScope.launch {
-            _selectedUri.flatMapLatest { uri ->
-                if (uri != null) repository.getPageBookmarksForPdf(uri) else flowOf(emptyList())
-            }.collect { _activePageBookmarks.value = it }
-        }
-
-        viewModelScope.launch {
-            _selectedUri.flatMapLatest { uri ->
-                if (uri != null) repository.getHighlightsForPdf(uri) else flowOf(emptyList())
-            }.collect { _activeHighlights.value = it }
+            _selectedUri.flatMapLatest { uri -> if (uri != null) repository.getHighlightsForPdf(uri) else flowOf(emptyList()) }.collect { _activeHighlights.value = it }
         }
 
         viewModelScope.launch {
@@ -283,13 +276,12 @@ class PdfViewModel @Inject constructor(
             }
         }
 
+        @OptIn(FlowPreview::class)
         viewModelScope.launch {
             currentPage.debounce(200L).collect { page ->
                 val fileUriString = _selectedUri.value
                 if (fileUriString != null && _prefetchEnabled.value) {
-                    try {
-                        prefetchManager.prefetchAround(page, _totalPages.value, Uri.parse(fileUriString), context)
-                    } catch (e: Exception) {}
+                    try { prefetchManager.prefetchAround(page, _totalPages.value, Uri.parse(fileUriString), context) } catch (e: Exception) {}
                 }
             }
         }
@@ -307,10 +299,7 @@ class PdfViewModel @Inject constructor(
         )
     }
 
-    fun completeOnboarding() {
-        viewModelScope.launch { context.dataStore.edit { it[ONBOARDING_DONE_KEY] = true } }
-    }
-
+    fun completeOnboarding() { viewModelScope.launch { context.dataStore.edit { it[ONBOARDING_DONE_KEY] = true } } }
     fun clearSecurityException() { _securityExceptionUri.value = null }
     fun clearLargeFilePending() { _largeFileUriPending.value = null }
     fun consumeLargeFileWarningSnackbar() { _showLargeFileWarningSnackbar.value = false }
@@ -324,20 +313,16 @@ class PdfViewModel @Inject constructor(
             val header = ByteArray(4)
             stream?.read(header)
             stream?.close()
-            if (!header.toString(Charsets.ISO_8859_1).startsWith("%PDF")) {
-                _errorState.value = "الملف ليس PDF صحيحاً أو تالف"
-                return
-            }
-        } catch (e: Exception) {
-            _errorState.value = "الملف ليس PDF صحيحاً أو تالف"
-            return
-        }
+            if (!header.toString(Charsets.ISO_8859_1).startsWith("%PDF")) { _errorState.value = "الملف ليس PDF صحيحاً أو تالف"; return }
+        } catch (e: Exception) { _errorState.value = "الملف ليس PDF صحيحاً أو تالف"; return }
         proceedWithLoading(context, uri)
     }
 
     fun toggleToolbarVisibility() { _isToolbarVisible.value = !_isToolbarVisible.value }
     fun setToolbarVisibility(visible: Boolean) { _isToolbarVisible.value = visible }
-    fun setTableOfContents(toc: List<PdfDocument.Bookmark>) { _tableOfContents.value = toc }
+    
+    // الدالة أصبحت تقبل List<Any> لكي لا يراها KSP
+    fun setTableOfContents(toc: List<Any>) { _tableOfContents.value = toc }
 
     fun toggleNightMode() {
         val nextValue = !_isNightMode.value
@@ -354,17 +339,8 @@ class PdfViewModel @Inject constructor(
     }
 
     fun toggleSwipeHorizontal() { _isSwipeHorizontal.value = !_isSwipeHorizontal.value }
-
-    fun setReadingScrollMode(mode: String) {
-        _readingScrollMode.value = mode
-        viewModelScope.launch { context.dataStore.edit { it[READING_SCROLL_MODE_KEY] = mode } }
-    }
-
-    fun setFitMode(mode: String) {
-        _fitMode.value = mode
-        viewModelScope.launch { context.dataStore.edit { it[FIT_MODE_KEY] = mode } }
-    }
-
+    fun setReadingScrollMode(mode: String) { viewModelScope.launch { context.dataStore.edit { it[READING_SCROLL_MODE_KEY] = mode } } }
+    fun setFitMode(mode: String) { viewModelScope.launch { context.dataStore.edit { it[FIT_MODE_KEY] = mode } } }
     fun toggleDoublePageMode() {
         val nextValue = !_isDoublePageEnabled.value
         _isDoublePageEnabled.value = nextValue
@@ -380,10 +356,7 @@ class PdfViewModel @Inject constructor(
             val pfd = context.contentResolver.openFileDescriptor(uri, "r")
             sizeBytes = pfd?.statSize ?: 0L
             pfd?.close()
-        } catch (e: SecurityException) {
-            _securityExceptionUri.value = uri.toString()
-            return
-        } catch (e: Exception) {}
+        } catch (e: SecurityException) { _securityExceptionUri.value = uri.toString(); return } catch (e: Exception) {}
 
         when {
             sizeBytes > 500L * 1024L * 1024L -> { _errorState.value = "الملف أكبر من 500 ميجابايت. هذا الحجم غير مدعوم."; return }
@@ -400,14 +373,8 @@ class PdfViewModel @Inject constructor(
             val header = ByteArray(4)
             stream?.read(header)
             stream?.close()
-            if (!header.toString(Charsets.ISO_8859_1).startsWith("%PDF")) {
-                _errorState.value = "الملف ليس PDF صحيحاً أو تالف"
-                return
-            }
-        } catch (e: Exception) {
-            _errorState.value = "الملف ليس PDF صحيحاً أو تالف"
-            return
-        }
+            if (!header.toString(Charsets.ISO_8859_1).startsWith("%PDF")) { _errorState.value = "الملف ليس PDF صحيحاً أو تالف"; return }
+        } catch (e: Exception) { _errorState.value = "الملف ليس PDF صحيحاً أو تالف"; return }
         proceedWithLoading(context, uri)
     }
 
