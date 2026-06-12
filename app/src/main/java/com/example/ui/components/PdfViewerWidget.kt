@@ -43,7 +43,8 @@ fun PdfViewerWidget(
     onPdfViewCreated: ((PDFView) -> Unit)? = null,
     onTap: (() -> Unit)? = null,
     onLongPress: ((androidx.compose.ui.geometry.Offset) -> Unit)? = null,
-    onZoomChanged: ((Float) -> Unit)? = null
+    onZoomChanged: ((Float) -> Unit)? = null,
+    onNavigateToWebView: ((String) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val pageSpacing by viewModel.pageSpacing.collectAsState()
@@ -217,7 +218,7 @@ fun PdfViewerWidget(
                                 .pageFitPolicy(FitPolicy.WIDTH)           // fit width of screen
                                 .nightMode(readingMode == "night")
                                 .scrollHandle(DefaultScrollHandle(ctx))
-                                .linkHandler(CustomLinkHandler(context, this, onLinkTapped)) // Custom link handler
+                                .linkHandler(CustomLinkHandler(context, this, onLinkTapped, onNavigateToWebView)) // Custom link handler
                                 .load()
 
                         } catch (e: Exception) {

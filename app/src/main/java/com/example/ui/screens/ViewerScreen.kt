@@ -87,7 +87,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 fun ViewerScreen(
     viewModel: PdfViewModel,
     onBack: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onNavigateToWebView: ((String) -> Unit)? = null
 ) {
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -459,7 +460,8 @@ fun ViewerScreen(
                             onZoomChanged = { zoom ->
                                 zoomLevel = zoom
                             },
-                            viewModel = viewModel
+                            viewModel = viewModel,
+                            onNavigateToWebView = onNavigateToWebView
                         )
                     }
 

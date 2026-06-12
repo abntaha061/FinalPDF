@@ -53,6 +53,11 @@ import com.example.ui.screens.OnboardingScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.AboutScreen
 import com.example.ui.screens.LanguageScreen
+import com.example.ui.screens.WebViewScreen
+import androidx.navigation.navArgument
+import androidx.navigation.NavType
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import com.example.ui.theme.MyApplicationTheme
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -371,6 +376,10 @@ class MainActivity : ComponentActivity() {
                                     viewModel = viewModel,
                                     onBack = {
                                         navController.popBackStack()
+                                    },
+                                    onNavigateToWebView = { url ->
+                                        val encoded = java.net.URLEncoder.encode(url, "UTF-8")
+                                        navController.navigate("webview?url=$encoded")
                                     }
                                 )
                             }
@@ -443,6 +452,36 @@ class MainActivity : ComponentActivity() {
                             ) {
                                 LanguageScreen(
                                     viewModel = viewModel,
+                                    onBack = {
+                                        navController.popBackStack()
+                                    }
+                                )
+                            }
+
+                            composable(
+                                route = "webview?url={url}",
+                                arguments = listOf(navArgument("url") { type = NavType.StringType; defaultValue = "" }),
+                                enterTransition = {
+                                    slideInVertically(
+                                        initialOffsetY = { it },
+                                        animationSpec = tween(350)
+                                    ) + fadeIn(animationSpec = tween(350))
+                                },
+                                exitTransition = {
+                                    slideOutVertically(
+                                        targetOffsetY = { it },
+                                        animationSpec = tween(350)
+                                    ) + fadeOut(animationSpec = tween(350))
+                                }
+                            ) { backStackEntry ->
+                                val encodedUrl = backStackEntry.arguments?.getString("url") ?: ""
+                                val initialUrl = try {
+                                    java.net.URLDecoder.decode(encodedUrl, "UTF-8")
+                                } catch (e: Exception) {
+                                    encodedUrl
+                                }
+                                WebViewScreen(
+                                    initialUrl = initialUrl,
                                     onBack = {
                                         navController.popBackStack()
                                     }

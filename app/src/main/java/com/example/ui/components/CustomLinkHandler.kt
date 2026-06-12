@@ -17,7 +17,8 @@ private val Context.settingsStore by preferencesDataStore(name = "pdf_reader_set
 class CustomLinkHandler(
     private val context: Context,
     private val pdfView: PDFView,
-    private val onLinkTapped: (RectF) -> Unit
+    private val onLinkTapped: (RectF) -> Unit,
+    private val onNavigateToWebView: ((String) -> Unit)? = null
 ) : LinkHandler {
 
     override fun handleLinkEvent(event: LinkTapEvent) {
@@ -101,14 +102,22 @@ class CustomLinkHandler(
                 Log.d("CustomLinkHandler", "Tapped http/https URI: $uriString with mode: $linkOpenMode")
                 when (linkOpenMode) {
                     "داخل التطبيق (WebView)" -> {
-                        openWebViewInDialog(context, uriString)
+                        if (onNavigateToWebView != null) {
+                            onNavigateToWebView.invoke(uriString)
+                        } else {
+                            openWebViewInDialog(context, uriString)
+                        }
                     }
                     "اسأل في كل مرة" -> {
                         android.app.AlertDialog.Builder(context)
                             .setTitle("فتح الرابط")
                             .setMessage("اختر طريقة فتح الرابط:\n$uriString")
                             .setPositiveButton("داخل التطبيق") { _, _ ->
-                                openWebViewInDialog(context, uriString)
+                                if (onNavigateToWebView != null) {
+                                    onNavigateToWebView.invoke(uriString)
+                                } else {
+                                    openWebViewInDialog(context, uriString)
+                                }
                             }
                             .setNegativeButton("المتصفح الخارجي") { _, _ ->
                                 launchExternalBrowser(context, uriString)
