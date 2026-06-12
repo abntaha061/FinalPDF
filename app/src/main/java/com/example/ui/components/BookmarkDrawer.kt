@@ -42,6 +42,8 @@ import com.github.barteksc.pdfviewer.PDFView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -58,6 +60,7 @@ fun BookmarkDrawer(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
     var selectedDrawerTab by remember { mutableStateOf(0) } // 0 = Bookmarks, 1 = Thumbnails
     
     // Add Bookmark Dialog custom states
@@ -181,6 +184,7 @@ fun BookmarkDrawer(
                                                     .fillMaxWidth()
                                                     .combinedClickable(
                                                         onLongClick = {
+                                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                                             bookmarkToDelete = bookmark
                                                             showDeleteDialog = true
                                                         },
@@ -410,6 +414,7 @@ fun BookmarkDrawer(
                         colors = ButtonDefaults.buttonColors(containerColor = AppPrimary),
                         onClick = {
                             if (bookmarkLabelInput.isNotBlank()) {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 onAddBookmark(bookmarkLabelInput)
                                 showAddDialog = false
                             }

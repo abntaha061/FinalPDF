@@ -71,6 +71,8 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import com.example.data.HighlightEntity
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.unit.IntOffset
 import androidx.activity.compose.rememberLauncherForActivityResult
 
@@ -83,6 +85,7 @@ fun ViewerScreen(
 ) {
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
     val snackbarHostState = remember { SnackbarHostState() }
     
     val audioViewModel: AudioViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
@@ -149,10 +152,43 @@ fun ViewerScreen(
     var zoomLevel by remember { mutableStateOf(1.0f) }
     var showZoomBadge by remember { mutableStateOf(false) }
 
+    var hasHapticTriggeredMax by remember { mutableStateOf(false) }
+    var hasHapticTriggeredMin by remember { mutableStateOf(false) }
+
     LaunchedEffect(zoomLevel) {
         showZoomBadge = true
+        if (zoomLevel >= 4.0f) {
+            if (!hasHapticTriggeredMax) {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                coroutineScope.launch {
+                    snackbarHostState.showSnackbar("أقصى تكبير", duration = SnackbarDuration.Short)
+                }
+                hasHapticTriggeredMax = true
+            }
+        } else {
+            hasHapticTriggeredMax = false
+        }
+
+        if (zoomLevel <= 0.5f) {
+            if (!hasHapticTriggeredMin) {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                coroutineScope.launch {
+                    snackbarHostState.showSnackbar("أدنى تصغير", duration = SnackbarDuration.Short)
+                }
+                hasHapticTriggeredMin = true
+            }
+        } else {
+            hasHapticTriggeredMin = false
+        }
+
         delay(2000)
         showZoomBadge = false
+    }
+
+    LaunchedEffect(audioState) {
+        if (audioState is AudioState.Playing) {
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        }
     }
 
     LaunchedEffect(showLargeFileWarningSnackbar) {
@@ -357,6 +393,7 @@ fun ViewerScreen(
                                 viewModel.toggleToolbarVisibility()
                             },
                             onLongPress = { offset ->
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 selectionPos = offset
                                 selectedText = getSelectionText(documentName, currentPage)
                                 isTextSelected = true
@@ -779,6 +816,7 @@ fun ViewerScreen(
                         }
                     },
                     onBookmarkClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                         viewModel.toggleCurrentPageBookmark()
                     },
                     onShareClick = {

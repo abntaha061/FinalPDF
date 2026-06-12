@@ -19,11 +19,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.animation.*
 import androidx.compose.animation.core.*
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -41,6 +46,231 @@ import java.io.File
 import java.io.FileOutputStream
 import java.text.DecimalFormat
 
+@Composable
+fun rememberShimmerBrush(): Brush {
+    val transition = rememberInfiniteTransition(label = "Shimmer")
+    val fullWidth = 1000f
+    val animatedOffset by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = fullWidth * 2f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "ShimmerOffset"
+    )
+    return Brush.linearGradient(
+        colors = listOf(AppSurface, Color(0xFF2A2A35), AppSurface),
+        start = Offset(animatedOffset - fullWidth, 0f),
+        end   = Offset(animatedOffset, 0f)
+    )
+}
+
+@Composable
+fun ShimmerEffect(modifier: Modifier = Modifier, shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(0.dp)) {
+    val brush = rememberShimmerBrush()
+    Box(
+        modifier = modifier
+            .clip(shape)
+            .background(brush)
+    )
+}
+
+@Composable
+fun SkeletonGrid() {
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(2),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .fillMaxHeight()
+    ) {
+        items(4) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                ShimmerEffect(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(160.dp),
+                    shape = RoundedCornerShape(16.dp)
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                ShimmerEffect(
+                    modifier = Modifier
+                        .fillMaxWidth(0.7f)
+                        .height(12.dp),
+                    shape = RoundedCornerShape(4.dp)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                ShimmerEffect(
+                    modifier = Modifier
+                        .fillMaxWidth(0.4f)
+                        .height(8.dp),
+                    shape = RoundedCornerShape(4.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun HomeScreenEmptyState() {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .fillMaxHeight(),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            val pulseTransition = rememberInfiniteTransition(label = "FolderPulse")
+            val folderScale by pulseTransition.animateFloat(
+                initialValue = 1f,
+                targetValue = 1.08f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(2000, easing = EaseInOut),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "FolderScale"
+            )
+
+            Icon(
+                imageVector = Icons.Outlined.FolderOpen,
+                contentDescription = null,
+                tint = AppPrimary.copy(alpha = 0.4f),
+                modifier = Modifier
+                    .size(96.dp)
+                    .scale(folderScale)
+                    .testTag("empty_folder_icon")
+            )
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            Text(
+                text = "لا توجد ملفات بعد",
+                color = AppTextPrimary,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.testTag("empty_title")
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = "اضغط على زر + بالأسفل لفتح أول ملف PDF",
+                color = AppTextSecondary,
+                fontSize = 14.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .padding(horizontal = 48.dp)
+                    .testTag("empty_subtitle")
+            )
+
+            Spacer(modifier = Modifier.height(40.dp))
+
+            val arrowTransition = rememberInfiniteTransition(label = "ArrowBounce")
+            val arrowOffsetY by arrowTransition.animateFloat(
+                initialValue = 0f,
+                targetValue = 12f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(800, easing = EaseInOut),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "ArrowOffset"
+            )
+
+            Icon(
+                imageVector = Icons.Default.KeyboardArrowDown,
+                contentDescription = null,
+                tint = AppPrimary,
+                modifier = Modifier
+                    .size(32.dp)
+                    .offset(y = arrowOffsetY.dp)
+                    .testTag("empty_arrow_down")
+            )
+        }
+    }
+}
+
+@Composable
+fun HomeScreenRealFiles(
+    recentPdfs: List<RecentFileEntity>,
+    viewModel: PdfViewModel,
+    onPdfOpened: () -> Unit
+) {
+    val context = LocalContext.current
+    val totalPdfs = recentPdfs.size
+    val lastOpenedDoc = recentPdfs.firstOrNull()
+    val lastOpenedName = lastOpenedDoc?.name ?: "—"
+    val lastOpenedPages = lastOpenedDoc?.totalPages?.let { if (it > 0) "$it" else "—" } ?: "—"
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        // 2. Row of 3 Stat Cards
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            StatCard(
+                title = "الملفات المفتوحة",
+                value = "$totalPdfs",
+                icon = Icons.Default.FolderOpen,
+                iconColor = AppPrimary,
+                modifier = Modifier.weight(1f)
+            )
+            StatCard(
+                title = "آخر فتح",
+                value = lastOpenedName,
+                icon = Icons.Default.RemoveRedEye,
+                iconColor = AppPrimaryVariant,
+                modifier = Modifier.weight(1.2f)
+            )
+            StatCard(
+                title = "الصفحات",
+                value = lastOpenedPages,
+                icon = Icons.Default.MenuBook,
+                iconColor = AppPrimary,
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(28.dp))
+
+        // Recent files title
+        Text(
+            text = "الملفات الأخيرة",
+            color = AppTextPrimary,
+            fontWeight = FontWeight.Bold,
+            fontSize = 18.sp,
+            modifier = Modifier.padding(bottom = 12.dp)
+        )
+
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(2),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+        ) {
+            items(recentPdfs, key = { it.uri }) { pdf ->
+                PdfGridCard(
+                    pdf = pdf,
+                    onClick = {
+                        viewModel.selectDocument(context, Uri.parse(pdf.uri))
+                        onPdfOpened()
+                    },
+                    onLongClick = {
+                        // Optional submenu or delete
+                        viewModel.deleteDocument(pdf.uri)
+                    }
+                )
+            }
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
@@ -50,6 +280,19 @@ fun HomeScreen(
 ) {
     val context = LocalContext.current
     val recentPdfs by viewModel.recentDocuments.collectAsState()
+    val isReady by viewModel.isReady.collectAsState()
+    var isLoading by remember { mutableStateOf(true) }
+    val haptic = LocalHapticFeedback.current
+
+    LaunchedEffect(isReady) {
+        if (isReady) {
+            kotlinx.coroutines.delay(500)
+            isLoading = false
+        } else {
+            kotlinx.coroutines.delay(800)
+            isLoading = false
+        }
+    }
 
     // SAF PDF Picker Launcher
     val pdfPickerLauncher = rememberLauncherForActivityResult(
@@ -75,7 +318,10 @@ fun HomeScreen(
             containerColor = AppBackground,
             floatingActionButton = {
                 FloatingActionButton(
-                    onClick = { pdfPickerLauncher.launch(arrayOf("application/pdf")) },
+                    onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        pdfPickerLauncher.launch(arrayOf("application/pdf"))
+                    },
                     containerColor = AppPrimary,
                     contentColor = Color.White,
                     shape = RoundedCornerShape(16.dp),
@@ -118,149 +364,21 @@ fun HomeScreen(
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                if (recentPdfs.isEmpty()) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.Center
-                        ) {
-                            val pulseTransition = rememberInfiniteTransition(label = "FolderPulse")
-                            val folderScale by pulseTransition.animateFloat(
-                                initialValue = 1f,
-                                targetValue = 1.08f,
-                                animationSpec = infiniteRepeatable(
-                                    animation = tween(1000, easing = EaseInOut),
-                                    repeatMode = RepeatMode.Reverse
-                                ),
-                                label = "FolderScale"
-                            )
-
-                            Icon(
-                                imageVector = Icons.Outlined.FolderOpen,
-                                contentDescription = null,
-                                tint = AppPrimary.copy(alpha = 0.4f),
-                                modifier = Modifier
-                                    .size(96.dp)
-                                    .scale(folderScale)
-                                    .testTag("empty_folder_icon")
-                            )
-
-                            Spacer(modifier = Modifier.height(20.dp))
-
-                            Text(
-                                text = "لا توجد ملفات بعد",
-                                color = AppTextPrimary,
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.testTag("empty_title")
-                            )
-
-                            Spacer(modifier = Modifier.height(8.dp))
-
-                            Text(
-                                text = "اضغط على زر + بالأسفل لفتح أول ملف PDF",
-                                color = AppTextSecondary,
-                                fontSize = 14.sp,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier
-                                    .padding(horizontal = 48.dp)
-                                    .testTag("empty_subtitle")
-                            )
-
-                            Spacer(modifier = Modifier.height(40.dp))
-
-                            val arrowTransition = rememberInfiniteTransition(label = "ArrowBounce")
-                            val arrowOffsetY by arrowTransition.animateFloat(
-                                initialValue = 0f,
-                                targetValue = 12f,
-                                animationSpec = infiniteRepeatable(
-                                    animation = tween(400, easing = EaseInOut),
-                                    repeatMode = RepeatMode.Reverse
-                                ),
-                                label = "ArrowOffset"
-                            )
-
-                            Icon(
-                                imageVector = Icons.Default.KeyboardArrowDown,
-                                contentDescription = null,
-                                tint = AppPrimary,
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .offset(y = arrowOffsetY.dp)
-                                    .testTag("empty_arrow_down")
-                            )
-                        }
-                    }
-                } else {
-                    // 2. Row of 3 Stat Cards
-                    val totalPdfs = recentPdfs.size
-                    val lastOpenedDoc = recentPdfs.firstOrNull()
-                    val lastOpenedName = lastOpenedDoc?.name ?: "—"
-                    val lastOpenedPages = lastOpenedDoc?.totalPages?.let { if (it > 0) "$it" else "—" } ?: "—"
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        StatCard(
-                            title = "الملفات المفتوحة",
-                            value = "$totalPdfs",
-                            icon = Icons.Default.FolderOpen,
-                            iconColor = AppPrimary,
-                            modifier = Modifier.weight(1f)
-                        )
-                        StatCard(
-                            title = "آخر فتح",
-                            value = lastOpenedName,
-                            icon = Icons.Default.RemoveRedEye,
-                            iconColor = AppPrimaryVariant,
-                            modifier = Modifier.weight(1.2f)
-                        )
-                        StatCard(
-                            title = "الصفحات",
-                            value = lastOpenedPages,
-                            icon = Icons.Default.MenuBook,
-                            iconColor = AppPrimary,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(28.dp))
-
-                    // Recent files title
-                    Text(
-                        text = "الملفات الأخيرة",
-                        color = AppTextPrimary,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp,
-                        modifier = Modifier.padding(bottom = 12.dp)
-                    )
-
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(2),
-                        horizontalArrangement = Arrangement.spacedBy(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f)
-                    ) {
-                        items(recentPdfs, key = { it.uri }) { pdf ->
-                            PdfGridCard(
-                                pdf = pdf,
-                                onClick = {
-                                    viewModel.selectDocument(context, Uri.parse(pdf.uri))
-                                    onPdfOpened()
-                                },
-                                onLongClick = {
-                                    // Optional submenu or delete
-                                    viewModel.deleteDocument(pdf.uri)
-                                }
-                            )
+                AnimatedContent(
+                    targetState = isLoading,
+                    transitionSpec = {
+                        fadeIn(animationSpec = tween(300)).togetherWith(fadeOut(animationSpec = tween(300)))
+                    },
+                    label = "HomeScreenLoading",
+                    modifier = Modifier.weight(1f)
+                ) { loading ->
+                    if (loading) {
+                        SkeletonGrid()
+                    } else {
+                        if (recentPdfs.isEmpty()) {
+                            HomeScreenEmptyState()
+                        } else {
+                            HomeScreenRealFiles(recentPdfs = recentPdfs, viewModel = viewModel, onPdfOpened = onPdfOpened)
                         }
                     }
                 }
