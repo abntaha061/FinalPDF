@@ -83,56 +83,50 @@ class PdfViewModel @Inject constructor(
     private val _filterDateRange = MutableStateFlow("الكل")
     val filterDateRange: StateFlow<String> = _filterDateRange.asStateFlow()
 
-    // السر هنا: تعريف التدفّقات الفرعية صراحة بأنواع بيانات واضحة لمنع انهيار مجمّع KSP
-    private val sizeFilterFlow: Flow<Pair<Float, Float>> = _filterMinSize.combine(_filterMaxSize) { minS, maxS -> 
-        Pair(minS, maxS) 
+    // الحل الجذري والأقوى: دمج التدفقات بشكل ثنائي متسلسل لمنع تكوين أي Star Projection يحطم معالج KSP
+    private val filterStep1: Flow<KspParamsStep1> = _filterMinSize.combine(_filterMaxSize) { minS, maxS ->
+        KspParamsStep1(minS, maxS)
     }
 
-    private val pageFilterFlow: Flow<Pair<Int, Int>> = _filterMinPages.combine(_filterMaxPages) { minP, maxP -> 
-        Pair(minP, maxP) 
+    private val filterStep2: Flow<KspParamsStep2> = filterStep1.combine(_filterMinPages) { s1, minP ->
+        KspParamsStep2(s1.minSize, s1.maxSize, minP)
     }
 
-    val activeFilterCount: StateFlow<Int> = combine(
-        sizeFilterFlow,
-        pageFilterFlow,
-        _filterDateRange
-    ) { sizeRange, pageRange, dateRange ->
-        val minS = sizeRange.first
-        val maxS = sizeRange.second
-        val minP = pageRange.first
-        val maxP = pageRange.second
+    private val filterStep3: Flow<KspParamsStep3> = filterStep2.combine(_filterMaxPages) { s2, maxP ->
+        KspParamsStep3(s2.minSize, s2.maxSize, s2.minPages, maxP)
+    }
+
+    private val filterStep4: Flow<KspParamsStep4> = filterStep3.combine(_filterDateRange) { s3, date ->
+        KspParamsStep4(s3.minSize, s3.maxSize, s3.minPages, s3.maxPages, date)
+    }
+
+    private val finalParamsFlow: Flow<KspFilterAndSortParams> = filterStep4.combine(_sortMode) { s4, sort ->
+        KspFilterAndSortParams(s4.minSize, s4.maxSize, s4.minPages, s4.maxPages, s4.dateRange, sort)
+    }
+
+    // حساب العداد والفلترة مباشرة من التدفق الموحد صريح النوع وثابت الاستقرار
+    val activeFilterCount: StateFlow<Int> = finalParamsFlow.map { params ->
         var count = 0
-        if (minS > 0f || maxS < 100f) count++
-        if (minP > 1 || maxP < 500) count++
-        if (dateRange != "الكل") count++
+        if (params.minSize > 0f || params.maxSize < 100f) count++
+        if (params.minPages > 1 || params.maxPages < 500) count++
+        if (params.dateRange != "الكل") count++
         count
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    val recentDocuments: StateFlow<List<RecentFileEntity>> = combine(
-        sizeFilterFlow,
-        pageFilterFlow,
-        _filterDateRange,
-        _sortMode
-    ) { sizeRange, pageRange, dateRange, sortMode ->
-        val minS = sizeRange.first
-        val maxS = sizeRange.second
-        val minP = pageRange.first
-        val maxP = pageRange.second
-        
-        val minSize = (minS * 1024 * 1024).toLong()
-        val maxSize = if (maxS >= 100f) Long.MAX_VALUE else (maxS * 1024 * 1024).toLong()
-        val minPages = minP
-        val maxPages = if (maxP >= 500) Int.MAX_VALUE else maxP
-        val minDate = when (dateRange) {
+    val recentDocuments: StateFlow<List<RecentFileEntity>> = finalParamsFlow.flatMapLatest { params ->
+        val minSize = (params.minSize * 1024 * 1024).toLong()
+        val maxSize = if (params.maxSize >= 100f) Long.MAX_VALUE else (params.maxSize * 1024 * 1024).toLong()
+        val minPages = params.minPages
+        val maxPages = if (params.maxPages >= 500) Int.MAX_VALUE else params.maxPages
+        val minDate = when (params.dateRange) {
             "24 ساعة" -> System.currentTimeMillis() - 24 * 60 * 60 * 1000L
             "أسبوع" -> System.currentTimeMillis() - 7 * 24 * 60 * 60 * 1000L
             "شهر" -> System.currentTimeMillis() - 30 * 24 * 60 * 60 * 1000L
             else -> 0L
         }
-        FilterParams(minSize, maxSize, minPages, maxPages, minDate, sortMode)
-    }.flatMapLatest { params ->
-        repository.getFilteredPdfs(params.minSize, params.maxSize, params.minPages, params.maxPages, params.minDate)
+        
+        repository.getFilteredPdfs(minSize, maxSize, minPages, maxPages, minDate)
             .map { list ->
                 when (params.sortMode) {
                     "الأقدم أولاً" -> list.sortedBy { it.lastOpenedAt }
@@ -851,6 +845,20 @@ class PdfViewModel @Inject constructor(
         }
     }
 }
+
+// كلاسات صريحة ومغلقة النوع لمنع تداخل الاستدلال النجمي المحطم لمعالج KSP
+private data class KspParamsStep1(val minSize: Float, val maxSize: Float)
+private data class KspParamsStep2(val minSize: Float, val maxSize: Float, val minPages: Int)
+private data class KspParamsStep3(val minSize: Float, val maxSize: Float, val minPages: Int, val maxPages: Int)
+private data class KspParamsStep4(val minSize: Float, val maxSize: Float, val minPages: Int, val maxPages: Int, val dateRange: String)
+private data class KspFilterAndSortParams(
+    val minSize: Float,
+    val maxSize: Float,
+    val minPages: Int,
+    val maxPages: Int,
+    val dateRange: String,
+    val sortMode: String
+)
 
 private data class FilterParams(
     val minSize: Long,
