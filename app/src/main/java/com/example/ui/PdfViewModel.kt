@@ -24,7 +24,6 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
-// تعريف الـ DataStore بشكل مركزي ومتاح للمشروع لمنع استنساخ الملف المسبب للكراش
 val Context.dataStore by preferencesDataStore(name = "pdf_reader_settings")
 
 private val NIGHT_MODE_KEY = booleanPreferencesKey("is_night_mode")
@@ -50,7 +49,6 @@ private val FILTER_MIN_PAGES_KEY = intPreferencesKey("filter_min_pages")
 private val FILTER_MAX_PAGES_KEY = intPreferencesKey("filter_max_pages")
 private val FILTER_DATE_RANGE_KEY = stringPreferencesKey("filter_date_range")
 
-// مفاتيح الإعدادات المتقدمة المضافة للتصفح والملاءمة
 private val READING_SCROLL_MODE_KEY = stringPreferencesKey("reading_scroll_mode")
 private val FIT_MODE_KEY = stringPreferencesKey("fit_mode")
 private val DOUBLE_PAGE_KEY = booleanPreferencesKey("double_page_mode")
@@ -85,9 +83,18 @@ class PdfViewModel @Inject constructor(
     private val _filterDateRange = MutableStateFlow("الكل")
     val filterDateRange: StateFlow<String> = _filterDateRange.asStateFlow()
 
+    // السر هنا: تعريف التدفّقات الفرعية صراحة بأنواع بيانات واضحة لمنع انهيار مجمّع KSP
+    private val sizeFilterFlow: Flow<Pair<Float, Float>> = _filterMinSize.combine(_filterMaxSize) { minS, maxS -> 
+        Pair(minS, maxS) 
+    }
+
+    private val pageFilterFlow: Flow<Pair<Int, Int>> = _filterMinPages.combine(_filterMaxPages) { minP, maxP -> 
+        Pair(minP, maxP) 
+    }
+
     val activeFilterCount: StateFlow<Int> = combine(
-        combine(_filterMinSize, _filterMaxSize) { minS, maxS -> minS to maxS },
-        combine(_filterMinPages, _filterMaxPages) { minP, maxP -> minP to maxP },
+        sizeFilterFlow,
+        pageFilterFlow,
         _filterDateRange
     ) { sizeRange, pageRange, dateRange ->
         val minS = sizeRange.first
@@ -103,8 +110,8 @@ class PdfViewModel @Inject constructor(
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val recentDocuments: StateFlow<List<RecentFileEntity>> = combine(
-        combine(_filterMinSize, _filterMaxSize) { minS, maxS -> minS to maxS },
-        combine(_filterMinPages, _filterMaxPages) { minP, maxP -> minP to maxP },
+        sizeFilterFlow,
+        pageFilterFlow,
         _filterDateRange,
         _sortMode
     ) { sizeRange, pageRange, dateRange, sortMode ->
@@ -139,7 +146,6 @@ class PdfViewModel @Inject constructor(
     val favoriteDocuments: StateFlow<List<RecentFileEntity>> = repository.bookmarkedPdfs
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // تهيئة الولايات الخاصة بإعدادات القراءة والتصفح
     private val _isNightMode = MutableStateFlow(false)
     val isNightMode: StateFlow<Boolean> = _isNightMode.asStateFlow()
 
@@ -238,8 +244,6 @@ class PdfViewModel @Inject constructor(
                 _filterMaxPages.value = preferences[FILTER_MAX_PAGES_KEY] ?: 500
                 _filterDateRange.value = preferences[FILTER_DATE_RANGE_KEY] ?: "الكل"
                 _appLanguage.value = preferences[APP_LANGUAGE_KEY] ?: "ar"
-                
-                // مزامنة ولايات التحكم بالإيماءات والتخطيط المتقدم المحدث
                 _readingScrollMode.value = preferences[READING_SCROLL_MODE_KEY] ?: "continuous"
                 _fitMode.value = preferences[FIT_MODE_KEY] ?: "width"
                 _isDoublePageEnabled.value = preferences[DOUBLE_PAGE_KEY] ?: false
@@ -318,7 +322,6 @@ class PdfViewModel @Inject constructor(
         _isToolbarVisible.value = visible
     }
 
-    // ولايات القارئ النشط للـ PDF
     private val _selectedUri = MutableStateFlow<String?>(null)
     val selectedUri: StateFlow<String?> = _selectedUri.asStateFlow()
 
@@ -395,7 +398,6 @@ class PdfViewModel @Inject constructor(
         _isSwipeHorizontal.value = !_isSwipeHorizontal.value
     }
 
-    // دوال وحوافظ تعيين أنماط التصفح والملاءمة المحدثة
     fun setReadingScrollMode(mode: String) {
         _readingScrollMode.value = mode
         viewModelScope.launch {
@@ -859,7 +861,6 @@ private data class FilterParams(
     val sortMode: String
 )
 
-// تم الإبقاء على كلاس الفاكتوري القياسي لضمان عدم حدوث تضارب برامترز بالملفات الأخرى
 class PdfViewModelFactory(
     private val repository: PdfRepository,
     private val context: Context
