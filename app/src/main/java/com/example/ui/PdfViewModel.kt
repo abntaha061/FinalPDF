@@ -3,6 +3,8 @@ package com.example.ui
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
@@ -21,37 +23,48 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
-val Context.dataStore by preferencesDataStore(name = "pdf_reader_settings")
+// 🌟 الحل الجذري: تحديد النوع الصريح DataStore<Preferences> يمنع انهيار KSP 🌟
+val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "pdf_reader_settings")
 
-private val NIGHT_MODE_KEY = booleanPreferencesKey("is_night_mode")
-private val READING_MODE_KEY = stringPreferencesKey("reading_mode")
-private val ONBOARDING_DONE_KEY = booleanPreferencesKey("onboarding_done")
+private val NIGHT_MODE_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("is_night_mode")
+private val READING_MODE_KEY: Preferences.Key<String> = stringPreferencesKey("reading_mode")
+private val ONBOARDING_DONE_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("onboarding_done")
 
-private val DEFAULT_READING_MODE_KEY = stringPreferencesKey("default_reading_mode")
-private val PRIMARY_COLOR_KEY = stringPreferencesKey("primary_color")
-private val UI_FONT_SIZE_KEY = floatPreferencesKey("ui_font_size")
-private val AUTO_SAVE_POSITION_KEY = booleanPreferencesKey("auto_save_position")
-private val SHOW_PAGE_INDICATOR_KEY = booleanPreferencesKey("show_page_indicator")
-private val PAGE_SPACING_KEY = floatPreferencesKey("page_spacing")
-private val SCROLL_SPEED_KEY = floatPreferencesKey("scroll_speed")
-private val LINK_OPEN_MODE_KEY = stringPreferencesKey("link_open_mode")
-private val AUTO_PLAY_AUDIO_KEY = booleanPreferencesKey("auto_play_audio")
-private val AUDIO_VOLUME_KEY = floatPreferencesKey("audio_volume")
-private val APP_LANGUAGE_KEY = stringPreferencesKey("app_language")
+private val DEFAULT_READING_MODE_KEY: Preferences.Key<String> = stringPreferencesKey("default_reading_mode")
+private val PRIMARY_COLOR_KEY: Preferences.Key<String> = stringPreferencesKey("primary_color")
+private val UI_FONT_SIZE_KEY: Preferences.Key<Float> = floatPreferencesKey("ui_font_size")
+private val AUTO_SAVE_POSITION_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("auto_save_position")
+private val SHOW_PAGE_INDICATOR_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("show_page_indicator")
+private val PAGE_SPACING_KEY: Preferences.Key<Float> = floatPreferencesKey("page_spacing")
+private val SCROLL_SPEED_KEY: Preferences.Key<Float> = floatPreferencesKey("scroll_speed")
+private val LINK_OPEN_MODE_KEY: Preferences.Key<String> = stringPreferencesKey("link_open_mode")
+private val AUTO_PLAY_AUDIO_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("auto_play_audio")
+private val AUDIO_VOLUME_KEY: Preferences.Key<Float> = floatPreferencesKey("audio_volume")
+private val APP_LANGUAGE_KEY: Preferences.Key<String> = stringPreferencesKey("app_language")
 
-private val SORT_MODE_KEY = stringPreferencesKey("sort_mode")
-private val FILTER_MIN_SIZE_KEY = floatPreferencesKey("filter_min_size")
-private val FILTER_MAX_SIZE_KEY = floatPreferencesKey("filter_max_size")
-private val FILTER_MIN_PAGES_KEY = intPreferencesKey("filter_min_pages")
-private val FILTER_MAX_PAGES_KEY = intPreferencesKey("filter_max_pages")
-private val FILTER_DATE_RANGE_KEY = stringPreferencesKey("filter_date_range")
+private val SORT_MODE_KEY: Preferences.Key<String> = stringPreferencesKey("sort_mode")
+private val FILTER_MIN_SIZE_KEY: Preferences.Key<Float> = floatPreferencesKey("filter_min_size")
+private val FILTER_MAX_SIZE_KEY: Preferences.Key<Float> = floatPreferencesKey("filter_max_size")
+private val FILTER_MIN_PAGES_KEY: Preferences.Key<Int> = intPreferencesKey("filter_min_pages")
+private val FILTER_MAX_PAGES_KEY: Preferences.Key<Int> = intPreferencesKey("filter_max_pages")
+private val FILTER_DATE_RANGE_KEY: Preferences.Key<String> = stringPreferencesKey("filter_date_range")
 
-private val READING_SCROLL_MODE_KEY = stringPreferencesKey("reading_scroll_mode")
-private val FIT_MODE_KEY = stringPreferencesKey("fit_mode")
-private val DOUBLE_PAGE_KEY = booleanPreferencesKey("double_page_mode")
+private val READING_SCROLL_MODE_KEY: Preferences.Key<String> = stringPreferencesKey("reading_scroll_mode")
+private val FIT_MODE_KEY: Preferences.Key<String> = stringPreferencesKey("fit_mode")
+private val DOUBLE_PAGE_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("double_page_mode")
+
+data class FilterParams(
+    val minSize: Float,
+    val maxSize: Float,
+    val minPages: Int,
+    val maxPages: Int,
+    val dateRange: String,
+    val sortMode: String
+)
 
 @HiltViewModel
 class PdfViewModel @Inject constructor(
@@ -59,145 +72,143 @@ class PdfViewModel @Inject constructor(
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
-    private val _isReady = MutableStateFlow(false)
+    // 🌟 تم تحديد النوع (Explicit Type) لكل سطر لعدم ترك مجال لتخمين المترجم 🌟
+    private val _isReady: MutableStateFlow<Boolean> = MutableStateFlow(false)
     val isReady: StateFlow<Boolean> = _isReady.asStateFlow()
 
-    private val _isOnboardingDone = MutableStateFlow<Boolean?>(null)
+    private val _isOnboardingDone: MutableStateFlow<Boolean?> = MutableStateFlow(null)
     val isOnboardingDone: StateFlow<Boolean?> = _isOnboardingDone.asStateFlow()
 
-    private val _sortMode = MutableStateFlow("الأحدث أولاً")
+    private val _sortMode: MutableStateFlow<String> = MutableStateFlow("الأحدث أولاً")
     val sortMode: StateFlow<String> = _sortMode.asStateFlow()
 
-    private val _filterMinSize = MutableStateFlow(0f)
+    private val _filterMinSize: MutableStateFlow<Float> = MutableStateFlow(0f)
     val filterMinSize: StateFlow<Float> = _filterMinSize.asStateFlow()
 
-    private val _filterMaxSize = MutableStateFlow(100f)
+    private val _filterMaxSize: MutableStateFlow<Float> = MutableStateFlow(100f)
     val filterMaxSize: StateFlow<Float> = _filterMaxSize.asStateFlow()
 
-    private val _filterMinPages = MutableStateFlow(1)
+    private val _filterMinPages: MutableStateFlow<Int> = MutableStateFlow(1)
     val filterMinPages: StateFlow<Int> = _filterMinPages.asStateFlow()
 
-    private val _filterMaxPages = MutableStateFlow(500)
+    private val _filterMaxPages: MutableStateFlow<Int> = MutableStateFlow(500)
     val filterMaxPages: StateFlow<Int> = _filterMaxPages.asStateFlow()
 
-    private val _filterDateRange = MutableStateFlow("الكل")
+    private val _filterDateRange: MutableStateFlow<String> = MutableStateFlow("الكل")
     val filterDateRange: StateFlow<String> = _filterDateRange.asStateFlow()
 
-    // 🌟 الحل النووي: منعنا الـ combine تماماً وبنينا State يدوية لـ KSP 🌟
-    private val _activeFilterCount = MutableStateFlow(0)
+    private val _activeFilterCount: MutableStateFlow<Int> = MutableStateFlow(0)
     val activeFilterCount: StateFlow<Int> = _activeFilterCount.asStateFlow()
 
-    private val _currentFilterParams = MutableStateFlow(
+    private val _currentFilterParams: MutableStateFlow<FilterParams> = MutableStateFlow(
         FilterParams(0f, 100f, 1, 500, "الكل", "الأحدث أولاً")
     )
 
-    private val _recentDocuments = MutableStateFlow<List<RecentFileEntity>>(emptyList())
+    private val _recentDocuments: MutableStateFlow<List<RecentFileEntity>> = MutableStateFlow(emptyList())
     val recentDocuments: StateFlow<List<RecentFileEntity>> = _recentDocuments.asStateFlow()
 
-    private val _favoriteDocuments = MutableStateFlow<List<RecentFileEntity>>(emptyList())
+    private val _favoriteDocuments: MutableStateFlow<List<RecentFileEntity>> = MutableStateFlow(emptyList())
     val favoriteDocuments: StateFlow<List<RecentFileEntity>> = _favoriteDocuments.asStateFlow()
 
-    private val _activePageBookmarks = MutableStateFlow<List<BookmarkEntity>>(emptyList())
+    private val _activePageBookmarks: MutableStateFlow<List<BookmarkEntity>> = MutableStateFlow(emptyList())
     val activePageBookmarks: StateFlow<List<BookmarkEntity>> = _activePageBookmarks.asStateFlow()
 
-    private val _activeHighlights = MutableStateFlow<List<HighlightEntity>>(emptyList())
+    private val _activeHighlights: MutableStateFlow<List<HighlightEntity>> = MutableStateFlow(emptyList())
     val activeHighlights: StateFlow<List<HighlightEntity>> = _activeHighlights.asStateFlow()
 
-    // خصائص إعدادات القراءة
-    private val _isNightMode = MutableStateFlow(false)
+    private val _isNightMode: MutableStateFlow<Boolean> = MutableStateFlow(false)
     val isNightMode: StateFlow<Boolean> = _isNightMode.asStateFlow()
 
-    private val _readingMode = MutableStateFlow("normal")
+    private val _readingMode: MutableStateFlow<String> = MutableStateFlow("normal")
     val readingMode: StateFlow<String> = _readingMode.asStateFlow()
 
-    private val _isSwipeHorizontal = MutableStateFlow(false)
+    private val _isSwipeHorizontal: MutableStateFlow<Boolean> = MutableStateFlow(false)
     val isSwipeHorizontal: StateFlow<Boolean> = _isSwipeHorizontal.asStateFlow()
 
-    private val _readingScrollMode = MutableStateFlow("continuous")
+    private val _readingScrollMode: MutableStateFlow<String> = MutableStateFlow("continuous")
     val readingScrollMode: StateFlow<String> = _readingScrollMode.asStateFlow()
 
-    private val _fitMode = MutableStateFlow("width")
+    private val _fitMode: MutableStateFlow<String> = MutableStateFlow("width")
     val fitMode: StateFlow<String> = _fitMode.asStateFlow()
 
-    private val _isDoublePageEnabled = MutableStateFlow(false)
+    private val _isDoublePageEnabled: MutableStateFlow<Boolean> = MutableStateFlow(false)
     val isDoublePageEnabled: StateFlow<Boolean> = _isDoublePageEnabled.asStateFlow()
 
-    private val _isToolbarVisible = MutableStateFlow(true)
+    private val _isToolbarVisible: MutableStateFlow<Boolean> = MutableStateFlow(true)
     val isToolbarVisible: StateFlow<Boolean> = _isToolbarVisible.asStateFlow()
 
-    private val _securityExceptionUri = MutableStateFlow<String?>(null)
+    private val _securityExceptionUri: MutableStateFlow<String?> = MutableStateFlow(null)
     val securityExceptionUri: StateFlow<String?> = _securityExceptionUri.asStateFlow()
 
-    private val _largeFileUriPending = MutableStateFlow<Pair<String, Long>?>(null)
+    private val _largeFileUriPending: MutableStateFlow<Pair<String, Long>?> = MutableStateFlow(null)
     val largeFileUriPending: StateFlow<Pair<String, Long>?> = _largeFileUriPending.asStateFlow()
 
-    private val _showLargeFileWarningSnackbar = MutableStateFlow(false)
+    private val _showLargeFileWarningSnackbar: MutableStateFlow<Boolean> = MutableStateFlow(false)
     val showLargeFileWarningSnackbar: StateFlow<Boolean> = _showLargeFileWarningSnackbar.asStateFlow()
 
-    private val _defaultReadingMode = MutableStateFlow("normal")
+    private val _defaultReadingMode: MutableStateFlow<String> = MutableStateFlow("normal")
     val defaultReadingMode: StateFlow<String> = _defaultReadingMode.asStateFlow()
 
-    private val _primaryColorHex = MutableStateFlow("#6C63FF")
+    private val _primaryColorHex: MutableStateFlow<String> = MutableStateFlow("#6C63FF")
     val primaryColorHex: StateFlow<String> = _primaryColorHex.asStateFlow()
 
-    private val _uiFontSize = MutableStateFlow(15f)
+    private val _uiFontSize: MutableStateFlow<Float> = MutableStateFlow(15f)
     val uiFontSize: StateFlow<Float> = _uiFontSize.asStateFlow()
 
-    private val _autoSavePosition = MutableStateFlow(true)
+    private val _autoSavePosition: MutableStateFlow<Boolean> = MutableStateFlow(true)
     val autoSavePosition: StateFlow<Boolean> = _autoSavePosition.asStateFlow()
 
-    private val _showPageIndicator = MutableStateFlow(true)
+    private val _showPageIndicator: MutableStateFlow<Boolean> = MutableStateFlow(true)
     val showPageIndicator: StateFlow<Boolean> = _showPageIndicator.asStateFlow()
 
-    private val _pageSpacing = MutableStateFlow(8f)
+    private val _pageSpacing: MutableStateFlow<Float> = MutableStateFlow(8f)
     val pageSpacing: StateFlow<Float> = _pageSpacing.asStateFlow()
 
-    private val _scrollSpeed = MutableStateFlow(1.0f)
+    private val _scrollSpeed: MutableStateFlow<Float> = MutableStateFlow(1.0f)
     val scrollSpeed: StateFlow<Float> = _scrollSpeed.asStateFlow()
 
-    private val _linkOpenMode = MutableStateFlow("المتصفح الافتراضي")
+    private val _linkOpenMode: MutableStateFlow<String> = MutableStateFlow("المتصفح الافتراضي")
     val linkOpenMode: StateFlow<String> = _linkOpenMode.asStateFlow()
 
-    private val _autoPlayAudio = MutableStateFlow(true)
+    private val _autoPlayAudio: MutableStateFlow<Boolean> = MutableStateFlow(true)
     val autoPlayAudio: StateFlow<Boolean> = _autoPlayAudio.asStateFlow()
 
-    private val _audioVolume = MutableStateFlow(1.0f)
+    private val _audioVolume: MutableStateFlow<Float> = MutableStateFlow(1.0f)
     val audioVolume: StateFlow<Float> = _audioVolume.asStateFlow()
 
-    private val _appLanguage = MutableStateFlow("ar")
+    private val _appLanguage: MutableStateFlow<String> = MutableStateFlow("ar")
     val appLanguage: StateFlow<String> = _appLanguage.asStateFlow()
 
-    // القارئ
-    private val _selectedUri = MutableStateFlow<String?>(null)
+    private val _selectedUri: MutableStateFlow<String?> = MutableStateFlow(null)
     val selectedUri: StateFlow<String?> = _selectedUri.asStateFlow()
 
-    private val _currentDocument = MutableStateFlow<RecentFileEntity?>(null)
+    private val _currentDocument: MutableStateFlow<RecentFileEntity?> = MutableStateFlow(null)
     val currentDocument: StateFlow<RecentFileEntity?> = _currentDocument.asStateFlow()
 
-    private val _currentPage = MutableStateFlow(0)
+    private val _currentPage: MutableStateFlow<Int> = MutableStateFlow(0)
     val currentPage: StateFlow<Int> = _currentPage.asStateFlow()
 
     val lastPageMap: MutableMap<String, Int> = mutableMapOf()
     val pageRotations: MutableMap<Int, Int> = mutableMapOf()
 
-    private val _totalPages = MutableStateFlow(0)
+    private val _totalPages: MutableStateFlow<Int> = MutableStateFlow(0)
     val totalPages: StateFlow<Int> = _totalPages.asStateFlow()
 
-    private val _isViewerLoading = MutableStateFlow(false)
+    private val _isViewerLoading: MutableStateFlow<Boolean> = MutableStateFlow(false)
     val isViewerLoading: StateFlow<Boolean> = _isViewerLoading.asStateFlow()
 
-    private val _tableOfContents = MutableStateFlow<List<com.shockwave.pdfium.PdfDocument.Bookmark>>(emptyList())
+    private val _tableOfContents: MutableStateFlow<List<com.shockwave.pdfium.PdfDocument.Bookmark>> = MutableStateFlow(emptyList())
     val tableOfContents: StateFlow<List<com.shockwave.pdfium.PdfDocument.Bookmark>> = _tableOfContents.asStateFlow()
 
-    val prefetchManager = PdfPrefetchManager()
-    private val _prefetchEnabled = MutableStateFlow(true)
+    val prefetchManager: PdfPrefetchManager = PdfPrefetchManager()
+    
+    private val _prefetchEnabled: MutableStateFlow<Boolean> = MutableStateFlow(true)
     val prefetchEnabled: StateFlow<Boolean> = _prefetchEnabled.asStateFlow()
 
-    private val _isCurrentPageBookmarked = MutableStateFlow(false)
+    private val _isCurrentPageBookmarked: MutableStateFlow<Boolean> = MutableStateFlow(false)
     val isCurrentPageBookmarked: StateFlow<Boolean> = _isCurrentPageBookmarked.asStateFlow()
 
     init {
-        // الاستماع لمعايير الفلترة الجديدة بدون استخدام combine
         @OptIn(ExperimentalCoroutinesApi::class)
         viewModelScope.launch {
             _currentFilterParams.flatMapLatest { params ->
@@ -276,7 +287,7 @@ class PdfViewModel @Inject constructor(
                 _fitMode.value = preferences[FIT_MODE_KEY] ?: "width"
                 _isDoublePageEnabled.value = preferences[DOUBLE_PAGE_KEY] ?: false
                 
-                triggerFilterUpdate() // تشغيل الفلتر بالقيم المحفوظة
+                triggerFilterUpdate()
                 _isReady.value = true
             }
         }
@@ -295,7 +306,6 @@ class PdfViewModel @Inject constructor(
         }
     }
 
-    // الدالة المسؤولة يدوياً عن دمج الفلاتر وحساب العداد لمنع KSP من التخمين
     private fun triggerFilterUpdate() {
         var count = 0
         if (_filterMinSize.value > 0f || _filterMaxSize.value < 100f) count++
@@ -565,7 +575,7 @@ class PdfViewModel @Inject constructor(
         }
     }
 
-    private val _errorState = MutableStateFlow<String?>(null)
+    private val _errorState: MutableStateFlow<String?> = MutableStateFlow(null)
     val errorState: StateFlow<String?> = _errorState.asStateFlow()
     fun setError(error: String?) { _errorState.value = error }
 
@@ -592,7 +602,6 @@ class PdfViewModel @Inject constructor(
         return Pair(name, size)
     }
 
-    // هنا نقوم بتحديث القيم وتشغيل دالة الفلترة يدوياً
     fun setSortMode(mode: String) {
         _sortMode.value = mode
         triggerFilterUpdate()
@@ -641,15 +650,6 @@ class PdfViewModel @Inject constructor(
         }
     }
 }
-
-private data class FilterParams(
-    val minSize: Float,
-    val maxSize: Float,
-    val minPages: Int,
-    val maxPages: Int,
-    val dateRange: String,
-    val sortMode: String
-)
 
 class PdfViewModelFactory(
     private val repository: PdfRepository,
