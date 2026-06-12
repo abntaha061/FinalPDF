@@ -3,6 +3,7 @@ package com.example.ui
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.*
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -19,8 +20,21 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import java.io.File
 
-// 🌟 تمت إزالة سطر الـ DataStore من هنا ونقله لملف DataStoreExt.kt لحماية المترجم من الانهيار 🌟
+// 🌟 بناء DataStore آمن لا ينهار أمامه المترجم KSP 🌟
+object SettingsDataStore {
+    @Volatile
+    private var INSTANCE: DataStore<Preferences>? = null
+
+    fun getInstance(context: Context): DataStore<Preferences> {
+        return INSTANCE ?: synchronized(this) {
+            INSTANCE ?: PreferenceDataStoreFactory.create(
+                produceFile = { File(context.filesDir, "datastore/pdf_reader_settings.preferences_pb") }
+            ).also { INSTANCE = it }
+        }
+    }
+}
 
 private val NIGHT_MODE_KEY: Preferences.Key<Boolean> = booleanPreferencesKey("is_night_mode")
 private val READING_MODE_KEY: Preferences.Key<String> = stringPreferencesKey("reading_mode")
@@ -69,6 +83,9 @@ class PdfViewModel @Inject constructor(
     @ApplicationContext private val context: Context
 ) : ViewModel() {
 
+    private val dataStore = SettingsDataStore.getInstance(context)
+
+    // 1. تعريف كل المتغيرات أولاً (Variable Declarations FIRST)
     private val _isReady: MutableStateFlow<Boolean> = MutableStateFlow(false)
     val isReady: StateFlow<Boolean> = _isReady.asStateFlow()
 
@@ -100,16 +117,16 @@ class PdfViewModel @Inject constructor(
         FilterParams(0f, 100f, 1, 500, "الكل", "الأحدث أولاً")
     )
 
-    private val _recentDocuments: MutableStateFlow<List<RecentFileEntity>> = MutableStateFlow(emptyList<RecentFileEntity>())
+    private val _recentDocuments: MutableStateFlow<List<RecentFileEntity>> = MutableStateFlow(emptyList())
     val recentDocuments: StateFlow<List<RecentFileEntity>> = _recentDocuments.asStateFlow()
 
-    private val _favoriteDocuments: MutableStateFlow<List<RecentFileEntity>> = MutableStateFlow(emptyList<RecentFileEntity>())
+    private val _favoriteDocuments: MutableStateFlow<List<RecentFileEntity>> = MutableStateFlow(emptyList())
     val favoriteDocuments: StateFlow<List<RecentFileEntity>> = _favoriteDocuments.asStateFlow()
 
-    private val _activePageBookmarks: MutableStateFlow<List<BookmarkEntity>> = MutableStateFlow(emptyList<BookmarkEntity>())
+    private val _activePageBookmarks: MutableStateFlow<List<BookmarkEntity>> = MutableStateFlow(emptyList())
     val activePageBookmarks: StateFlow<List<BookmarkEntity>> = _activePageBookmarks.asStateFlow()
 
-    private val _activeHighlights: MutableStateFlow<List<HighlightEntity>> = MutableStateFlow(emptyList<HighlightEntity>())
+    private val _activeHighlights: MutableStateFlow<List<HighlightEntity>> = MutableStateFlow(emptyList())
     val activeHighlights: StateFlow<List<HighlightEntity>> = _activeHighlights.asStateFlow()
 
     private val _isNightMode: MutableStateFlow<Boolean> = MutableStateFlow(false)
@@ -181,11 +198,12 @@ class PdfViewModel @Inject constructor(
     private val _currentDocument: MutableStateFlow<RecentFileEntity?> = MutableStateFlow(null)
     val currentDocument: StateFlow<RecentFileEntity?> = _currentDocument.asStateFlow()
 
+    // 🌟 هذا هو المتغير الذي كان يسبب الكراش لأنه كان معرفاً بعد הـ init 🌟
     private val _currentPage: MutableStateFlow<Int> = MutableStateFlow(0)
     val currentPage: StateFlow<Int> = _currentPage.asStateFlow()
 
-    val lastPageMap: MutableMap<String, Int> = mutableMapOf<String, Int>()
-    val pageRotations: MutableMap<Int, Int> = mutableMapOf<Int, Int>()
+    val lastPageMap: MutableMap<String, Int> = mutableMapOf()
+    val pageRotations: MutableMap<Int, Int> = mutableMapOf()
 
     private val _totalPages: MutableStateFlow<Int> = MutableStateFlow(0)
     val totalPages: StateFlow<Int> = _totalPages.asStateFlow()
@@ -193,7 +211,7 @@ class PdfViewModel @Inject constructor(
     private val _isViewerLoading: MutableStateFlow<Boolean> = MutableStateFlow(false)
     val isViewerLoading: StateFlow<Boolean> = _isViewerLoading.asStateFlow()
 
-    private val _tableOfContents: MutableStateFlow<List<Any>> = MutableStateFlow(emptyList<Any>())
+    private val _tableOfContents: MutableStateFlow<List<Any>> = MutableStateFlow(emptyList())
     val tableOfContents: StateFlow<List<Any>> = _tableOfContents.asStateFlow()
 
     val prefetchManager: PdfPrefetchManager = PdfPrefetchManager()
@@ -204,6 +222,10 @@ class PdfViewModel @Inject constructor(
     private val _isCurrentPageBookmarked: MutableStateFlow<Boolean> = MutableStateFlow(false)
     val isCurrentPageBookmarked: StateFlow<Boolean> = _isCurrentPageBookmarked.asStateFlow()
 
+    private val _errorState: MutableStateFlow<String?> = MutableStateFlow(null)
+    val errorState: StateFlow<String?> = _errorState.asStateFlow()
+
+    // 2. بلوك الـ init الآن بأمان في الأسفل (جميع المتغيرات أصبحت جاهزة للعمل)
     init {
         @OptIn(ExperimentalCoroutinesApi::class)
         viewModelScope.launch {
@@ -243,7 +265,7 @@ class PdfViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
-            context.dataStore.data.collect { preferences ->
+            dataStore.data.collect { preferences ->
                 _defaultReadingMode.value = preferences[DEFAULT_READING_MODE_KEY] ?: "normal"
                 val initialMode = preferences[READING_MODE_KEY] ?: preferences[DEFAULT_READING_MODE_KEY] ?: if (preferences[NIGHT_MODE_KEY] == true) "night" else "normal"
                 _readingMode.value = initialMode
@@ -278,6 +300,7 @@ class PdfViewModel @Inject constructor(
 
         @OptIn(FlowPreview::class)
         viewModelScope.launch {
+            // الآن currentPage معرفة مسبقاً ولن تسبب NullPointerException
             currentPage.debounce(200L).collect { page ->
                 val fileUriString = _selectedUri.value
                 if (fileUriString != null && _prefetchEnabled.value) {
@@ -287,6 +310,7 @@ class PdfViewModel @Inject constructor(
         }
     }
 
+    // 3. الدوال التابعة للكلاس
     private fun triggerFilterUpdate() {
         var count = 0
         if (_filterMinSize.value > 0f || _filterMaxSize.value < 100f) count++
@@ -299,7 +323,7 @@ class PdfViewModel @Inject constructor(
         )
     }
 
-    fun completeOnboarding() { viewModelScope.launch { context.dataStore.edit { it[ONBOARDING_DONE_KEY] = true } } }
+    fun completeOnboarding() { viewModelScope.launch { dataStore.edit { it[ONBOARDING_DONE_KEY] = true } } }
     fun clearSecurityException() { _securityExceptionUri.value = null }
     fun clearLargeFilePending() { _largeFileUriPending.value = null }
     fun consumeLargeFileWarningSnackbar() { _showLargeFileWarningSnackbar.value = false }
@@ -327,22 +351,22 @@ class PdfViewModel @Inject constructor(
         _isNightMode.value = nextValue
         val nextMode = if (nextValue) "night" else "normal"
         _readingMode.value = nextMode
-        viewModelScope.launch { context.dataStore.edit { it[NIGHT_MODE_KEY] = nextValue; it[READING_MODE_KEY] = nextMode } }
+        viewModelScope.launch { dataStore.edit { it[NIGHT_MODE_KEY] = nextValue; it[READING_MODE_KEY] = nextMode } }
     }
 
     fun setReadingMode(mode: String) {
         _readingMode.value = mode
         _isNightMode.value = (mode == "night")
-        viewModelScope.launch { context.dataStore.edit { it[READING_MODE_KEY] = mode; it[NIGHT_MODE_KEY] = (mode == "night") } }
+        viewModelScope.launch { dataStore.edit { it[READING_MODE_KEY] = mode; it[NIGHT_MODE_KEY] = (mode == "night") } }
     }
 
     fun toggleSwipeHorizontal() { _isSwipeHorizontal.value = !_isSwipeHorizontal.value }
-    fun setReadingScrollMode(mode: String) { viewModelScope.launch { context.dataStore.edit { it[READING_SCROLL_MODE_KEY] = mode } } }
-    fun setFitMode(mode: String) { viewModelScope.launch { context.dataStore.edit { it[FIT_MODE_KEY] = mode } } }
+    fun setReadingScrollMode(mode: String) { viewModelScope.launch { dataStore.edit { it[READING_SCROLL_MODE_KEY] = mode } } }
+    fun setFitMode(mode: String) { viewModelScope.launch { dataStore.edit { it[FIT_MODE_KEY] = mode } } }
     fun toggleDoublePageMode() {
         val nextValue = !_isDoublePageEnabled.value
         _isDoublePageEnabled.value = nextValue
-        viewModelScope.launch { context.dataStore.edit { it[DOUBLE_PAGE_KEY] = nextValue } }
+        viewModelScope.launch { dataStore.edit { it[DOUBLE_PAGE_KEY] = nextValue } }
     }
 
     fun selectDocument(context: Context, uri: Uri) {
@@ -385,7 +409,7 @@ class PdfViewModel @Inject constructor(
             var doc = repository.getPdfByUri(uri.toString())
             val key = intPreferencesKey("last_page_${uri.toString().hashCode()}")
             var savedPage = 0
-            try { savedPage = context.dataStore.data.map { it[key] ?: 0 }.first() } catch (e: Exception) {}
+            try { savedPage = dataStore.data.map { it[key] ?: 0 }.first() } catch (e: Exception) {}
             if (savedPage <= 0 && doc != null) savedPage = doc.currentPage
             if (savedPage < 0) savedPage = 0
 
@@ -413,17 +437,17 @@ class PdfViewModel @Inject constructor(
         }
     }
 
-    fun setDefaultReadingMode(mode: String) { viewModelScope.launch { context.dataStore.edit { it[DEFAULT_READING_MODE_KEY] = mode; it[READING_MODE_KEY] = mode } } }
-    fun setPrimaryColorHex(hex: String) { viewModelScope.launch { context.dataStore.edit { it[PRIMARY_COLOR_KEY] = hex } } }
-    fun setUiFontSize(size: Float) { viewModelScope.launch { context.dataStore.edit { it[UI_FONT_SIZE_KEY] = size } } }
-    fun setAutoSavePosition(b: Boolean) { viewModelScope.launch { context.dataStore.edit { it[AUTO_SAVE_POSITION_KEY] = b } } }
-    fun setShowPageIndicator(b: Boolean) { viewModelScope.launch { context.dataStore.edit { it[SHOW_PAGE_INDICATOR_KEY] = b } } }
-    fun setPageSpacing(spacing: Float) { viewModelScope.launch { context.dataStore.edit { it[PAGE_SPACING_KEY] = spacing } } }
-    fun setScrollSpeed(speed: Float) { viewModelScope.launch { context.dataStore.edit { it[SCROLL_SPEED_KEY] = speed } } }
-    fun setLinkOpenMode(mode: String) { viewModelScope.launch { context.dataStore.edit { it[LINK_OPEN_MODE_KEY] = mode } } }
-    fun setAutoPlayAudio(b: Boolean) { viewModelScope.launch { context.dataStore.edit { it[AUTO_PLAY_AUDIO_KEY] = b } } }
-    fun setAudioVolume(volume: Float) { viewModelScope.launch { context.dataStore.edit { it[AUDIO_VOLUME_KEY] = volume } } }
-    fun setAppLanguage(lang: String) { viewModelScope.launch { context.dataStore.edit { it[APP_LANGUAGE_KEY] = lang } } }
+    fun setDefaultReadingMode(mode: String) { viewModelScope.launch { dataStore.edit { it[DEFAULT_READING_MODE_KEY] = mode; it[READING_MODE_KEY] = mode } } }
+    fun setPrimaryColorHex(hex: String) { viewModelScope.launch { dataStore.edit { it[PRIMARY_COLOR_KEY] = hex } } }
+    fun setUiFontSize(size: Float) { viewModelScope.launch { dataStore.edit { it[UI_FONT_SIZE_KEY] = size } } }
+    fun setAutoSavePosition(b: Boolean) { viewModelScope.launch { dataStore.edit { it[AUTO_SAVE_POSITION_KEY] = b } } }
+    fun setShowPageIndicator(b: Boolean) { viewModelScope.launch { dataStore.edit { it[SHOW_PAGE_INDICATOR_KEY] = b } } }
+    fun setPageSpacing(spacing: Float) { viewModelScope.launch { dataStore.edit { it[PAGE_SPACING_KEY] = spacing } } }
+    fun setScrollSpeed(speed: Float) { viewModelScope.launch { dataStore.edit { it[SCROLL_SPEED_KEY] = speed } } }
+    fun setLinkOpenMode(mode: String) { viewModelScope.launch { dataStore.edit { it[LINK_OPEN_MODE_KEY] = mode } } }
+    fun setAutoPlayAudio(b: Boolean) { viewModelScope.launch { dataStore.edit { it[AUTO_PLAY_AUDIO_KEY] = b } } }
+    fun setAudioVolume(volume: Float) { viewModelScope.launch { dataStore.edit { it[AUDIO_VOLUME_KEY] = volume } } }
+    fun setAppLanguage(lang: String) { viewModelScope.launch { dataStore.edit { it[APP_LANGUAGE_KEY] = lang } } }
     fun clearAllRecentFiles() { viewModelScope.launch { repository.clearAllRecentFiles() } }
     fun clearAllBookmarks() { viewModelScope.launch { repository.clearAllBookmarks() } }
     fun clearAllHighlights() { viewModelScope.launch { repository.clearAllHighlights() } }
@@ -494,7 +518,7 @@ class PdfViewModel @Inject constructor(
     fun saveLastPage(uri: String, page: Int) {
         lastPageMap[uri] = page
         viewModelScope.launch {
-            context.dataStore.edit { it[intPreferencesKey("last_page_${uri.hashCode()}")] = page }
+            dataStore.edit { it[intPreferencesKey("last_page_${uri.hashCode()}")] = page }
             repository.updatePdfProgress(uri, page, _totalPages.value)
         }
     }
@@ -516,7 +540,7 @@ class PdfViewModel @Inject constructor(
         if (uri != null) {
             lastPageMap[uri] = page
             viewModelScope.launch {
-                context.dataStore.edit { it[intPreferencesKey("last_page_${uri.hashCode()}")] = page }
+                dataStore.edit { it[intPreferencesKey("last_page_${uri.hashCode()}")] = page }
                 repository.updatePdfProgress(uri, page, _totalPages.value)
                 _currentDocument.value = _currentDocument.value?.copy(currentPage = page)
             }
@@ -524,8 +548,6 @@ class PdfViewModel @Inject constructor(
         }
     }
 
-    private val _errorState: MutableStateFlow<String?> = MutableStateFlow(null)
-    val errorState: StateFlow<String?> = _errorState.asStateFlow()
     fun setError(error: String?) { _errorState.value = error }
 
     private fun checkIfCurrentPageIsBookmarked() {
@@ -554,32 +576,32 @@ class PdfViewModel @Inject constructor(
     fun setSortMode(mode: String) {
         _sortMode.value = mode
         triggerFilterUpdate()
-        viewModelScope.launch { context.dataStore.edit { it[SORT_MODE_KEY] = mode } }
+        viewModelScope.launch { dataStore.edit { it[SORT_MODE_KEY] = mode } }
     }
     fun setFilterMinSize(size: Float) {
         _filterMinSize.value = size
         triggerFilterUpdate()
-        viewModelScope.launch { context.dataStore.edit { it[FILTER_MIN_SIZE_KEY] = size } }
+        viewModelScope.launch { dataStore.edit { it[FILTER_MIN_SIZE_KEY] = size } }
     }
     fun setFilterMaxSize(size: Float) {
         _filterMaxSize.value = size
         triggerFilterUpdate()
-        viewModelScope.launch { context.dataStore.edit { it[FILTER_MAX_SIZE_KEY] = size } }
+        viewModelScope.launch { dataStore.edit { it[FILTER_MAX_SIZE_KEY] = size } }
     }
     fun setFilterMinPages(pages: Int) {
         _filterMinPages.value = pages
         triggerFilterUpdate()
-        viewModelScope.launch { context.dataStore.edit { it[FILTER_MIN_PAGES_KEY] = pages } }
+        viewModelScope.launch { dataStore.edit { it[FILTER_MIN_PAGES_KEY] = pages } }
     }
     fun setFilterMaxPages(pages: Int) {
         _filterMaxPages.value = pages
         triggerFilterUpdate()
-        viewModelScope.launch { context.dataStore.edit { it[FILTER_MAX_PAGES_KEY] = pages } }
+        viewModelScope.launch { dataStore.edit { it[FILTER_MAX_PAGES_KEY] = pages } }
     }
     fun setFilterDateRange(range: String) {
         _filterDateRange.value = range
         triggerFilterUpdate()
-        viewModelScope.launch { context.dataStore.edit { it[FILTER_DATE_RANGE_KEY] = range } }
+        viewModelScope.launch { dataStore.edit { it[FILTER_DATE_RANGE_KEY] = range } }
     }
     fun resetFilters() {
         _filterMinSize.value = 0f
@@ -589,7 +611,7 @@ class PdfViewModel @Inject constructor(
         _filterDateRange.value = "الكل"
         triggerFilterUpdate()
         viewModelScope.launch {
-            context.dataStore.edit {
+            dataStore.edit {
                 it[FILTER_MIN_SIZE_KEY] = 0f
                 it[FILTER_MAX_SIZE_KEY] = 100f
                 it[FILTER_MIN_PAGES_KEY] = 1
