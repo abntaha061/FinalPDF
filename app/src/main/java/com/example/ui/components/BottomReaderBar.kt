@@ -43,6 +43,12 @@ fun BottomReaderBar(
     onPrintClick: () -> Unit,
     onFileInfoClick: () -> Unit,
     onReadingModeClick: () -> Unit,
+    onSavePageAsImageClick: () -> Unit,
+    onRotateRightClick: () -> Unit,
+    onRotateLeftClick: () -> Unit,
+    onResetRotationClick: () -> Unit,
+    isScreenRotationLocked: Boolean,
+    onToggleLockScreenRotation: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -248,6 +254,57 @@ fun BottomReaderBar(
                             showMoreMenu = false
                             onGoToPageClick()
                         }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("حفظ الصفحة كصورة", color = AppTextPrimary, fontSize = 14.sp) },
+                        leadingIcon = { Icon(Icons.Default.Image, contentDescription = null, tint = AppPrimary) },
+                        onClick = {
+                            showMoreMenu = false
+                            onSavePageAsImageClick()
+                        },
+                        modifier = Modifier.testTag("save_page_as_image_option")
+                    )
+                    DropdownMenuItem(
+                        text = { Text("تدوير يميناً ٩٠°", color = AppTextPrimary, fontSize = 14.sp) },
+                        leadingIcon = { Icon(Icons.Default.RotateRight, contentDescription = null, tint = AppPrimary) },
+                        onClick = {
+                            showMoreMenu = false
+                            onRotateRightClick()
+                        },
+                        modifier = Modifier.testTag("rotate_right_option")
+                    )
+                    DropdownMenuItem(
+                        text = { Text("تدوير يساراً ٩٠°", color = AppTextPrimary, fontSize = 14.sp) },
+                        leadingIcon = { Icon(Icons.Default.RotateLeft, contentDescription = null, tint = AppPrimary) },
+                        onClick = {
+                            showMoreMenu = false
+                            onRotateLeftClick()
+                        },
+                        modifier = Modifier.testTag("rotate_left_option")
+                    )
+                    DropdownMenuItem(
+                        text = { Text("إعادة تعيين الدوران", color = AppTextPrimary, fontSize = 14.sp) },
+                        leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null, tint = AppPrimary) },
+                        onClick = {
+                            showMoreMenu = false
+                            onResetRotationClick()
+                        },
+                        modifier = Modifier.testTag("reset_rotation_option")
+                    )
+                    DropdownMenuItem(
+                        text = { Text("قفل اتجاه الشاشة", color = AppTextPrimary, fontSize = 14.sp) },
+                        leadingIcon = { 
+                            Icon(
+                                imageVector = if (isScreenRotationLocked) Icons.Default.Lock else Icons.Default.LockOpen, 
+                                contentDescription = null, 
+                                tint = AppPrimary
+                            ) 
+                        },
+                        onClick = {
+                            showMoreMenu = false
+                            onToggleLockScreenRotation()
+                        },
+                        modifier = Modifier.testTag("lock_rotation_option")
                     )
                 }
             }

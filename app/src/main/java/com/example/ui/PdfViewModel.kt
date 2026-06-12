@@ -131,6 +131,8 @@ class PdfViewModel(
 
     val lastPageMap: MutableMap<String, Int> = mutableMapOf()
 
+    val pageRotations: MutableMap<Int, Int> = mutableMapOf()
+
     private val _totalPages = MutableStateFlow(0)
     val totalPages: StateFlow<Int> = _totalPages.asStateFlow()
 
@@ -312,6 +314,7 @@ class PdfViewModel(
         _isViewerLoading.value = false
         hasShownRestoreSnackbarForUri = null
         _tableOfContents.value = emptyList()
+        pageRotations.clear()
     }
 
     fun toggleCurrentPageBookmark() {

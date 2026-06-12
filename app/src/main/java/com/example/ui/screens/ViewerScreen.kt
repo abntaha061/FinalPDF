@@ -1,11 +1,17 @@
 package com.example.ui.screens
 
 import android.app.Activity
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ActivityInfo
+import android.graphics.Bitmap
+import android.graphics.pdf.PdfRenderer
 import android.net.Uri
+import android.provider.MediaStore
 import android.print.PrintManager
 import android.util.Log
+import com.example.ui.components.setPageRotation
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -107,6 +113,9 @@ fun ViewerScreen(
     // Bottom Reader Bar visibility state connected to the ViewModel Flow
     val isToolbarVisible by viewModel.isToolbarVisible.collectAsState()
 
+    var isScreenRotationLocked by remember { mutableStateOf(false) }
+    var showSaveAsImageConfirmDialog by remember { mutableStateOf(false) }
+
     // Keep reference to PDFView for zooming levels
     var pdfViewInst by remember { mutableStateOf<PDFView?>(null) }
 
@@ -138,6 +147,7 @@ fun ViewerScreen(
                 val controller = WindowCompat.getInsetsController(window, window.decorView)
                 controller.show(WindowInsetsCompat.Type.systemBars())
             }
+            activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         }
     }
 
@@ -905,6 +915,52 @@ fun ViewerScreen(
                     },
                     onReadingModeClick = {
                         showReadingModeBottomSheet = true
+                    },
+                    onSavePageAsImageClick = {
+                        showSaveAsImageConfirmDialog = true
+                    },
+                    onRotateRightClick = {
+                        pdfViewInst?.let { pdfView ->
+                            val currentRot = viewModel.pageRotations[currentPage] ?: 0
+                            val newRot = currentRot + 90
+                            viewModel.pageRotations[currentPage] = newRot
+                            pdfView.setPageRotation(currentPage, newRot % 360)
+                            pdfView.invalidate()
+                        }
+                    },
+                    onRotateLeftClick = {
+                        pdfViewInst?.let { pdfView ->
+                            val currentRot = viewModel.pageRotations[currentPage] ?: 0
+                            val newRot = currentRot - 90
+                            viewModel.pageRotations[currentPage] = newRot
+                            pdfView.setPageRotation(currentPage, ((newRot % 360) + 360) % 360)
+                            pdfView.invalidate()
+                        }
+                    },
+                    onResetRotationClick = {
+                        pdfViewInst?.let { pdfView ->
+                            viewModel.pageRotations[currentPage] = 0
+                            pdfView.setPageRotation(currentPage, 0)
+                            pdfView.invalidate()
+                        }
+                    },
+                    isScreenRotationLocked = isScreenRotationLocked,
+                    onToggleLockScreenRotation = {
+                        val requestedState = !isScreenRotationLocked
+                        isScreenRotationLocked = requestedState
+                        activity?.let { act ->
+                            if (requestedState) {
+                                act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LOCKED
+                                coroutineScope.launch {
+                                    snackbarHostState.showSnackbar("تم قفل اتجاه الشاشة")
+                                }
+                            } else {
+                                act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                                coroutineScope.launch {
+                                    snackbarHostState.showSnackbar("تم فتح قفل الاتجاه")
+                                }
+                            }
+                        }
                     }
                 )
             }
@@ -921,6 +977,112 @@ fun ViewerScreen(
                             snackbarHostState.showSnackbar("تم الانتقال إلى الصفحة $targetPageVal")
                         }
                     }
+                )
+            }
+
+            // Save Page As Image Confirmation Dialog
+            if (showSaveAsImageConfirmDialog) {
+                AlertDialog(
+                    onDismissRequest = { showSaveAsImageConfirmDialog = false },
+                    title = {
+                        Text(
+                            text = "حفظ الصفحة الحالية",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = AppTextPrimary
+                        )
+                    },
+                    text = {
+                        Text(
+                            text = "سيتم حفظ الصفحة ${currentPage + 1} كصورة PNG في معرض الصور",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = AppTextSecondary
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                showSaveAsImageConfirmDialog = false
+                                coroutineScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                    try {
+                                        val fileUriStr = activeUri ?: return@launch
+                                        val fileUri = Uri.parse(fileUriStr)
+                                        
+                                        val pfd = context.contentResolver.openFileDescriptor(fileUri, "r")
+                                        if (pfd == null) {
+                                            coroutineScope.launch {
+                                                snackbarHostState.showSnackbar("خطأ: تعذر فتح الملف")
+                                            }
+                                            return@launch
+                                        }
+                                        
+                                        pfd.use { parcelFileDescriptor ->
+                                            val pdfRenderer = PdfRenderer(parcelFileDescriptor)
+                                            val page = pdfRenderer.openPage(currentPage)
+                                            
+                                            val bitmap = Bitmap.createBitmap(
+                                                page.width * 2,
+                                                page.height * 2,
+                                                Bitmap.Config.ARGB_8888
+                                            )
+                                            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                            page.close()
+                                            pdfRenderer.close()
+                                            
+                                            val values = ContentValues().apply {
+                                                put(MediaStore.Images.Media.DISPLAY_NAME, "pdf_page_${currentPage + 1}_${System.currentTimeMillis()}.png")
+                                                put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+                                                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/قارئ PDF")
+                                            }
+                                            val savedUri = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                                            
+                                            if (savedUri != null) {
+                                                context.contentResolver.openOutputStream(savedUri)?.use { outputStream ->
+                                                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, outputStream)
+                                                }
+                                                
+                                                coroutineScope.launch {
+                                                    val result = snackbarHostState.showSnackbar(
+                                                        message = "تم الحفظ في معرض الصور ✓",
+                                                        actionLabel = "عرض",
+                                                        duration = SnackbarDuration.Short
+                                                    )
+                                                    if (result == SnackbarResult.ActionPerformed) {
+                                                        try {
+                                                            val intent = Intent(Intent.ACTION_VIEW, savedUri).apply {
+                                                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                            }
+                                                            context.startActivity(intent)
+                                                        } catch (e: Exception) {
+                                                            Log.e("ViewerScreen", "Error opening saved image", e)
+                                                        }
+                                                    }
+                                                }
+                                            } else {
+                                                coroutineScope.launch {
+                                                    snackbarHostState.showSnackbar("خطأ في حفظ الصورة")
+                                                }
+                                            }
+                                        }
+                                    } catch (e: Exception) {
+                                        Log.e("ViewerScreen", "Error rendering/saving PDF page", e)
+                                        coroutineScope.launch {
+                                            snackbarHostState.showSnackbar("فشل في حفظ الصفحة كصورة: ${e.message}")
+                                        }
+                                    }
+                                }
+                            }
+                        ) {
+                            Text("حفظ", color = AppPrimary, fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showSaveAsImageConfirmDialog = false }) {
+                            Text("إلغاء", color = AppTextSecondary)
+                        }
+                    },
+                    containerColor = AppSurface,
+                    modifier = Modifier.testTag("save_page_confirm_dialog")
                 )
             }
 

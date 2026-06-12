@@ -185,11 +185,17 @@ fun PdfViewerWidget(
                                         Log.e("PdfViewerWidget", "Could not get table of contents", e)
                                         viewModel.setTableOfContents(emptyList())
                                     }
+                                    val rot = viewModel.pageRotations[currentPage] ?: 0
+                                    val normRot = ((rot % 360) + 360) % 360
+                                    this@apply.rotation = normRot.toFloat()
                                     onLoadComplete(totalPages)
                                 }
                                 .onPageChange { page, total ->
                                     viewModel.setCurrentPage(page)
                                     onPageChanged(page, total)
+                                    val rot = viewModel.pageRotations[page] ?: 0
+                                    val normRot = ((rot % 360) + 360) % 360
+                                    this@apply.rotation = normRot.toFloat()
                                 }
                                 .onError { error ->
                                     loadError = error.message ?: "Unknown error"
@@ -225,6 +231,10 @@ fun PdfViewerWidget(
                     // Apply layout updates dynamically safely
                     if (isLoaded) {
                         try {
+                            viewModel.pageRotations.forEach { (pageIdx, rot) ->
+                                val normRot = ((rot % 360) + 360) % 360
+                                pdfView.setPageRotation(pageIdx, normRot)
+                            }
                             if (pdfView.currentPage != currentPage) {
                                 pdfView.jumpTo(currentPage)
                             }
@@ -251,5 +261,12 @@ fun PdfViewerWidget(
                     .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.25f * highlightAlpha))
             )
         }
+    }
+}
+
+fun com.github.barteksc.pdfviewer.PDFView.setPageRotation(page: Int, rotation: Int) {
+    if (page == this.currentPage) {
+        val normRot = ((rotation % 360) + 360) % 360
+        this.rotation = normRot.toFloat()
     }
 }
