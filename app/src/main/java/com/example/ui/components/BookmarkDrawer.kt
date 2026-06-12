@@ -20,6 +20,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowLeft
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.core.tween
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -57,7 +63,9 @@ fun BookmarkDrawer(
     onAddBookmark: (String) -> Unit,
     onDeleteBookmark: (BookmarkEntity) -> Unit,
     onCloseDrawer: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    tableOfContents: List<com.shockwave.pdfium.PdfDocument.Bookmark> = emptyList(),
+    onTocItemClicked: ((com.shockwave.pdfium.PdfDocument.Bookmark) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
@@ -111,6 +119,8 @@ fun BookmarkDrawer(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
+                val showTocTab = tableOfContents.isNotEmpty()
+
                 // Tab selectors: "الإشارات المرجعية" and "الصفحات المصغرة"
                 TabRow(
                     selectedTabIndex = selectedDrawerTab,
@@ -144,6 +154,20 @@ fun BookmarkDrawer(
                         },
                         modifier = Modifier.testTag("thumbnails_tab")
                     )
+                    if (showTocTab) {
+                        Tab(
+                            selected = selectedDrawerTab == 2,
+                            onClick = { selectedDrawerTab = 2 },
+                            text = {
+                                Text(
+                                    "الفهرس",
+                                    fontSize = 13.sp,
+                                    fontWeight = if (selectedDrawerTab == 2) FontWeight.Bold else FontWeight.Normal
+                                )
+                            },
+                            modifier = Modifier.testTag("toc_tab")
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
@@ -279,7 +303,7 @@ fun BookmarkDrawer(
                                 )
                             }
                         }
-                    } else {
+                    } else if (selectedDrawerTab == 1) {
                         // TAB 2: THUMBNAILS
                         if (totalPages == 0) {
                             Box(
@@ -380,6 +404,87 @@ fun BookmarkDrawer(
                                 }
                             }
                         }
+                    } else if (selectedDrawerTab == 2 && showTocTab) {
+                        // TAB 3: TOC (Table of Contents)
+                        val expandedMap = remember { mutableStateMapOf<String, Boolean>() }
+
+                        Column(modifier = Modifier.fillMaxSize()) {
+                            // Top controls: "توسيع الكل" and "طي الكل"
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Start
+                            ) {
+                                TextButton(
+                                    onClick = {
+                                        val parentKeys = getAllParentKeys(tableOfContents)
+                                        expandedMap.clear()
+                                        parentKeys.forEach { expandedMap[it] = true }
+                                    },
+                                    modifier = Modifier.testTag("toc_expand_all")
+                                ) {
+                                    Text(
+                                        text = "توسيع الكل",
+                                        color = AppPrimary,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .height(16.dp)
+                                        .width(1.dp)
+                                        .background(AppTextSecondary.copy(alpha = 0.3f))
+                                )
+
+                                TextButton(
+                                    onClick = {
+                                        expandedMap.clear()
+                                    },
+                                    modifier = Modifier.testTag("toc_collapse_all")
+                                ) {
+                                    Text(
+                                        text = "طي الكل",
+                                        color = AppTextSecondary,
+                                        fontSize = 13.sp
+                                    )
+                                }
+                            }
+
+                            HorizontalDivider(
+                                thickness = 1.dp,
+                                color = AppBottomBarBg.copy(alpha = 0.5f)
+                            )
+
+                            LazyColumn(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .testTag("toc_lazy_column")
+                            ) {
+                                items(tableOfContents) { rootItem ->
+                                    TocItemRow(
+                                        item = rootItem,
+                                        level = 0,
+                                        expandedMap = expandedMap,
+                                        onToggleExpand = { key ->
+                                            expandedMap[key] = !(expandedMap[key] ?: false)
+                                        },
+                                        onJumpTo = { item ->
+                                            if (onTocItemClicked != null) {
+                                                onTocItemClicked(item)
+                                            } else {
+                                                onCloseDrawer()
+                                                pdfViewInst?.jumpTo(item.pageIdx.toInt())
+                                                onJumpToPage(item.pageIdx.toInt())
+                                            }
+                                        }
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -473,6 +578,112 @@ fun BookmarkDrawer(
                 },
                 containerColor = AppSurface
             )
+        }
+    }
+}
+
+private fun getAllParentKeys(items: List<com.shockwave.pdfium.PdfDocument.Bookmark>): List<String> {
+    val keys = mutableListOf<String>()
+    fun traverse(node: com.shockwave.pdfium.PdfDocument.Bookmark) {
+        val hasChildren = node.children != null && node.children.isNotEmpty()
+        if (hasChildren) {
+            keys.add("${node.title}_${node.pageIdx}")
+            node.children.forEach { child ->
+                traverse(child)
+            }
+        }
+    }
+    items.forEach { traverse(it) }
+    return keys
+}
+
+@Composable
+private fun TocItemRow(
+    item: com.shockwave.pdfium.PdfDocument.Bookmark,
+    level: Int,
+    expandedMap: Map<String, Boolean>,
+    onToggleExpand: (String) -> Unit,
+    onJumpTo: (com.shockwave.pdfium.PdfDocument.Bookmark) -> Unit
+) {
+    if (level >= 3) return
+
+    val key = "${item.title}_${item.pageIdx}"
+    val hasChildren = item.children != null && item.children.isNotEmpty()
+    val isExpanded = expandedMap[key] == true
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable {
+                    if (hasChildren) {
+                        onToggleExpand(key)
+                    } else {
+                        onJumpTo(item)
+                    }
+                }
+                .padding(vertical = 12.dp, horizontal = 16.dp)
+                .padding(start = (level * 24).dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            if (hasChildren) {
+                Icon(
+                    imageVector = if (isExpanded) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowLeft,
+                    contentDescription = if (isExpanded) "Collapse" else "Expand",
+                    tint = AppPrimary,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+            } else {
+                Spacer(modifier = Modifier.width(26.dp))
+            }
+
+            Text(
+                text = item.title ?: "",
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontSize = if (level == 0) 15.sp else 13.sp,
+                    color = if (level == 0) AppTextPrimary else AppTextSecondary,
+                    fontWeight = if (level == 0) FontWeight.Bold else FontWeight.Normal
+                ),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+
+            Spacer(modifier = Modifier.width(16.dp))
+
+            Text(
+                text = "${item.pageIdx + 1}",
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontSize = if (level == 0) 14.sp else 12.sp,
+                    color = AppTextSecondary
+                )
+            )
+        }
+
+        HorizontalDivider(
+            thickness = 1.dp,
+            color = AppBottomBarBg.copy(alpha = 0.5f)
+        )
+
+        if (hasChildren) {
+            androidx.compose.animation.AnimatedVisibility(
+                visible = isExpanded,
+                enter = androidx.compose.animation.expandVertically(animationSpec = tween(200)),
+                exit = androidx.compose.animation.shrinkVertically(animationSpec = tween(200))
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    item.children.forEach { child ->
+                        TocItemRow(
+                            item = child,
+                            level = level + 1,
+                            expandedMap = expandedMap,
+                            onToggleExpand = onToggleExpand,
+                            onJumpTo = onJumpTo
+                        )
+                    }
+                }
+            }
         }
     }
 }

@@ -102,6 +102,7 @@ fun ViewerScreen(
     val pageBookmarks by viewModel.activePageBookmarks.collectAsState()
     val errorState by viewModel.errorState.collectAsState()
     val showLargeFileWarningSnackbar by viewModel.showLargeFileWarningSnackbar.collectAsState()
+    val tableOfContents by viewModel.tableOfContents.collectAsState()
     
     // Bottom Reader Bar visibility state connected to the ViewModel Flow
     val isToolbarVisible by viewModel.isToolbarVisible.collectAsState()
@@ -286,10 +287,19 @@ fun ViewerScreen(
                 totalPages = totalPages,
                 pageBookmarks = pageBookmarks,
                 pdfViewInst = pdfViewInst,
+                tableOfContents = tableOfContents,
                 onJumpToPage = { index -> viewModel.jumpToPage(index) },
                 onAddBookmark = { label -> viewModel.addPageBookmark(activeUri ?: "", currentPage + 1, label) },
                 onDeleteBookmark = { bookmark -> viewModel.deletePageBookmark(bookmark.fileUri, bookmark.pageNumber) },
-                onCloseDrawer = { coroutineScope.launch { drawerState.close() } }
+                onCloseDrawer = { coroutineScope.launch { drawerState.close() } },
+                onTocItemClicked = { item ->
+                    coroutineScope.launch {
+                        drawerState.close()
+                        pdfViewInst?.jumpTo(item.pageIdx.toInt())
+                        viewModel.setCurrentPage(item.pageIdx.toInt())
+                        snackbarHostState.showSnackbar("الصفحة ${item.pageIdx + 1} — ${item.title}")
+                    }
+                }
             )
         }
     ) {

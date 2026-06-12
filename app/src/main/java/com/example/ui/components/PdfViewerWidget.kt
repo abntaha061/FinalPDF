@@ -174,6 +174,17 @@ fun PdfViewerWidget(
                                 .onLoad { totalPages ->
                                     isLoaded = true
                                     viewModel.setTotalPages(totalPages)
+                                    try {
+                                        val toc = tableOfContents
+                                        if (toc != null) {
+                                            viewModel.setTableOfContents(toc)
+                                        } else {
+                                            viewModel.setTableOfContents(emptyList())
+                                        }
+                                    } catch (e: Exception) {
+                                        Log.e("PdfViewerWidget", "Could not get table of contents", e)
+                                        viewModel.setTableOfContents(emptyList())
+                                    }
                                     onLoadComplete(totalPages)
                                 }
                                 .onPageChange { page, total ->

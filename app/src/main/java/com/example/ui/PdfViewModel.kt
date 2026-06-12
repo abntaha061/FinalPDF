@@ -137,6 +137,13 @@ class PdfViewModel(
     private val _isViewerLoading = MutableStateFlow(false)
     val isViewerLoading: StateFlow<Boolean> = _isViewerLoading.asStateFlow()
 
+    private val _tableOfContents = MutableStateFlow<List<com.shockwave.pdfium.PdfDocument.Bookmark>>(emptyList())
+    val tableOfContents: StateFlow<List<com.shockwave.pdfium.PdfDocument.Bookmark>> = _tableOfContents.asStateFlow()
+
+    fun setTableOfContents(toc: List<com.shockwave.pdfium.PdfDocument.Bookmark>) {
+        _tableOfContents.value = toc
+    }
+
     @OptIn(ExperimentalCoroutinesApi::class)
     val activePageBookmarks: StateFlow<List<BookmarkEntity>> = _selectedUri
         .flatMapLatest { uri ->
@@ -304,6 +311,7 @@ class PdfViewModel(
         _isCurrentPageBookmarked.value = false
         _isViewerLoading.value = false
         hasShownRestoreSnackbarForUri = null
+        _tableOfContents.value = emptyList()
     }
 
     fun toggleCurrentPageBookmark() {
