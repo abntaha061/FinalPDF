@@ -211,7 +211,6 @@ class PdfViewModel @Inject constructor(
     private val _isViewerLoading: MutableStateFlow<Boolean> = MutableStateFlow(false)
     val isViewerLoading: StateFlow<Boolean> = _isViewerLoading.asStateFlow()
 
-    // 🌟 التعديل المطلوب: List<String> 🌟
     private val _tableOfContents: MutableStateFlow<List<String>> = MutableStateFlow(emptyList())
     val tableOfContents: StateFlow<List<String>> = _tableOfContents.asStateFlow()
 
@@ -256,12 +255,14 @@ class PdfViewModel @Inject constructor(
 
         @OptIn(ExperimentalCoroutinesApi::class)
         viewModelScope.launch {
-            _selectedUri.flatMapLatest { uri -> if (uri != null) repository.getPageBookmarksForPdf(uri) else flowOf(emptyList()) }.collect { _activePageBookmarks.value = it }
+            // 🌟 إضافة <BookmarkEntity> صريحة لمنع STAR null 🌟
+            _selectedUri.flatMapLatest { uri -> if (uri != null) repository.getPageBookmarksForPdf(uri) else flowOf(emptyList<BookmarkEntity>()) }.collect { _activePageBookmarks.value = it }
         }
 
         @OptIn(ExperimentalCoroutinesApi::class)
         viewModelScope.launch {
-            _selectedUri.flatMapLatest { uri -> if (uri != null) repository.getHighlightsForPdf(uri) else flowOf(emptyList()) }.collect { _activeHighlights.value = it }
+            // 🌟 إضافة <HighlightEntity> صريحة لمنع STAR null 🌟
+            _selectedUri.flatMapLatest { uri -> if (uri != null) repository.getHighlightsForPdf(uri) else flowOf(emptyList<HighlightEntity>()) }.collect { _activeHighlights.value = it }
         }
 
         viewModelScope.launch {
@@ -343,7 +344,6 @@ class PdfViewModel @Inject constructor(
     fun toggleToolbarVisibility() { _isToolbarVisible.value = !_isToolbarVisible.value }
     fun setToolbarVisibility(visible: Boolean) { _isToolbarVisible.value = visible }
     
-    // 🌟 التعديل المطلوب: List<String> 🌟
     fun setTableOfContents(toc: List<String>) { _tableOfContents.value = toc }
 
     fun toggleNightMode() {
@@ -413,12 +413,20 @@ class PdfViewModel @Inject constructor(
             if (savedPage <= 0 && doc != null) savedPage = doc.currentPage
             if (savedPage < 0) savedPage = 0
 
+            // 🌟 إصلاح اللغم الكارثي: استخدام الـ Named Arguments للتوافق التام مع الكلاس ومنع كراش KSP 🌟
             if (doc == null) {
-                doc = RecentFileEntity(uri.toString(), metadata.first, metadata.second, savedPage, 0, System.currentTimeMillis(), null)
+                doc = RecentFileEntity(
+                    uri = uri.toString(),
+                    name = metadata.first,
+                    sizeBytes = metadata.second,
+                    totalPages = 0,
+                    currentPage = savedPage
+                )
             } else {
                 doc = doc.copy(lastOpenedAt = System.currentTimeMillis(), currentPage = savedPage)
             }
-            repository.insertPdf(doc)
+            
+            repository.insertPdf(doc!!)
             _currentPage.value = savedPage
             _currentDocument.value = doc
             checkIfCurrentPageIsBookmarked()
