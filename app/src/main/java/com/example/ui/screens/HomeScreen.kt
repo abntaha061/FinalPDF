@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -285,6 +286,35 @@ fun HomeScreen(
     var isLoading by remember { mutableStateOf(true) }
     val haptic = LocalHapticFeedback.current
 
+    val activeFilterCount by viewModel.activeFilterCount.collectAsState()
+    var showSortSheet by remember { mutableStateOf(false) }
+    var showFilterSheet by remember { mutableStateOf(false) }
+    val sortMode by viewModel.sortMode.collectAsState()
+    
+    val filterMinSize by viewModel.filterMinSize.collectAsState()
+    val filterMaxSize by viewModel.filterMaxSize.collectAsState()
+    val filterMinPages by viewModel.filterMinPages.collectAsState()
+    val filterMaxPages by viewModel.filterMaxPages.collectAsState()
+    val filterDateRange by viewModel.filterDateRange.collectAsState()
+
+    var tempMinSize by remember { mutableStateOf(0f) }
+    var tempMaxSize by remember { mutableStateOf(100f) }
+    var tempMinPages by remember { mutableStateOf(1) }
+    var tempMaxPages by remember { mutableStateOf(500) }
+    var tempDateRange by remember { mutableStateOf("الكل") }
+
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(showFilterSheet) {
+        if (showFilterSheet) {
+            tempMinSize = filterMinSize
+            tempMaxSize = filterMaxSize
+            tempMinPages = filterMinPages
+            tempMaxPages = filterMaxPages
+            tempDateRange = filterDateRange
+        }
+    }
+
     LaunchedEffect(isReady) {
         if (isReady) {
             kotlinx.coroutines.delay(500)
@@ -358,18 +388,66 @@ fun HomeScreen(
                         fontSize = 28.sp,
                         textAlign = TextAlign.Start
                     )
-                    IconButton(
-                        onClick = onNavigateToSettings,
-                        modifier = Modifier
-                            .size(36.dp)
-                            .testTag("settings_button")
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Settings,
-                            contentDescription = "Settings",
-                            tint = AppTextPrimary,
-                            modifier = Modifier.size(24.dp)
-                        )
+                        // Button 1: Filter List with badge
+                        IconButton(
+                            onClick = { showFilterSheet = true },
+                            modifier = Modifier
+                                .size(36.dp)
+                                .testTag("filter_button")
+                        ) {
+                            BadgedBox(
+                                badge = {
+                                    if (activeFilterCount > 0) {
+                                        Badge(
+                                            containerColor = Color.Red,
+                                            contentColor = Color.White
+                                        ) {
+                                            Text(text = "$activeFilterCount")
+                                        }
+                                    }
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.FilterList,
+                                    contentDescription = "تصفية",
+                                    tint = AppTextPrimary,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                        }
+
+                        // Button 2: Sort
+                        IconButton(
+                            onClick = { showSortSheet = true },
+                            modifier = Modifier
+                                .size(36.dp)
+                                .testTag("sort_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Sort,
+                                contentDescription = "ترتيب",
+                                tint = AppTextPrimary,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+
+                        IconButton(
+                            onClick = onNavigateToSettings,
+                            modifier = Modifier
+                                .size(36.dp)
+                                .testTag("settings_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = "Settings",
+                                tint = AppTextPrimary,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
                     }
                 }
                 Spacer(modifier = Modifier.height(4.dp))
@@ -398,6 +476,310 @@ fun HomeScreen(
                             HomeScreenEmptyState()
                         } else {
                             HomeScreenRealFiles(recentPdfs = recentPdfs, viewModel = viewModel, onPdfOpened = onPdfOpened)
+                        }
+                    }
+                }
+            }
+        }
+
+        if (showSortSheet) {
+            ModalBottomSheet(
+                onDismissRequest = { showSortSheet = false },
+                sheetState = rememberModalBottomSheetState(),
+                containerColor = MaterialTheme.colorScheme.surface
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 36.dp, start = 20.dp, end = 20.dp)
+                ) {
+                    // Title Row
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(onClick = { showSortSheet = false }) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "إغلاق",
+                                tint = AppTextPrimary
+                            )
+                        }
+                        Text(
+                            text = "ترتيب الملفات",
+                            color = AppTextPrimary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp
+                        )
+                        Spacer(modifier = Modifier.width(48.dp))
+                    }
+                    
+                    val options = listOf(
+                        "الأحدث أولاً" to Icons.Default.AccessTime,
+                        "الأقدم أولاً" to Icons.Default.History,
+                        "الاسم (أ → ي)" to Icons.Default.SortByAlpha,
+                        "الحجم (الأكبر أولاً)" to Icons.Default.Storage
+                    )
+                    
+                    options.forEach { (optionName, icon) ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(52.dp)
+                                .clickable {
+                                    viewModel.setSortMode(optionName)
+                                    scope.launch {
+                                        kotlinx.coroutines.delay(300)
+                                        showSortSheet = false
+                                    }
+                                }
+                                .padding(vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = icon,
+                                    contentDescription = null,
+                                    tint = AppTextSecondary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Text(
+                                    text = optionName,
+                                    color = AppTextPrimary,
+                                    fontSize = 15.sp
+                                )
+                            }
+                            RadioButton(
+                                selected = (sortMode == optionName),
+                                onClick = {
+                                    viewModel.setSortMode(optionName)
+                                    scope.launch {
+                                        kotlinx.coroutines.delay(300)
+                                        showSortSheet = false
+                                    }
+                                },
+                                colors = RadioButtonDefaults.colors(
+                                    selectedColor = MaterialTheme.colorScheme.primary
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        if (showFilterSheet) {
+            ModalBottomSheet(
+                onDismissRequest = { showFilterSheet = false },
+                sheetState = rememberModalBottomSheetState(),
+                containerColor = MaterialTheme.colorScheme.surface
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 36.dp, start = 20.dp, end = 20.dp)
+                ) {
+                    // Title Row
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        IconButton(onClick = { showFilterSheet = false }) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "إغلاق",
+                                tint = AppTextPrimary
+                            )
+                        }
+                        Text(
+                            text = "تصفية الملفات",
+                            color = AppTextPrimary,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp
+                        )
+                        Spacer(modifier = Modifier.width(48.dp))
+                    }
+                    
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    // FILTER 1: حجم الملف
+                    Column {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "حجم الملف",
+                                color = AppTextSecondary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "${tempMinSize.toInt()} م.ب - ${tempMaxSize.toInt()} م.ب",
+                                color = MaterialTheme.colorScheme.primary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        RangeSlider(
+                            value = tempMinSize..tempMaxSize,
+                            onValueChange = { range ->
+                                tempMinSize = range.start
+                                tempMaxSize = range.endInclusive
+                            },
+                            valueRange = 0f..100f,
+                            steps = 100,
+                            colors = SliderDefaults.colors(
+                                activeTrackColor = MaterialTheme.colorScheme.primary,
+                                thumbColor = MaterialTheme.colorScheme.primary
+                            )
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    // FILTER 2: عدد الصفحات
+                    Column {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "عدد الصفحات",
+                                color = AppTextSecondary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "${tempMinPages} - ${tempMaxPages} صفحة",
+                                color = MaterialTheme.colorScheme.primary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        RangeSlider(
+                            value = tempMinPages.toFloat()..tempMaxPages.toFloat(),
+                            onValueChange = { range ->
+                                tempMinPages = range.start.toInt()
+                                tempMaxPages = range.endInclusive.toInt()
+                            },
+                            valueRange = 1f..500f,
+                            steps = 500,
+                            colors = SliderDefaults.colors(
+                                activeTrackColor = MaterialTheme.colorScheme.primary,
+                                thumbColor = MaterialTheme.colorScheme.primary
+                            )
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+
+                    // FILTER 3: تاريخ الفتح
+                    Text(
+                        text = "فُتح في آخر:",
+                        color = AppTextSecondary,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    
+                    val dateOptions = listOf("الكل", "24 ساعة", "أسبوع", "شهر")
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        dateOptions.forEach { option ->
+                            val isSelected = (tempDateRange == option)
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .background(
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                        shape = RoundedCornerShape(12.dp)
+                                    )
+                                    .clickable { tempDateRange = option }
+                                    .padding(vertical = 10.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = option,
+                                    color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontSize = 13.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(32.dp))
+
+                    // Control Buttons Row: Reset and Apply
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // Outlined Reset Button styled with Modifier.border
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .background(Color.Transparent, RoundedCornerShape(12.dp))
+                                .border(1.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(12.dp))
+                                .clickable {
+                                    tempMinSize = 0f
+                                    tempMaxSize = 100f
+                                    tempMinPages = 1
+                                    tempMaxPages = 500
+                                    tempDateRange = "الكل"
+                                    viewModel.resetFilters()
+                                    showFilterSheet = false
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "إعادة ضبط",
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                        }
+
+                        // Filled Apply Button
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(48.dp)
+                                .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(12.dp))
+                                .clickable {
+                                    viewModel.setFilterMinSize(tempMinSize)
+                                    viewModel.setFilterMaxSize(tempMaxSize)
+                                    viewModel.setFilterMinPages(tempMinPages)
+                                    viewModel.setFilterMaxPages(tempMaxPages)
+                                    viewModel.setFilterDateRange(tempDateRange)
+                                    showFilterSheet = false
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "تطبيق",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
                         }
                     }
                 }

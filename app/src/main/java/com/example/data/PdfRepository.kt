@@ -15,6 +15,16 @@ class PdfRepository @Inject constructor(
 ) {
     val allRecentPdfs: Flow<List<RecentFileEntity>> = recentFileDao.getAll()
     
+    fun getFilteredPdfs(
+        minSize: Long,
+        maxSize: Long,
+        minPages: Int,
+        maxPages: Int,
+        minDate: Long
+    ): Flow<List<RecentFileEntity>> {
+        return recentFileDao.getFiltered(minSize, maxSize, minPages, maxPages, minDate)
+    }
+    
     val bookmarkedPdfs: Flow<List<RecentFileEntity>> = recentFileDao.getAll().map { list ->
         list.filter { it.isBookmarked }
     }

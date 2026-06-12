@@ -33,6 +33,13 @@ private val LINK_OPEN_MODE_KEY = androidx.datastore.preferences.core.stringPrefe
 private val AUTO_PLAY_AUDIO_KEY = booleanPreferencesKey("auto_play_audio")
 private val AUDIO_VOLUME_KEY = androidx.datastore.preferences.core.floatPreferencesKey("audio_volume")
 
+private val SORT_MODE_KEY = androidx.datastore.preferences.core.stringPreferencesKey("sort_mode")
+private val FILTER_MIN_SIZE_KEY = androidx.datastore.preferences.core.floatPreferencesKey("filter_min_size")
+private val FILTER_MAX_SIZE_KEY = androidx.datastore.preferences.core.floatPreferencesKey("filter_max_size")
+private val FILTER_MIN_PAGES_KEY = androidx.datastore.preferences.core.intPreferencesKey("filter_min_pages")
+private val FILTER_MAX_PAGES_KEY = androidx.datastore.preferences.core.intPreferencesKey("filter_max_pages")
+private val FILTER_DATE_RANGE_KEY = androidx.datastore.preferences.core.stringPreferencesKey("filter_date_range")
+
 class PdfViewModel(
     private val repository: PdfRepository,
     private val context: Context
@@ -44,9 +51,74 @@ class PdfViewModel(
     private val _isOnboardingDone = MutableStateFlow<Boolean?>(null)
     val isOnboardingDone: StateFlow<Boolean?> = _isOnboardingDone.asStateFlow()
 
-    // Document States
-    val recentDocuments: StateFlow<List<RecentFileEntity>> = repository.allRecentPdfs
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    private val _sortMode = MutableStateFlow("الأحدث أولاً")
+    val sortMode: StateFlow<String> = _sortMode.asStateFlow()
+
+    private val _filterMinSize = MutableStateFlow(0f)
+    val filterMinSize: StateFlow<Float> = _filterMinSize.asStateFlow()
+
+    private val _filterMaxSize = MutableStateFlow(100f)
+    val filterMaxSize: StateFlow<Float> = _filterMaxSize.asStateFlow()
+
+    private val _filterMinPages = MutableStateFlow(1)
+    val filterMinPages: StateFlow<Int> = _filterMinPages.asStateFlow()
+
+    private val _filterMaxPages = MutableStateFlow(500)
+    val filterMaxPages: StateFlow<Int> = _filterMaxPages.asStateFlow()
+
+    private val _filterDateRange = MutableStateFlow("الكل")
+    val filterDateRange: StateFlow<String> = _filterDateRange.asStateFlow()
+
+    val activeFilterCount: StateFlow<Int> = combine(
+        combine(_filterMinSize, _filterMaxSize) { minS, maxS -> minS to maxS },
+        combine(_filterMinPages, _filterMaxPages) { minP, maxP -> minP to maxP },
+        _filterDateRange
+    ) { sizeRange, pageRange, dateRange ->
+        val minS = sizeRange.first
+        val maxS = sizeRange.second
+        val minP = pageRange.first
+        val maxP = pageRange.second
+        var count = 0
+        if (minS > 0f || maxS < 100f) count++
+        if (minP > 1 || maxP < 500) count++
+        if (dateRange != "الكل") count++
+        count
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val recentDocuments: StateFlow<List<RecentFileEntity>> = combine(
+        combine(_filterMinSize, _filterMaxSize) { minS, maxS -> minS to maxS },
+        combine(_filterMinPages, _filterMaxPages) { minP, maxP -> minP to maxP },
+        _filterDateRange,
+        _sortMode
+    ) { sizeRange, pageRange, dateRange, sortMode ->
+        val minS = sizeRange.first
+        val maxS = sizeRange.second
+        val minP = pageRange.first
+        val maxP = pageRange.second
+        
+        val minSize = (minS * 1024 * 1024).toLong()
+        val maxSize = if (maxS >= 100f) Long.MAX_VALUE else (maxS * 1024 * 1024).toLong()
+        val minPages = minP
+        val maxPages = if (maxP >= 500) Int.MAX_VALUE else maxP
+        val minDate = when (dateRange) {
+            "24 ساعة" -> System.currentTimeMillis() - 24 * 60 * 60 * 1000L
+            "أسبوع" -> System.currentTimeMillis() - 7 * 24 * 60 * 60 * 1000L
+            "شهر" -> System.currentTimeMillis() - 30 * 24 * 60 * 60 * 1000L
+            else -> 0L
+        }
+        FilterParams(minSize, maxSize, minPages, maxPages, minDate, sortMode)
+    }.flatMapLatest { params ->
+        repository.getFilteredPdfs(params.minSize, params.maxSize, params.minPages, params.maxPages, params.minDate)
+            .map { list ->
+                when (params.sortMode) {
+                    "الأقدم أولاً" -> list.sortedBy { it.lastOpenedAt }
+                    "الاسم (أ → ي)" -> list.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
+                    "الحجم (الأكبر أولاً)" -> list.sortedByDescending { it.sizeBytes }
+                    else -> list.sortedByDescending { it.lastOpenedAt } // "الأحدث أولاً"
+                }
+            }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val favoriteDocuments: StateFlow<List<RecentFileEntity>> = repository.bookmarkedPdfs
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -132,6 +204,12 @@ class PdfViewModel(
                 _linkOpenMode.value = preferences[LINK_OPEN_MODE_KEY] ?: "المتصفح الافتراضي"
                 _autoPlayAudio.value = preferences[AUTO_PLAY_AUDIO_KEY] ?: true
                 _audioVolume.value = preferences[AUDIO_VOLUME_KEY] ?: 1.0f
+                _sortMode.value = preferences[SORT_MODE_KEY] ?: "الأحدث أولاً"
+                _filterMinSize.value = preferences[FILTER_MIN_SIZE_KEY] ?: 0f
+                _filterMaxSize.value = preferences[FILTER_MAX_SIZE_KEY] ?: 100f
+                _filterMinPages.value = preferences[FILTER_MIN_PAGES_KEY] ?: 1
+                _filterMaxPages.value = preferences[FILTER_MAX_PAGES_KEY] ?: 500
+                _filterDateRange.value = preferences[FILTER_DATE_RANGE_KEY] ?: "الكل"
             }
         }
         viewModelScope.launch {
@@ -631,7 +709,76 @@ class PdfViewModel(
         }
         return Pair(name, size)
     }
+
+    fun setSortMode(mode: String) {
+        viewModelScope.launch {
+            context.dataStore.edit { preferences ->
+                preferences[SORT_MODE_KEY] = mode
+            }
+        }
+    }
+
+    fun setFilterMinSize(size: Float) {
+        viewModelScope.launch {
+            context.dataStore.edit { preferences ->
+                preferences[FILTER_MIN_SIZE_KEY] = size
+            }
+        }
+    }
+
+    fun setFilterMaxSize(size: Float) {
+        viewModelScope.launch {
+            context.dataStore.edit { preferences ->
+                preferences[FILTER_MAX_SIZE_KEY] = size
+            }
+        }
+    }
+
+    fun setFilterMinPages(pages: Int) {
+        viewModelScope.launch {
+            context.dataStore.edit { preferences ->
+                preferences[FILTER_MIN_PAGES_KEY] = pages
+            }
+        }
+    }
+
+    fun setFilterMaxPages(pages: Int) {
+        viewModelScope.launch {
+            context.dataStore.edit { preferences ->
+                preferences[FILTER_MAX_PAGES_KEY] = pages
+            }
+        }
+    }
+
+    fun setFilterDateRange(range: String) {
+        viewModelScope.launch {
+            context.dataStore.edit { preferences ->
+                preferences[FILTER_DATE_RANGE_KEY] = range
+            }
+        }
+    }
+
+    fun resetFilters() {
+        viewModelScope.launch {
+            context.dataStore.edit { preferences ->
+                preferences[FILTER_MIN_SIZE_KEY] = 0f
+                preferences[FILTER_MAX_SIZE_KEY] = 100f
+                preferences[FILTER_MIN_PAGES_KEY] = 1
+                preferences[FILTER_MAX_PAGES_KEY] = 500
+                preferences[FILTER_DATE_RANGE_KEY] = "الكل"
+            }
+        }
+    }
 }
+
+private data class FilterParams(
+    val minSize: Long,
+    val maxSize: Long,
+    val minPages: Int,
+    val maxPages: Int,
+    val minDate: Long,
+    val sortMode: String
+)
 
 class PdfViewModelFactory(
     private val repository: PdfRepository,

@@ -14,6 +14,21 @@ interface RecentFileDao {
     @Query("SELECT * FROM recent_files ORDER BY lastOpenedAt DESC")
     fun getAll(): Flow<List<RecentFileEntity>>
 
+    @Query("""
+      SELECT * FROM recent_files 
+      WHERE sizeBytes BETWEEN :minSize AND :maxSize
+      AND totalPages BETWEEN :minPages AND :maxPages
+      AND lastOpenedAt >= :minDate
+      ORDER BY lastOpenedAt DESC
+    """)
+    fun getFiltered(
+        minSize: Long,
+        maxSize: Long,
+        minPages: Int,
+        maxPages: Int,
+        minDate: Long
+    ): Flow<List<RecentFileEntity>>
+
     @Query("SELECT * FROM recent_files WHERE uri = :uri LIMIT 1")
     suspend fun getByUri(uri: String): RecentFileEntity?
 
