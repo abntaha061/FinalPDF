@@ -47,6 +47,7 @@ import com.example.data.AppDatabase
 import com.example.data.PdfRepository
 import com.example.ui.PdfViewModel
 import com.example.ui.PdfViewModelFactory
+import com.example.ui.dataStore
 import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.ViewerScreen
 import com.example.ui.screens.OnboardingScreen
@@ -67,13 +68,16 @@ import androidx.compose.animation.core.tween
 import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.material3.LocalTextStyle
-import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.first
 import java.util.Locale
 
-private val Context.dataStore by preferencesDataStore(name = "pdf_reader_settings")
+// تمت إزالة التعريف المكرر لـ:
+// private val Context.dataStore by preferencesDataStore(name = "pdf_reader_settings")
+// لأنه كان موجوداً بالفعل في PdfViewModel.kt، والآن نستورده من هناك (import com.example.ui.dataStore أعلى)
+// هذا التكرار كان يسبب: IllegalStateException: There are multiple DataStores active for the same file
+
 private val APP_LANGUAGE_KEY = androidx.datastore.preferences.core.stringPreferencesKey("app_language")
 
 class MainActivity : ComponentActivity() {
