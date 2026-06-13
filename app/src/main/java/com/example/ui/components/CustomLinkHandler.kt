@@ -14,9 +14,15 @@ import kotlinx.coroutines.runBlocking
 
 import com.example.util.pdfReaderDataStore
 
+import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.text.PDFTextStripperByArea
+import com.tom_roush.pdfbox.pdmodel.common.PDRectangle
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+
 class CustomLinkHandler(
     private val context: Context,
     private val pdfView: PDFView,
+    private val pdfUriString: String,
     private val onLinkTapped: (RectF) -> Unit,
     private val onNavigateToWebView: ((String) -> Unit)? = null
 ) : LinkHandler {
@@ -120,18 +126,27 @@ class CustomLinkHandler(
                     val parsedUri = Uri.parse(uriString)
                     var wordToSpeak = ""
                     
-                    // 1. Try to extract from common dictionary query parameters
-                    val queryParams = listOf("q", "s", "search", "query", "word", "text")
-                    for (param in queryParams) {
-                        val value = parsedUri.getQueryParameter(param)
-                        if (!value.isNullOrBlank()) {
-                            wordToSpeak = value
-                            break
+                    // First try to extract word directly from PDF text at that position
+                    val extractedWord = getWordAtLink(link?.bounds, event, page)
+                    if (extractedWord.isNotBlank()) {
+                         wordToSpeak = extractedWord
+                         Log.d("CustomLinkHandler", "Extracted word from PDF text bounds: $wordToSpeak")
+                    }
+                    
+                    if (wordToSpeak.isBlank()) {
+                        // 1. Try to extract from common dictionary query parameters
+                        val queryParams = listOf("q", "s", "search", "query", "word", "text")
+                        for (param in queryParams) {
+                            val value = parsedUri.getQueryParameter(param)
+                            if (!value.isNullOrBlank()) {
+                                wordToSpeak = value
+                                break
+                            }
                         }
                     }
                     
-                    // 2. If no query param, look for common path patterns
                     if (wordToSpeak.isBlank()) {
+                        // 2. If no query param, look for common path patterns
                         val path = parsedUri.path ?: ""
                         if (path.contains("deutsch-arabisch/", ignoreCase = true)) {
                             val idx = path.indexOf("deutsch-arabisch/", ignoreCase = true)
@@ -226,6 +241,120 @@ class CustomLinkHandler(
             context.startActivity(intent)
         } catch (e: Exception) {
             Log.e("CustomLinkHandler", "Error launching system browser intent", e)
+        }
+    }
+
+    private fun getWordAtLink(bounds: RectF?, event: LinkTapEvent, pageIndex: Int): String {
+        try {
+            if (pdfUriString.isBlank()) return ""
+            val pdfUri = Uri.parse(pdfUriString)
+            PDFBoxResourceLoader.init(context.applicationContext)
+            context.contentResolver.openInputStream(pdfUri)?.use { inputStream ->
+                PDDocument.load(inputStream).use { document ->
+                    if (pageIndex >= document.numberOfPages) return ""
+                    val pageObj = document.getPage(pageIndex)
+                    val mediaBox = pageObj.mediaBox ?: PDRectangle(0f, 0f, 595f, 842f)
+                    val pageHeight = mediaBox.height
+
+                    val stripper = PDFTextStripperByArea()
+                    stripper.sortByPosition = true
+
+                    var wordText = ""
+                    if (bounds != null) {
+                        val left = bounds.left
+                        val right = bounds.right
+                        val top = pageHeight - bounds.top
+                        val bottom = pageHeight - bounds.bottom
+                        val yMin = Math.min(top, bottom)
+                        val yHeight = Math.abs(bottom - top)
+                        val xWidth = Math.abs(right - left)
+
+                        val rect = android.graphics.RectF(
+                            Math.max(0f, left - 4f),
+                            Math.max(0f, yMin - 4f),
+                            xWidth + 8f,
+                            yHeight + 8f
+                        )
+                        stripper.addRegion("link_area", rect)
+                        stripper.extractRegions(pageObj)
+                        wordText = stripper.getTextForRegion("link_area")?.trim() ?: ""
+                    }
+
+                    if (wordText.isBlank()) {
+                        val tx = event.originalX
+                        val ty = pageHeight - event.originalY
+                        val rectTap = android.graphics.RectF(
+                            Math.max(0f, tx - 40f),
+                            Math.max(0f, ty - 10f),
+                            80f,
+                            20f
+                        )
+                        val stripperTap = PDFTextStripperByArea()
+                        stripperTap.sortByPosition = true
+                        stripperTap.addRegion("tap_area", rectTap)
+                        stripperTap.extractRegions(pageObj)
+                        wordText = stripperTap.getTextForRegion("tap_area")?.trim() ?: ""
+                    }
+
+                    if (wordText.isNotBlank()) {
+                        val lines = wordText.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
+                        if (lines.isNotEmpty()) {
+                            val merged = lines.joinToString(" ")
+                            if (merged.length < 80) {
+                                return merged
+                            }
+                            val words = merged.split(Regex("\\s+")).map { it.trim() }.filter { it.isNotEmpty() }
+                            if (words.isNotEmpty()) {
+                                return words.joinToString(" ")
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("CustomLinkHandler", "Error extracting text in link region", e)
+        }
+        return ""
+    }
+
+    companion object {
+        fun isTapOnLink(pdfView: PDFView, x: Float, y: Float): Boolean {
+            try {
+                val pdfViewClass = pdfView.javaClass
+                val mappedMethod = pdfViewClass.methods.firstOrNull { 
+                    it.name.contains("mappedScreenToPage", ignoreCase = true) && it.parameterTypes.size == 2
+                } ?: pdfViewClass.declaredMethods.firstOrNull {
+                    it.name.contains("mappedScreenToPage", ignoreCase = true) && it.parameterTypes.size == 2
+                }
+                
+                if (mappedMethod != null) {
+                    mappedMethod.isAccessible = true
+                    val point = mappedMethod.invoke(pdfView, x, y) as? android.graphics.PointF
+                    if (point != null) {
+                        val pdfFileField = pdfViewClass.declaredFields.firstOrNull { it.name == "pdfFile" }
+                            ?: pdfViewClass.fields.firstOrNull { it.name == "pdfFile" }
+                        if (pdfFileField != null) {
+                            pdfFileField.isAccessible = true
+                            val pdfFile = pdfFileField.get(pdfView)
+                            if (pdfFile != null) {
+                                val getLinkAtMethod = pdfFile.javaClass.methods.firstOrNull {
+                                    it.name.contains("getLink", ignoreCase = true) && it.parameterTypes.size == 2
+                                } ?: pdfFile.javaClass.declaredMethods.firstOrNull {
+                                    it.name.contains("getLink", ignoreCase = true) && it.parameterTypes.size == 2
+                                }
+                                if (getLinkAtMethod != null) {
+                                    getLinkAtMethod.isAccessible = true
+                                    val link = getLinkAtMethod.invoke(pdfFile, point.x, point.y)
+                                    return link != null
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("CustomLinkHandler", "Error checking isTapOnLink in companion object via reflection", e)
+            }
+            return false
         }
     }
 }

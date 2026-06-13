@@ -260,7 +260,10 @@ fun PdfViewerWidget(
                                     Log.e("PdfViewerWidget", "Error on page $page", error)
                                 }
                                 .onTap { e ->
-                                    onTap?.invoke()
+                                    val isLink = com.github.barteksc.pdfviewer.CustomLinkHandler.isTapOnLink(this@apply, e.x, e.y)
+                                    if (!isLink) {
+                                        onTap?.invoke()
+                                    }
                                     false
                                 }
                                 .onLongPress { e ->
@@ -272,7 +275,7 @@ fun PdfViewerWidget(
                                 .pageFitPolicy(if (fitMode == "height") FitPolicy.HEIGHT else FitPolicy.WIDTH)
                                 .nightMode(readingMode == "night")
                                 .scrollHandle(DefaultScrollHandle(ctx))
-                                .linkHandler(CustomLinkHandler(context, this, onLinkTapped, onNavigateToWebView)) // Custom link handler
+                                .linkHandler(CustomLinkHandler(context, this, pdfUriString, onLinkTapped, onNavigateToWebView)) // Custom link handler
                                 .load()
 
                         } catch (e: Exception) {
@@ -290,9 +293,6 @@ fun PdfViewerWidget(
                             viewModel.pageRotations.forEach { (pageIdx, rot) ->
                                 val normRot = ((rot % 360) + 360) % 360
                                 pdfView.setPageRotation(pageIdx, normRot)
-                            }
-                            if (pdfView.currentPage != currentPage) {
-                                pdfView.jumpTo(currentPage)
                             }
                         } catch (e: Exception) {
                             // ignore
