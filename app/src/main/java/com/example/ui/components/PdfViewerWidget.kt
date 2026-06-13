@@ -191,15 +191,8 @@ fun PdfViewerWidget(
                             setLayerType(android.view.View.LAYER_TYPE_NONE, null)
                         }
                         
-                        setOnTouchListener { _, event ->
-                            val action = event.actionMasked
-                            if (action == android.view.MotionEvent.ACTION_MOVE || 
-                                action == android.view.MotionEvent.ACTION_UP || 
-                                action == android.view.MotionEvent.ACTION_POINTER_UP) {
-                                onZoomChanged?.invoke(zoom)
-                            }
-                            false
-                        }
+                        // Removed custom touch listener to prevent breaking the native pinch-to-zoom/scroll drag and drop interactions of the PDFView.
+
 
                         try {
                             val fileUri = Uri.parse(pdfUriString)

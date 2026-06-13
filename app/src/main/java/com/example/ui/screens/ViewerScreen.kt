@@ -379,8 +379,7 @@ fun ViewerScreen(
         pdfUri: Uri,
         page: Int,
         offset: Offset,
-        pdfViewWidth: Float,
-        pdfViewHeight: Float
+        pdfView: Any?
     ): String {
         return try {
             PDFBoxResourceLoader.init(context.applicationContext)
@@ -411,29 +410,36 @@ fun ViewerScreen(
             val lines = pageText.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
             if (lines.isEmpty()) return ""
             
-            // Calculate precise bounds of the PDF page within the PDFView widget
-            val viewRatio = pdfViewWidth / pdfViewHeight
-            val pageRatio = pageWidth / pageHeight
-            
-            var renderedWidth = pdfViewWidth
-            var renderedHeight = pdfViewHeight
-            var leftOffset = 0f
-            var topOffset = 0f
-            
-            if (viewRatio > pageRatio) {
-                // Pillarbox: blank margins on left and right
-                renderedHeight = pdfViewHeight
-                renderedWidth = pdfViewHeight * pageRatio
-                leftOffset = (pdfViewWidth - renderedWidth) / 2f
-            } else {
-                // Letterbox: blank margins on top and bottom
-                renderedWidth = pdfViewWidth
-                renderedHeight = pdfViewWidth / pageRatio
-                topOffset = (pdfViewHeight - renderedHeight) / 2f
+            var rx = 0.5f
+            var ry = 0.5f
+            var mappedSuccess = false
+
+            if (pdfView != null) {
+                try {
+                    val pdfViewClass = pdfView.javaClass
+                    val mappedMethod = pdfViewClass.methods.firstOrNull { 
+                        it.name.contains("mappedScreenToPage", ignoreCase = true) && it.parameterTypes.size == 2
+                    } ?: pdfViewClass.declaredMethods.firstOrNull {
+                        it.name.contains("mappedScreenToPage", ignoreCase = true) && it.parameterTypes.size == 2
+                    }
+                    if (mappedMethod != null) {
+                        mappedMethod.isAccessible = true
+                        val point = mappedMethod.invoke(pdfView, offset.x, offset.y) as? android.graphics.PointF
+                        if (point != null) {
+                            rx = (point.x / pageWidth).coerceIn(0f, 1f)
+                            ry = (point.y / pageHeight).coerceIn(0f, 1f)
+                            mappedSuccess = true
+                        }
+                    }
+                } catch (ex: Exception) {
+                    Log.e("PdfViewerWidget", "Error extracting mapped coordinates via reflection", ex)
+                }
             }
 
-            val rx = ((offset.x - leftOffset) / renderedWidth).coerceIn(0f, 1f)
-            val ry = ((offset.y - topOffset) / renderedHeight).coerceIn(0f, 1f)
+            if (!mappedSuccess) {
+                rx = 0.5f
+                ry = 0.5f
+            }
 
             val targetLineIndex = (ry * lines.size).toInt().coerceIn(0, lines.size - 1)
             val lineText = lines[targetLineIndex]
@@ -742,8 +748,7 @@ fun ViewerScreen(
                                             pdfUri = Uri.parse(uriString),
                                             page = currentPage,
                                             offset = offset,
-                                            pdfViewWidth = pdfViewInst?.width?.toFloat() ?: 1000f,
-                                            pdfViewHeight = pdfViewInst?.height?.toFloat() ?: 1000f
+                                            pdfView = pdfViewInst
                                         )
                                     } else {
                                         ""
@@ -2598,7 +2603,7 @@ fun ViewerScreen(
                                             if (isArabic) {
                                                 textToSpeech.language = java.util.Locale("ar")
                                             } else {
-                                                textToSpeech.language = java.util.Locale.US
+                                                textToSpeech.language = java.util.Locale.GERMAN
                                             }
                                             textToSpeech.speak(selectedText, TextToSpeech.QUEUE_FLUSH, null, "PDF_TTS_ID")
                                         }
