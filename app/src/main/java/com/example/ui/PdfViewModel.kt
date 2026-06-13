@@ -19,7 +19,10 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
-private val Context.dataStore by preferencesDataStore(name = "pdf_reader_settings")
+import com.example.util.pdfReaderDataStore
+
+private val Context.dataStore get() = this.pdfReaderDataStore
+
 private val NIGHT_MODE_KEY = booleanPreferencesKey("is_night_mode")
 private val READING_MODE_KEY = androidx.datastore.preferences.core.stringPreferencesKey("reading_mode")
 private val ONBOARDING_DONE_KEY = booleanPreferencesKey("onboarding_done")
@@ -208,67 +211,6 @@ class PdfViewModel(
     private val _appLanguage = MutableStateFlow("ar")
     val appLanguage: StateFlow<String> = _appLanguage.asStateFlow()
 
-    init {
-        viewModelScope.launch {
-            context.dataStore.data.map { preferences ->
-                preferences[READING_MODE_KEY] ?: preferences[DEFAULT_READING_MODE_KEY] ?: if (preferences[NIGHT_MODE_KEY] == true) "night" else "normal"
-            }.collect { mode ->
-                _readingMode.value = mode
-                _isNightMode.value = (mode == "night")
-            }
-        }
-        viewModelScope.launch {
-            context.dataStore.data.map { preferences ->
-                preferences[ONBOARDING_DONE_KEY] == true
-            }.collect { done ->
-                _isOnboardingDone.value = done
-            }
-        }
-        viewModelScope.launch {
-            context.dataStore.data.collect { preferences ->
-                _defaultReadingMode.value = preferences[DEFAULT_READING_MODE_KEY] ?: "normal"
-                _primaryColorHex.value = preferences[PRIMARY_COLOR_KEY] ?: "#6C63FF"
-                _uiFontSize.value = preferences[UI_FONT_SIZE_KEY] ?: 15f
-                _autoSavePosition.value = preferences[AUTO_SAVE_POSITION_KEY] ?: true
-                _showPageIndicator.value = preferences[SHOW_PAGE_INDICATOR_KEY] ?: true
-                _pageSpacing.value = preferences[PAGE_SPACING_KEY] ?: 8f
-                _scrollSpeed.value = preferences[SCROLL_SPEED_KEY] ?: 1.0f
-                _linkOpenMode.value = preferences[LINK_OPEN_MODE_KEY] ?: "المتصفح الافتراضي"
-                _autoPlayAudio.value = preferences[AUTO_PLAY_AUDIO_KEY] ?: true
-                _audioVolume.value = preferences[AUDIO_VOLUME_KEY] ?: 1.0f
-                _sortMode.value = preferences[SORT_MODE_KEY] ?: "الأحدث أولاً"
-                _filterMinSize.value = preferences[FILTER_MIN_SIZE_KEY] ?: 0f
-                _filterMaxSize.value = preferences[FILTER_MAX_SIZE_KEY] ?: 100f
-                _filterMinPages.value = preferences[FILTER_MIN_PAGES_KEY] ?: 1
-                _filterMaxPages.value = preferences[FILTER_MAX_PAGES_KEY] ?: 500
-                _filterDateRange.value = preferences[FILTER_DATE_RANGE_KEY] ?: "الكل"
-                _appLanguage.value = preferences[APP_LANGUAGE_KEY] ?: "ar"
-                _readingScrollMode.value = preferences[READING_SCROLL_MODE_KEY] ?: "continuous"
-                _fitMode.value = preferences[FIT_MODE_KEY] ?: "width"
-            }
-        }
-        viewModelScope.launch {
-            recentDocuments.first()
-            _isOnboardingDone.filterNotNull().first()
-            _isReady.value = true
-        }
-        viewModelScope.launch {
-            currentPage
-                .debounce(200L)
-                .collect { page ->
-                    val fileUriString = _selectedUri.value
-                    if (fileUriString != null && _prefetchEnabled.value) {
-                        try {
-                            val fUri = Uri.parse(fileUriString)
-                            prefetchManager.prefetchAround(page, _totalPages.value, fUri, context)
-                        } catch (e: Exception) {
-                            // Silently ignore prefetch errors
-                        }
-                    }
-                }
-        }
-    }
-
     fun completeOnboarding() {
         viewModelScope.launch {
             context.dataStore.edit { preferences ->
@@ -370,6 +312,67 @@ class PdfViewModel(
 
     private val _isCurrentPageBookmarked = MutableStateFlow(false)
     val isCurrentPageBookmarked: StateFlow<Boolean> = _isCurrentPageBookmarked.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            context.dataStore.data.map { preferences ->
+                preferences[READING_MODE_KEY] ?: preferences[DEFAULT_READING_MODE_KEY] ?: if (preferences[NIGHT_MODE_KEY] == true) "night" else "normal"
+            }.collect { mode ->
+                _readingMode.value = mode
+                _isNightMode.value = (mode == "night")
+            }
+        }
+        viewModelScope.launch {
+            context.dataStore.data.map { preferences ->
+                preferences[ONBOARDING_DONE_KEY] == true
+            }.collect { done ->
+                _isOnboardingDone.value = done
+            }
+        }
+        viewModelScope.launch {
+            context.dataStore.data.collect { preferences ->
+                _defaultReadingMode.value = preferences[DEFAULT_READING_MODE_KEY] ?: "normal"
+                _primaryColorHex.value = preferences[PRIMARY_COLOR_KEY] ?: "#6C63FF"
+                _uiFontSize.value = preferences[UI_FONT_SIZE_KEY] ?: 15f
+                _autoSavePosition.value = preferences[AUTO_SAVE_POSITION_KEY] ?: true
+                _showPageIndicator.value = preferences[SHOW_PAGE_INDICATOR_KEY] ?: true
+                _pageSpacing.value = preferences[PAGE_SPACING_KEY] ?: 8f
+                _scrollSpeed.value = preferences[SCROLL_SPEED_KEY] ?: 1.0f
+                _linkOpenMode.value = preferences[LINK_OPEN_MODE_KEY] ?: "المتصفح الافتراضي"
+                _autoPlayAudio.value = preferences[AUTO_PLAY_AUDIO_KEY] ?: true
+                _audioVolume.value = preferences[AUDIO_VOLUME_KEY] ?: 1.0f
+                _sortMode.value = preferences[SORT_MODE_KEY] ?: "الأحدث أولاً"
+                _filterMinSize.value = preferences[FILTER_MIN_SIZE_KEY] ?: 0f
+                _filterMaxSize.value = preferences[FILTER_MAX_SIZE_KEY] ?: 100f
+                _filterMinPages.value = preferences[FILTER_MIN_PAGES_KEY] ?: 1
+                _filterMaxPages.value = preferences[FILTER_MAX_PAGES_KEY] ?: 500
+                _filterDateRange.value = preferences[FILTER_DATE_RANGE_KEY] ?: "الكل"
+                _appLanguage.value = preferences[APP_LANGUAGE_KEY] ?: "ar"
+                _readingScrollMode.value = preferences[READING_SCROLL_MODE_KEY] ?: "continuous"
+                _fitMode.value = preferences[FIT_MODE_KEY] ?: "width"
+            }
+        }
+        viewModelScope.launch {
+            recentDocuments.first()
+            _isOnboardingDone.filterNotNull().first()
+            _isReady.value = true
+        }
+        viewModelScope.launch {
+            currentPage
+                .debounce(200L)
+                .collect { page ->
+                    val fileUriString = _selectedUri.value
+                    if (fileUriString != null && _prefetchEnabled.value) {
+                        try {
+                            val fUri = Uri.parse(fileUriString)
+                            prefetchManager.prefetchAround(page, _totalPages.value, fUri, context)
+                        } catch (e: Exception) {
+                            // Silently ignore prefetch errors
+                        }
+                    }
+                }
+        }
+    }
 
     fun toggleNightMode() {
         val nextValue = !_isNightMode.value

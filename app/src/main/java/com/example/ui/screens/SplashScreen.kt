@@ -27,7 +27,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
-private val Context.splashDataStore by preferencesDataStore(name = "pdf_reader_settings")
+import com.example.util.pdfReaderDataStore
+
 private val ONBOARDING_KEY = booleanPreferencesKey("onboarding_done")
 
 @Composable
@@ -53,7 +54,7 @@ fun SplashScreen(navController: NavController) {
         
         delay(800) // 800ms delay
         
-        val onboardingDone = context.splashDataStore.data.map { it[ONBOARDING_KEY] ?: false }.first()
+        val onboardingDone = context.pdfReaderDataStore.data.map { it[ONBOARDING_KEY] ?: false }.first()
         if (onboardingDone) {
             navController.navigate(Screen.Home.route) {
                 popUpTo(Screen.Splash.route) { inclusive = true }

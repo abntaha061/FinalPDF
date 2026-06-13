@@ -12,7 +12,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 
-private val Context.settingsStore by preferencesDataStore(name = "pdf_reader_settings")
+import com.example.util.pdfReaderDataStore
 
 class CustomLinkHandler(
     private val context: Context,
@@ -72,7 +72,7 @@ class CustomLinkHandler(
 
             // Read preferences synchronously
             val (autoPlayAudio, audioVolume, linkOpenMode) = try {
-                val preferences = runBlocking { context.settingsStore.data.first() }
+                val preferences = runBlocking { context.pdfReaderDataStore.data.first() }
                 val autoPlay = preferences[androidx.datastore.preferences.core.booleanPreferencesKey("auto_play_audio")] ?: true
                 val vol = preferences[androidx.datastore.preferences.core.floatPreferencesKey("audio_volume")] ?: 1.0f
                 val mode = preferences[androidx.datastore.preferences.core.stringPreferencesKey("link_open_mode")] ?: "المتصفح الافتراضي"

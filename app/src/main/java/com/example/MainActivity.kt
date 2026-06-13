@@ -73,7 +73,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.first
 import java.util.Locale
 
-private val Context.dataStore by preferencesDataStore(name = "pdf_reader_settings")
+import com.example.util.pdfReaderDataStore
+
 private val APP_LANGUAGE_KEY = androidx.datastore.preferences.core.stringPreferencesKey("app_language")
 
 class MainActivity : ComponentActivity() {
@@ -102,7 +103,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        val savedLang = runBlocking { dataStore.data.map { it[APP_LANGUAGE_KEY] ?: "ar" }.first() }
+        val savedLang = runBlocking { pdfReaderDataStore.data.map { it[APP_LANGUAGE_KEY] ?: "ar" }.first() }
         val locale = Locale(savedLang)
         Locale.setDefault(locale)
         val config = resources.configuration
