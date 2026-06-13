@@ -407,17 +407,22 @@ class PdfViewModel(
         _securityExceptionUri.value = null
         _largeFileUriPending.value = null
 
-        var sizeBytes = 0L
-        // 1. Get file size and Check thresholds
-        try {
-            val pfd = context.contentResolver.openFileDescriptor(uri, "r")
-            sizeBytes = pfd?.statSize ?: 0L
-            pfd?.close()
-        } catch (e: SecurityException) {
-            _securityExceptionUri.value = uri.toString()
-            return // Stop and show permission denied dialog
-        } catch (e: Exception) {
-            // Ignore other exceptions during file prep checking
+        // 1. Get file size from metadata safely first (which does not throw SecurityException)
+        val metadata = getUriMetadata(context, uri)
+        var sizeBytes = metadata.second
+
+        // If metadata size is zero or not found, try to open file descriptor safely
+        if (sizeBytes <= 0) {
+            try {
+                val pfd = context.contentResolver.openFileDescriptor(uri, "r")
+                sizeBytes = pfd?.statSize ?: 0L
+                pfd?.close()
+            } catch (e: SecurityException) {
+                _securityExceptionUri.value = uri.toString()
+                return // Stop and show permission denied dialog
+            } catch (e: Exception) {
+                // Ignore other exceptions during file prep checking
+            }
         }
 
         when {
@@ -447,6 +452,9 @@ class PdfViewModel(
                 _errorState.value = "الملف ليس PDF صحيحاً أو تالف"
                 return
             }
+        } catch (e: SecurityException) {
+            _securityExceptionUri.value = uri.toString()
+            return
         } catch (e: Exception) {
             _errorState.value = "الملف ليس PDF صحيحاً أو تالف"
             return

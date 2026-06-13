@@ -85,15 +85,13 @@ class MainActivity : ComponentActivity() {
     private fun hasRequiredPermission(context: Context): Boolean {
         return when {
             Build.VERSION.SDK_INT >= 33 -> {
-                ContextCompat.checkSelfPermission(
-                    context,
-                    Manifest.permission.READ_MEDIA_IMAGES
-                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-            }
-            Build.VERSION.SDK_INT >= 30 -> {
-                Environment.isExternalStorageManager()
+                // On Android 13+, standard storage permission is deprecated. Since we use Storage Access Framework
+                // dynamically, we can return true directly to avoid requesting unnecessary media permissions here.
+                true
             }
             else -> {
+                // For API <= 32 (including Android 11 & 12 / API 30-32), standard READ_EXTERNAL_STORAGE is sufficient
+                // and avoids launching the highly restrictive MANAGE_EXTERNAL_STORAGE settings page.
                 ContextCompat.checkSelfPermission(
                     context,
                     Manifest.permission.READ_EXTERNAL_STORAGE
@@ -129,15 +127,20 @@ class MainActivity : ComponentActivity() {
         }
 
         splashScreen.setOnExitAnimationListener { splashScreenView ->
-            // Animate the logo scaling down and fading out
-            val scaleX = ObjectAnimator.ofFloat(splashScreenView.iconView, View.SCALE_X, 1f, 0.8f)
-            val scaleY = ObjectAnimator.ofFloat(splashScreenView.iconView, View.SCALE_Y, 1f, 0.8f)
-            val alpha  = ObjectAnimator.ofFloat(splashScreenView.iconView, View.ALPHA, 1f, 0f)
-            AnimatorSet().apply {
-                playTogether(scaleX, scaleY, alpha)
-                duration = 400
-                doOnEnd { splashScreenView.remove() }
-                start()
+            val iconView = splashScreenView.iconView
+            if (iconView != null) {
+                // Animate the logo scaling down and fading out
+                val scaleX = ObjectAnimator.ofFloat(iconView, View.SCALE_X, 1f, 0.8f)
+                val scaleY = ObjectAnimator.ofFloat(iconView, View.SCALE_Y, 1f, 0.8f)
+                val alpha  = ObjectAnimator.ofFloat(iconView, View.ALPHA, 1f, 0f)
+                AnimatorSet().apply {
+                    playTogether(scaleX, scaleY, alpha)
+                    duration = 400
+                    doOnEnd { splashScreenView.remove() }
+                    start()
+                }
+            } else {
+                splashScreenView.remove()
             }
         }
 
@@ -198,7 +201,7 @@ class MainActivity : ComponentActivity() {
 
                 if (showRationaleDialog) {
                     AlertDialog(
-                        onDismissRequest = {},
+                        onDismissRequest = { showRationaleDialog = false },
                         title = { Text("طلب صلاحية الوصول", fontWeight = FontWeight.Bold) },
                         text = { Text("يحتاج التطبيق إلى صلاحية الوصول إلى الملفات لقراءة كتب ومستندات الـ PDF المخزنة على جهازك وعرضها لك.") },
                         confirmButton = {
@@ -207,23 +210,6 @@ class MainActivity : ComponentActivity() {
                                     showRationaleDialog = false
                                     if (Build.VERSION.SDK_INT >= 33) {
                                         standardPermissionLauncher.launch(Manifest.permission.READ_MEDIA_IMAGES)
-                                    } else if (Build.VERSION.SDK_INT >= 30) {
-                                        try {
-                                            val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
-                                                data = Uri.parse("package:${context.packageName}")
-                                            }
-                                            manageStorageLauncher.launch(intent)
-                                        } catch (e: Exception) {
-                                            try {
-                                                val intent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
-                                                manageStorageLauncher.launch(intent)
-                                            } catch (ex: Exception) {
-                                                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                                                    data = Uri.parse("package:${context.packageName}")
-                                                }
-                                                context.startActivity(intent)
-                                            }
-                                        }
                                     } else {
                                         standardPermissionLauncher.launch(Manifest.permission.READ_EXTERNAL_STORAGE)
                                     }
@@ -232,15 +218,21 @@ class MainActivity : ComponentActivity() {
                                 Text("موافق")
                             }
                         },
-                        dismissButton = null
+                        dismissButton = {
+                            TextButton(
+                                onClick = { showRationaleDialog = false }
+                            ) {
+                                Text("إلغاء")
+                            }
+                        }
                     )
                 }
 
                 if (showDeniedDialog) {
                     AlertDialog(
-                        onDismissRequest = {},
+                        onDismissRequest = { showDeniedDialog = false },
                         title = { Text("الصلاحية مطلوبة", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error) },
-                        text = { Text("تم رفض تفعيل صلاحية الوصول إلى الملفات. يرجى تفعيلها يدوياً من إعدادات النظام لمواصلة استخدام التطبيق بميزات كاملة.") },
+                        text = { Text("تم رفض تفعيل صلاحية الوصول إلى الملفات. يمكنك تفعيلها يدوياً من إعدادات النظام، أو مواصلة استخدام التطبيق بميزات جزئية.") },
                         confirmButton = {
                             Button(
                                 onClick = {
@@ -257,7 +249,13 @@ class MainActivity : ComponentActivity() {
                                 Text("فتح الإعدادات")
                             }
                         },
-                        dismissButton = null
+                        dismissButton = {
+                            TextButton(
+                                onClick = { showDeniedDialog = false }
+                            ) {
+                                Text("إلغاء")
+                            }
+                        }
                     )
                 }
 
