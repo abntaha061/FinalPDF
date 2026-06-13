@@ -218,8 +218,8 @@ fun PdfViewerWidget(
                                 .enableSwipe(true)
                                 .swipeHorizontal(if (isPaged) true else false)
                                 .pageSnap(if (isPaged) true else false)
-                                .autoSpacing(if (isPaged) true else false)
-                                .pageFling(if (isPaged) true else false)
+                                .autoSpacing(true)                        // Always spacing enabled for beautiful clean page separation
+                                .pageFling(true)                          // ALWAYS enable pageFling for smooth momentum physics scrolling!
                                 .enableDoubletap(true)                    // native double tap zoom enabled
                                 .defaultPage(currentPage)                 // start from current page
                                 .onLoad { totalPages ->
@@ -293,6 +293,9 @@ fun PdfViewerWidget(
                             viewModel.pageRotations.forEach { (pageIdx, rot) ->
                                 val normRot = ((rot % 360) + 360) % 360
                                 pdfView.setPageRotation(pageIdx, normRot)
+                            }
+                            if (pdfView.currentPage != currentPage) {
+                                pdfView.jumpTo(currentPage)
                             }
                         } catch (e: Exception) {
                             // ignore
