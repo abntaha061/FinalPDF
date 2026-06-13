@@ -15,6 +15,7 @@ import com.example.ui.components.setPageRotation
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -56,6 +57,18 @@ import androidx.core.view.WindowInsetsControllerCompat
 import com.example.ui.PdfViewModel
 import com.example.ui.AudioViewModel
 import com.example.ui.AudioState
+import com.example.ui.AnnotationViewModel
+import com.example.ui.AnnotationTool
+import com.example.ui.AnnotationData
+import com.example.ui.components.AnnotationBar
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Paint
+import androidx.compose.ui.graphics.PaintingStyle
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import com.example.ui.components.BottomReaderBar
 import com.example.ui.components.PdfViewerWidget
 import com.example.ui.components.BookmarkDrawer
@@ -93,7 +106,8 @@ fun ViewerScreen(
     viewModel: PdfViewModel,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
-    onNavigateToWebView: ((String) -> Unit)? = null
+    onNavigateToWebView: ((String) -> Unit)? = null,
+    onNavigateToReader: ((String) -> Unit)? = null
 ) {
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -128,6 +142,26 @@ fun ViewerScreen(
 
     // Keep reference to PDFView for zooming levels
     var pdfViewInst by remember { mutableStateOf<PDFView?>(null) }
+
+    val annotationViewModel: AnnotationViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+    val annotationTool by annotationViewModel.currentTool.collectAsState()
+    val annotationColor by annotationViewModel.currentColor.collectAsState()
+    val annotationStrokeWidth by annotationViewModel.strokeWidth.collectAsState()
+    val annotationsList by annotationViewModel.annotations.collectAsState()
+
+    var isAnnotationBarVisible by remember { mutableStateOf(false) }
+    val currentDrawPoints = remember { mutableStateListOf<Offset>() }
+    var currentHighlightStart by remember { mutableStateOf<Offset?>(null) }
+    var currentHighlightEnd by remember { mutableStateOf<Offset?>(null) }
+
+    // Dialog state for TextNote and StickyNote
+    var showAnnotationTextDialog by remember { mutableStateOf(false) }
+    var annotationDialogText by remember { mutableStateOf("") }
+    var annotationDialogPosition by remember { mutableStateOf(Offset.Zero) }
+    var annotationDialogColor by remember { mutableStateOf(Color(0xFFFF3F3F)) }
+    var isAddingStickyNote by remember { mutableStateOf(false) } // distinguish TextNote or StickyNote
+    // Save confirmation dialog
+    var showSaveConfirmDialog by remember { mutableStateOf(false) }
 
     val pdfPickerLauncher = rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
@@ -576,6 +610,314 @@ fun ViewerScreen(
                         }
                     }
 
+                    // Interactive Drawing Canvas Overlay
+                    if (isAnnotationBarVisible) {
+                        Canvas(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .testTag("annotation_canvas")
+                                .pointerInput(annotationTool) {
+                                    if (annotationTool == com.example.ui.AnnotationTool.None) return@pointerInput
+
+                                    detectDragGestures(
+                                        onDragStart = { offset ->
+                                            when (annotationTool) {
+                                                com.example.ui.AnnotationTool.Pen -> {
+                                                    currentDrawPoints.clear()
+                                                    currentDrawPoints.add(offset)
+                                                }
+                                                com.example.ui.AnnotationTool.Highlighter -> {
+                                                    currentHighlightStart = offset
+                                                    currentHighlightEnd = offset
+                                                }
+                                                com.example.ui.AnnotationTool.Eraser -> {
+                                                    annotationViewModel.eraseAt(offset, currentPage)
+                                                }
+                                                else -> {}
+                                            }
+                                        },
+                                        onDrag = { change, _ ->
+                                            change.consume()
+                                            when (annotationTool) {
+                                                com.example.ui.AnnotationTool.Pen -> {
+                                                    currentDrawPoints.add(change.position)
+                                                }
+                                                com.example.ui.AnnotationTool.Highlighter -> {
+                                                    currentHighlightEnd = change.position
+                                                }
+                                                com.example.ui.AnnotationTool.Eraser -> {
+                                                    annotationViewModel.eraseAt(change.position, currentPage)
+                                                }
+                                                else -> {}
+                                            }
+                                        },
+                                        onDragEnd = {
+                                            when (annotationTool) {
+                                                com.example.ui.AnnotationTool.Pen -> {
+                                                    if (currentDrawPoints.isNotEmpty()) {
+                                                        annotationViewModel.addAnnotation(
+                                                            com.example.ui.AnnotationData.DrawPath(
+                                                                points = currentDrawPoints.toList(),
+                                                                color = annotationColor,
+                                                                stroke = annotationStrokeWidth,
+                                                                page = currentPage
+                                                            )
+                                                        )
+                                                        currentDrawPoints.clear()
+                                                    }
+                                                }
+                                                com.example.ui.AnnotationTool.Highlighter -> {
+                                                    val start = currentHighlightStart
+                                                    val end = currentHighlightEnd
+                                                    if (start != null && end != null) {
+                                                        val rect = androidx.compose.ui.geometry.Rect(
+                                                            left = Math.min(start.x, end.x),
+                                                            top = Math.min(start.y, end.y),
+                                                            right = Math.max(start.x, end.x),
+                                                            bottom = Math.max(start.y, end.y)
+                                                        )
+                                                        annotationViewModel.addAnnotation(
+                                                            com.example.ui.AnnotationData.Highlight(
+                                                                rect = rect,
+                                                                color = annotationColor,
+                                                                page = currentPage
+                                                            )
+                                                        )
+                                                    }
+                                                    currentHighlightStart = null
+                                                    currentHighlightEnd = null
+                                                }
+                                                else -> {}
+                                            }
+                                        }
+                                    )
+                                }
+                                .pointerInput(annotationTool) {
+                                    if (annotationTool == com.example.ui.AnnotationTool.None) return@pointerInput
+                                    detectTapGestures { offset ->
+                                        if (annotationTool == com.example.ui.AnnotationTool.TextNote || annotationTool == com.example.ui.AnnotationTool.StickyNote) {
+                                            isAddingStickyNote = (annotationTool == com.example.ui.AnnotationTool.StickyNote)
+                                            annotationDialogPosition = offset
+                                            annotationDialogText = ""
+                                            annotationDialogColor = annotationColor
+                                            showAnnotationTextDialog = true
+                                        }
+                                    }
+                                }
+                        ) {
+                            // Update canvas size in VM for coordinates translations
+                            annotationViewModel.canvasWidth = size.width
+                            annotationViewModel.canvasHeight = size.height
+
+                            // Draw existing Annotations for current page
+                            annotationsList.filter { it.page == currentPage }.forEach { annotation ->
+                                when (annotation) {
+                                    is com.example.ui.AnnotationData.DrawPath -> {
+                                        val points = annotation.points
+                                        if (points.size > 1) {
+                                            val path = Path().apply {
+                                                moveTo(points.first().x, points.first().y)
+                                                for (i in 1 until points.size) {
+                                                    lineTo(points[i].x, points[i].y)
+                                                }
+                                            }
+                                            drawIntoCanvas { canvas ->
+                                                canvas.drawPath(path, Paint().apply {
+                                                    color = annotation.color
+                                                    style = PaintingStyle.Stroke
+                                                    strokeWidth = annotation.stroke
+                                                    strokeCap = StrokeCap.Round
+                                                    strokeJoin = StrokeJoin.Round
+                                                    isAntiAlias = true
+                                                })
+                                            }
+                                        }
+                                    }
+                                    is com.example.ui.AnnotationData.Highlight -> {
+                                        drawRect(
+                                            color = annotation.color.copy(alpha = 0.35f),
+                                            topLeft = annotation.rect.topLeft,
+                                            size = annotation.rect.size
+                                        )
+                                    }
+                                    else -> {} // Sticky / Text Notes drawn as overlay Composables below
+                                }
+                            }
+
+                            // Draw current active drawing line
+                            if (annotationTool == com.example.ui.AnnotationTool.Pen && currentDrawPoints.size > 1) {
+                                val activePath = Path().apply {
+                                    moveTo(currentDrawPoints.first().x, currentDrawPoints.first().y)
+                                    for (i in 1 until currentDrawPoints.size) {
+                                        lineTo(currentDrawPoints[i].x, currentDrawPoints[i].y)
+                                    }
+                                }
+                                drawIntoCanvas { canvas ->
+                                    canvas.drawPath(activePath, Paint().apply {
+                                        color = annotationColor
+                                        style = PaintingStyle.Stroke
+                                        strokeWidth = annotationStrokeWidth
+                                        strokeCap = StrokeCap.Round
+                                        strokeJoin = StrokeJoin.Round
+                                        isAntiAlias = true
+                                    })
+                                }
+                            }
+
+                            // Draw current active highlighter box
+                            if (annotationTool == com.example.ui.AnnotationTool.Highlighter) {
+                                val start = currentHighlightStart
+                                val end = currentHighlightEnd
+                                if (start != null && end != null) {
+                                    val rect = androidx.compose.ui.geometry.Rect(
+                                        left = Math.min(start.x, end.x),
+                                        top = Math.min(start.y, end.y),
+                                        right = Math.max(start.x, end.x),
+                                        bottom = Math.max(start.y, end.y)
+                                    )
+                                    drawRect(
+                                        color = annotationColor.copy(alpha = 0.35f),
+                                        topLeft = rect.topLeft,
+                                        size = rect.size
+                                    )
+                                }
+                            }
+                        }
+
+                        // Overlay Sticky / Text Notes on top of the Canvas
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            annotationsList.filter { it.page == currentPage }.forEach { annotation ->
+                                when (annotation) {
+                                    is com.example.ui.AnnotationData.TextNote -> {
+                                        var notePos by remember { mutableStateOf(annotation.position) }
+
+                                        Box(
+                                            modifier = Modifier
+                                                .offset { IntOffset(notePos.x.toInt(), notePos.y.toInt()) }
+                                                .pointerInput(annotation) {
+                                                    detectDragGestures(
+                                                        onDrag = { change, dragAmount ->
+                                                            change.consume()
+                                                            notePos += dragAmount
+                                                        },
+                                                        onDragEnd = {
+                                                            // update position in VM lists
+                                                            annotationViewModel.removeAnnotation(annotation)
+                                                            annotationViewModel.addAnnotation(annotation.copy(position = notePos))
+                                                        }
+                                                    )
+                                                }
+                                                .background(Color(0xFF2E2E3E), shape = RoundedCornerShape(8.dp))
+                                                .border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))
+                                                .padding(horizontal = 8.dp, vertical = 6.dp)
+                                                .widthIn(max = 200.dp)
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                            ) {
+                                                Text(
+                                                    text = annotation.text,
+                                                    color = Color.White,
+                                                    fontSize = 12.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                                Icon(
+                                                    imageVector = Icons.Default.Delete,
+                                                    contentDescription = "حذف الملاحظة",
+                                                    tint = Color(0xFFFF6B6B),
+                                                    modifier = Modifier
+                                                        .size(16.dp)
+                                                        .clickable {
+                                                            annotationViewModel.removeAnnotation(annotation)
+                                                        }
+                                                )
+                                            }
+                                        }
+                                    }
+                                    is com.example.ui.AnnotationData.StickyNote -> {
+                                        var showStickyTextPopup by remember { mutableStateOf(false) }
+                                        var showDeleteConfirm by remember { mutableStateOf(false) }
+
+                                        Box(
+                                            modifier = Modifier
+                                                .offset { IntOffset(annotation.position.x.toInt() - 18, annotation.position.y.toInt() - 18) }
+                                        ) {
+                                            IconButton(
+                                                onClick = { showStickyTextPopup = !showStickyTextPopup },
+                                                modifier = Modifier
+                                                    .size(36.dp)
+                                                    .pointerInput(annotation) {
+                                                        detectTapGestures(
+                                                            onTap = { showStickyTextPopup = !showStickyTextPopup },
+                                                            onLongPress = { showDeleteConfirm = true }
+                                                        )
+                                                    }
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.StickyNote2,
+                                                    contentDescription = "ملصق ملاحظة",
+                                                    tint = Color(0xFFFFD93D),
+                                                    modifier = Modifier.size(36.dp)
+                                                )
+                                            }
+
+                                            if (showStickyTextPopup) {
+                                                Popup(
+                                                    alignment = Alignment.TopCenter,
+                                                    offset = IntOffset(0, -50),
+                                                    onDismissRequest = { showStickyTextPopup = false }
+                                                ) {
+                                                    Card(
+                                                        shape = RoundedCornerShape(8.dp),
+                                                        colors = CardDefaults.cardColors(containerColor = Color(0xFF2E2E3E)),
+                                                        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+                                                        modifier = Modifier
+                                                            .padding(4.dp)
+                                                            .widthIn(max = 200.dp)
+                                                    ) {
+                                                        Column(modifier = Modifier.padding(8.dp)) {
+                                                            Text(
+                                                                text = annotation.text,
+                                                                color = Color.White,
+                                                                fontSize = 12.sp
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            if (showDeleteConfirm) {
+                                                AlertDialog(
+                                                    onDismissRequest = { showDeleteConfirm = false },
+                                                    title = { Text("حذف الملصق", fontWeight = FontWeight.Bold) },
+                                                    text = { Text("هل تريد حذف هذا الملصق فعلاً؟") },
+                                                    confirmButton = {
+                                                        Button(
+                                                            onClick = {
+                                                                annotationViewModel.removeAnnotation(annotation)
+                                                                showDeleteConfirm = false
+                                                            },
+                                                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6B6B))
+                                                        ) {
+                                                            Text("حذف")
+                                                        }
+                                                    },
+                                                    dismissButton = {
+                                                        TextButton(onClick = { showDeleteConfirm = false }) {
+                                                            Text("إلغاء")
+                                                        }
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
+                                    else -> {}
+                                }
+                            }
+                        }
+                    }
+
                     // Draw automatic yellow text highlight overlay in the center area if search matches current page
                     if (isSearching && searchMatches.contains(currentPage)) {
                         Box(
@@ -1004,179 +1346,394 @@ fun ViewerScreen(
                 }
             }
 
-            // Overlay BottomReaderBar with Tween slide vertical animations (300ms)
-            AnimatedVisibility(
-                visible = isToolbarVisible,
-                enter = slideInVertically(
-                    initialOffsetY = { it },
-                    animationSpec = tween(durationMillis = 300)
-                ),
-                exit = slideOutVertically(
-                    targetOffsetY = { it },
-                    animationSpec = tween(durationMillis = 300)
-                ),
+            // Integrated Bottom Bars Column: Contains AnnotationBar (top) and BottomReaderBar (bottom)
+            Column(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
+                    .navigationBarsPadding(),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                BottomReaderBar(
-                    isPageBookmarked = isPageBookmarked,
-                    onMenuClick = {
-                        coroutineScope.launch { drawerState.open() }
-                    },
-                    onSearchClick = {
-                        isSearching = !isSearching
-                        if (!isSearching) {
-                            pdfViewInst?.resetSearch()
-                            searchQuery = ""
-                            searchMatches = emptyList()
-                            totalSearchMatches = 0
-                            currentSearchMatchIndex = 0
+                // Annotation ToolBar (Slide vertically from bottom)
+                AnimatedVisibility(
+                    visible = isAnnotationBarVisible && isToolbarVisible,
+                    enter = slideInVertically(
+                        initialOffsetY = { it },
+                        animationSpec = tween(durationMillis = 250)
+                    ),
+                    exit = slideOutVertically(
+                        targetOffsetY = { it },
+                        animationSpec = tween(durationMillis = 250)
+                    )
+                ) {
+                    AnnotationBar(
+                        selectedTool = annotationTool,
+                        onToolSelect = { tool ->
+                            annotationViewModel.setTool(tool)
+                        },
+                        currentColor = annotationColor,
+                        onColorSelect = { color ->
+                            annotationViewModel.setColor(color)
+                        },
+                        strokeWidth = annotationStrokeWidth,
+                        onStrokeWidthSelect = { width ->
+                            annotationViewModel.setStrokeWidth(width)
+                        },
+                        onCloseClick = {
+                            showSaveConfirmDialog = true
                         }
-                    },
-                    onZoomInClick = {
-                        pdfViewInst?.let { pdfView ->
-                            val proposedZoom = (pdfView.zoom + 0.25f).coerceAtMost(4.0f)
-                            pdfView.zoomWithAnimation(proposedZoom)
-                            zoomLevel = proposedZoom
-                        }
-                    },
-                    onZoomOutClick = {
-                        pdfViewInst?.let { pdfView ->
-                            val proposedZoom = (pdfView.zoom - 0.25f).coerceAtLeast(0.5f)
-                            pdfView.zoomWithAnimation(proposedZoom)
-                            zoomLevel = proposedZoom
-                        }
-                    },
-                    onBookmarkClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        viewModel.toggleCurrentPageBookmark()
-                    },
-                    onShareClick = {
-                        if (activeUri != null) {
-                            try {
-                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                    type = "application/pdf"
-                                    putExtra(Intent.EXTRA_STREAM, Uri.parse(activeUri!!))
-                                    putExtra(Intent.EXTRA_SUBJECT, documentName)
-                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                }
-                                context.startActivity(Intent.createChooser(shareIntent, "مشاركة مستند PDF"))
-                            } catch (e: Exception) {
-                                Log.e("ViewerScreen", "Error sharing document", e)
+                    )
+                }
+
+                // Overlay BottomReaderBar with Tween slide vertical animations (300ms)
+                AnimatedVisibility(
+                    visible = isToolbarVisible,
+                    enter = slideInVertically(
+                        initialOffsetY = { it },
+                        animationSpec = tween(durationMillis = 300)
+                    ),
+                    exit = slideOutVertically(
+                        targetOffsetY = { it },
+                        animationSpec = tween(durationMillis = 300)
+                    )
+                ) {
+                    BottomReaderBar(
+                        isPageBookmarked = isPageBookmarked,
+                        onMenuClick = {
+                            coroutineScope.launch { drawerState.open() }
+                        },
+                        onSearchClick = {
+                            isSearching = !isSearching
+                            if (!isSearching) {
+                                pdfViewInst?.resetSearch()
+                                searchQuery = ""
+                                searchMatches = emptyList()
+                                totalSearchMatches = 0
+                                currentSearchMatchIndex = 0
                             }
-                        }
-                    },
-                    onGoToPageClick = {
-                        showJumpDialog = true
-                    },
-                    onPrintClick = {
-                        if (activeUri != null) {
-                            try {
-                                val printManager = context.getSystemService(Context.PRINT_SERVICE) as? PrintManager
-                                if (printManager != null) {
-                                    val printAdapter = PdfDocumentAdapter(
-                                        context = context,
-                                        fileUri = Uri.parse(activeUri!!),
-                                        totalPages = totalPages
-                                    )
-                                    printManager.print("قارئ PDF - $documentName", printAdapter, android.print.PrintAttributes.Builder().build())
-                                }
-                            } catch (e: Exception) {
-                                Log.e("ViewerScreen", "Error launching printer job", e)
+                        },
+                        onZoomInClick = {
+                            pdfViewInst?.let { pdfView ->
+                                val proposedZoom = (pdfView.zoom + 0.25f).coerceAtMost(4.0f)
+                                pdfView.zoomWithAnimation(proposedZoom)
+                                zoomLevel = proposedZoom
                             }
-                        }
-                    },
-                    onFileInfoClick = {
-                        showFileInfoDialog = true
-                    },
-                    onReadingModeClick = {
-                        showReadingModeBottomSheet = true
-                    },
-                    onSavePageAsImageClick = {
-                        showSaveAsImageConfirmDialog = true
-                    },
-                    onRotateRightClick = {
-                        pdfViewInst?.let { pdfView ->
-                            val currentRot = viewModel.pageRotations[currentPage] ?: 0
-                            val newRot = currentRot + 90
-                            viewModel.pageRotations[currentPage] = newRot
-                            pdfView.setPageRotation(currentPage, newRot % 360)
-                            pdfView.invalidate()
-                        }
-                    },
-                    onRotateLeftClick = {
-                        pdfViewInst?.let { pdfView ->
-                            val currentRot = viewModel.pageRotations[currentPage] ?: 0
-                            val newRot = currentRot - 90
-                            viewModel.pageRotations[currentPage] = newRot
-                            pdfView.setPageRotation(currentPage, ((newRot % 360) + 360) % 360)
-                            pdfView.invalidate()
-                        }
-                    },
-                    onResetRotationClick = {
-                        pdfViewInst?.let { pdfView ->
-                            viewModel.pageRotations[currentPage] = 0
-                            pdfView.setPageRotation(currentPage, 0)
-                            pdfView.invalidate()
-                        }
-                    },
-                    isScreenRotationLocked = isScreenRotationLocked,
-                    onToggleLockScreenRotation = {
-                        val requestedState = !isScreenRotationLocked
-                        isScreenRotationLocked = requestedState
-                        activity?.let { act ->
-                            if (requestedState) {
-                                act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LOCKED
-                                coroutineScope.launch {
-                                    snackbarHostState.showSnackbar("تم قفل اتجاه الشاشة")
-                                }
-                            } else {
-                                act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-                                coroutineScope.launch {
-                                    snackbarHostState.showSnackbar("تم فتح قفل الاتجاه")
+                        },
+                        onZoomOutClick = {
+                            pdfViewInst?.let { pdfView ->
+                                val proposedZoom = (pdfView.zoom - 0.25f).coerceAtLeast(0.5f)
+                                pdfView.zoomWithAnimation(proposedZoom)
+                                zoomLevel = proposedZoom
+                            }
+                        },
+                        onBookmarkClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            viewModel.toggleCurrentPageBookmark()
+                        },
+                        onShareClick = {
+                            if (activeUri != null) {
+                                try {
+                                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                        type = "application/pdf"
+                                        putExtra(Intent.EXTRA_STREAM, Uri.parse(activeUri!!))
+                                        putExtra(Intent.EXTRA_SUBJECT, documentName)
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                    context.startActivity(Intent.createChooser(shareIntent, "مشاركة مستند PDF"))
+                                } catch (e: Exception) {
+                                    Log.e("ViewerScreen", "Error sharing document", e)
                                 }
                             }
-                        }
-                    },
-                    readingScrollMode = readingScrollMode,
-                    onReadingScrollModeToggle = {
-                        val nextMode = if (readingScrollMode == "continuous") "paged" else "continuous"
-                        viewModel.setReadingScrollMode(nextMode)
-                        coroutineScope.launch {
-                            snackbarHostState.showSnackbar(
-                                if (nextMode == "continuous") "تم تفعيل التمرير المستمر" else "تم تفعيل التمرير صفحة بصفحة"
-                            )
-                        }
-                    },
-                    fitMode = fitMode,
-                    onFitModeChange = { newFit ->
-                        viewModel.setFitMode(newFit)
-                        coroutineScope.launch {
-                            snackbarHostState.showSnackbar(
-                                when (newFit) {
-                                    "width" -> "ملاءمة العرض"
-                                    "height" -> "ملاءمة الارتفاع"
-                                    else -> "الحجم الفعلي"
+                        },
+                        onGoToPageClick = {
+                            showJumpDialog = true
+                        },
+                        onPrintClick = {
+                            if (activeUri != null) {
+                                try {
+                                    val printManager = context.getSystemService(Context.PRINT_SERVICE) as? PrintManager
+                                    if (printManager != null) {
+                                        val printAdapter = PdfDocumentAdapter(
+                                            context = context,
+                                            fileUri = Uri.parse(activeUri!!),
+                                            totalPages = totalPages
+                                        )
+                                        printManager.print("قارئ PDF - $documentName", printAdapter, android.print.PrintAttributes.Builder().build())
+                                    }
+                                } catch (e: Exception) {
+                                    Log.e("ViewerScreen", "Error launching printer job", e)
                                 }
-                            )
-                        }
-                    },
-                    isDoublePageMode = isDoublePageMode,
-                    onDoublePageModeToggle = {
-                        val configState = context.resources.configuration
-                        val isTabletOrLandscapeState = configState.screenWidthDp >= 600 || configState.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
-                        if (!isTabletOrLandscapeState) {
-                            coroutineScope.launch {
-                                snackbarHostState.showSnackbar("وضع الصفحتين متاح في الوضع الأفقي فقط")
                             }
-                        } else {
-                            val nextDoubleVal = !isDoublePageMode
-                            viewModel.setDoublePageMode(nextDoubleVal)
+                        },
+                        onFileInfoClick = {
+                            showFileInfoDialog = true
+                        },
+                        onReadingModeClick = {
+                            showReadingModeBottomSheet = true
+                        },
+                        onSavePageAsImageClick = {
+                            showSaveAsImageConfirmDialog = true
+                        },
+                        onRotateRightClick = {
+                            pdfViewInst?.let { pdfView ->
+                                val currentRot = viewModel.pageRotations[currentPage] ?: 0
+                                val newRot = currentRot + 90
+                                viewModel.pageRotations[currentPage] = newRot
+                                pdfView.setPageRotation(currentPage, newRot % 360)
+                                pdfView.invalidate()
+                            }
+                        },
+                        onRotateLeftClick = {
+                            pdfViewInst?.let { pdfView ->
+                                val currentRot = viewModel.pageRotations[currentPage] ?: 0
+                                val newRot = currentRot - 90
+                                viewModel.pageRotations[currentPage] = newRot
+                                pdfView.setPageRotation(currentPage, ((newRot % 360) + 360) % 360)
+                                pdfView.invalidate()
+                            }
+                        },
+                        onResetRotationClick = {
+                            pdfViewInst?.let { pdfView ->
+                                viewModel.pageRotations[currentPage] = 0
+                                pdfView.setPageRotation(currentPage, 0)
+                                pdfView.invalidate()
+                            }
+                        },
+                        isScreenRotationLocked = isScreenRotationLocked,
+                        onToggleLockScreenRotation = {
+                            val requestedState = !isScreenRotationLocked
+                            isScreenRotationLocked = requestedState
+                            activity?.let { act ->
+                                if (requestedState) {
+                                    act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LOCKED
+                                    coroutineScope.launch {
+                                        snackbarHostState.showSnackbar("تم قفل اتجاه الشاشة")
+                                    }
+                                } else {
+                                    act.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                                    coroutineScope.launch {
+                                        snackbarHostState.showSnackbar("تم فتح قفل الاتجاه")
+                                    }
+                                }
+                            }
+                        },
+                        readingScrollMode = readingScrollMode,
+                        onReadingScrollModeToggle = {
+                            val nextMode = if (readingScrollMode == "continuous") "paged" else "continuous"
+                            viewModel.setReadingScrollMode(nextMode)
                             coroutineScope.launch {
                                 snackbarHostState.showSnackbar(
-                                    if (nextDoubleVal) "تم تفعيل وضع الصفحتين" else "تم إلغاء وضع الصفحتين"
+                                    if (nextMode == "continuous") "تم تفعيل التمرير المستمر" else "تم تفعيل التمرير صفحة بصفحة"
                                 )
+                            }
+                        },
+                        fitMode = fitMode,
+                        onFitModeChange = { newFit ->
+                            viewModel.setFitMode(newFit)
+                            coroutineScope.launch {
+                                snackbarHostState.showSnackbar(
+                                    when (newFit) {
+                                        "width" -> "ملاءمة العرض"
+                                        "height" -> "ملاءمة الارتفاع"
+                                        else -> "الحجم الفعلي"
+                                    }
+                                )
+                            }
+                        },
+                        isDoublePageMode = isDoublePageMode,
+                        onDoublePageModeToggle = {
+                            val configState = context.resources.configuration
+                            val isTabletOrLandscapeState = configState.screenWidthDp >= 600 || configState.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+                            if (!isTabletOrLandscapeState) {
+                                coroutineScope.launch {
+                                    snackbarHostState.showSnackbar("وضع الصفحتين متاح في الوضع الأفقي فقط")
+                                }
+                            } else {
+                                val nextDoubleVal = !isDoublePageMode
+                                viewModel.setDoublePageMode(nextDoubleVal)
+                                coroutineScope.launch {
+                                    snackbarHostState.showSnackbar(
+                                        if (nextDoubleVal) "تم تفعيل وضع الصفحتين" else "تم إلغاء وضع الصفحتين"
+                                    )
+                                }
+                            }
+                        },
+                        isAnnotationModeActive = isAnnotationBarVisible,
+                        onAnnotationClick = {
+                            isAnnotationBarVisible = !isAnnotationBarVisible
+                            if (isAnnotationBarVisible) {
+                                annotationViewModel.setTool(AnnotationTool.Pen)
+                            } else {
+                                annotationViewModel.setTool(AnnotationTool.None)
+                            }
+                        }
+                    )
+                }
+            }
+
+            // Annotation Text Dialogue
+            if (showAnnotationTextDialog) {
+                AlertDialog(
+                    onDismissRequest = { showAnnotationTextDialog = false },
+                    title = {
+                        Text(
+                            text = if (isAddingStickyNote) "إضافة ملصق ملاحظة" else "إضافة ملاحظة نصية",
+                            fontWeight = FontWeight.Bold,
+                            color = AppTextPrimary
+                        )
+                    },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+                                OutlinedTextField(
+                                    value = annotationDialogText,
+                                    onValueChange = { if (it.length <= 200) annotationDialogText = it },
+                                    placeholder = { Text("اكتب ملاحظتك...") },
+                                    modifier = Modifier.fillMaxWidth().testTag("annotation_text_input"),
+                                    maxLines = 4
+                                )
+                            }
+                            Text(
+                                text = "اختر اللون:",
+                                color = AppTextSecondary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                listOf(
+                                    Color(0xFFFF3F3F), // Red
+                                    Color(0xFFFF7F3F), // Orange
+                                    Color(0xFFFFD93D), // Yellow
+                                    Color(0xFF6BCB77), // Green
+                                    Color(0xFF4D96FF)  // Teal
+                                ).forEach { color ->
+                                    Box(
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .clip(CircleShape)
+                                            .background(color)
+                                            .border(
+                                                2.dp,
+                                                if (annotationDialogColor == color) Color.White else Color.Transparent,
+                                                CircleShape
+                                            )
+                                            .clickable {
+                                                annotationDialogColor = color
+                                            }
+                                            .testTag("dialog_color_${color.value}")
+                                    )
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                if (annotationDialogText.isNotBlank()) {
+                                    if (isAddingStickyNote) {
+                                        annotationViewModel.addAnnotation(
+                                            AnnotationData.StickyNote(
+                                                text = annotationDialogText,
+                                                position = annotationDialogPosition,
+                                                page = currentPage
+                                            )
+                                        )
+                                    } else {
+                                        annotationViewModel.addAnnotation(
+                                            AnnotationData.TextNote(
+                                                text = annotationDialogText,
+                                                position = annotationDialogPosition,
+                                                page = currentPage
+                                            )
+                                        )
+                                    }
+                                }
+                                showAnnotationTextDialog = false
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = AppPrimary),
+                            modifier = Modifier.testTag("annotation_dialog_confirm")
+                        ) {
+                            Text("إضافة")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(
+                            onClick = { showAnnotationTextDialog = false },
+                            modifier = Modifier.testTag("annotation_dialog_dismiss")
+                        ) {
+                            Text("إلغاء")
+                        }
+                    }
+                )
+            }
+
+            // Annotation save/exit confirmation dialog
+            if (showSaveConfirmDialog) {
+                AlertDialog(
+                    onDismissRequest = { showSaveConfirmDialog = false },
+                    title = { Text("حفظ التعديلات", fontWeight = FontWeight.Bold, color = AppTextPrimary) },
+                    text = { Text("هل تريد حفظ التعديلات داخل ملف PDF جديد؟") },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                showSaveConfirmDialog = false
+                                if (activeUri != null) {
+                                    coroutineScope.launch {
+                                        val snack = snackbarHostState.showSnackbar(
+                                            message = "جاري الحفظ والتعديل...",
+                                            duration = SnackbarDuration.Indefinite
+                                        )
+                                        val savedFile = annotationViewModel.saveAnnotationsToPdf(
+                                            context,
+                                            Uri.parse(activeUri!!),
+                                            totalPages
+                                        )
+                                        if (savedFile != null) {
+                                            isAnnotationBarVisible = false
+                                            annotationViewModel.setTool(AnnotationTool.None)
+                                            annotationViewModel.clearAnnotations()
+
+                                            val result = snackbarHostState.showSnackbar(
+                                                message = "تم الحفظ: ${savedFile.name}",
+                                                actionLabel = "فتح",
+                                                duration = SnackbarDuration.Long
+                                            )
+                                            if (result == SnackbarResult.ActionPerformed) {
+                                                onNavigateToReader?.invoke(Uri.fromFile(savedFile).toString())
+                                            }
+                                        } else {
+                                            snackbarHostState.showSnackbar("تعذّر حفظ التعديلات!")
+                                        }
+                                    }
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = AppPrimary),
+                            modifier = Modifier.testTag("save_annotations_confirm")
+                        ) {
+                            Text("حفظ كملف جديد")
+                        }
+                    },
+                    dismissButton = {
+                        Row {
+                            TextButton(
+                                onClick = {
+                                    showSaveConfirmDialog = false
+                                    isAnnotationBarVisible = false
+                                    annotationViewModel.setTool(AnnotationTool.None)
+                                    annotationViewModel.clearAnnotations()
+                                },
+                                modifier = Modifier.testTag("save_annotations_discard")
+                            ) {
+                                Text("تجاهل")
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            TextButton(
+                                onClick = { showSaveConfirmDialog = false },
+                                modifier = Modifier.testTag("save_annotations_cancel")
+                            ) {
+                                Text("إلغاء")
                             }
                         }
                     }

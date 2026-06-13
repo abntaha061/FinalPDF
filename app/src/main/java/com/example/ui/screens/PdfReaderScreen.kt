@@ -34,6 +34,10 @@ fun PdfReaderScreen(
         onNavigateToWebView = { url ->
             val encoded = Uri.encode(url)
             navController.navigate(Screen.WebView.createRoute(encoded))
+        },
+        onNavigateToReader = { newUri ->
+            val encoded = Uri.encode(newUri)
+            navController.navigate(Screen.PdfReader.createRoute(encoded))
         }
     )
 }

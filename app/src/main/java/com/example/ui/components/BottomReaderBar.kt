@@ -56,6 +56,8 @@ fun BottomReaderBar(
     onFitModeChange: (String) -> Unit,
     isDoublePageMode: Boolean,
     onDoublePageModeToggle: () -> Unit,
+    isAnnotationModeActive: Boolean,
+    onAnnotationClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -221,6 +223,15 @@ fun BottomReaderBar(
                 contentDescription = "تبديل وضع التمرير",
                 onClick = onReadingScrollModeToggle,
                 testTag = "reader_scroll_mode_toggle_button"
+            )
+
+            // 7c. Annotation mode edit button
+            BarIconButton(
+                icon = Icons.Default.Edit,
+                tint = if (isAnnotationModeActive) AppPrimary else AppTextPrimary,
+                contentDescription = "التعديل والكتابة",
+                onClick = onAnnotationClick,
+                testTag = "reader_annotation_button"
             )
 
             // 8. More vertically options dropdown
