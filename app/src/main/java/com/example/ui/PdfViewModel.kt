@@ -18,10 +18,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
-// لا "private" هنا عمداً: MainActivity.kt يستورد هذا الـ DataStore عبر
-// import com.example.ui.dataStore لتجنب وجود نسختين من DataStore لنفس الملف
-val Context.dataStore by preferencesDataStore(name = "pdf_reader_settings")
-
+private val Context.dataStore by preferencesDataStore(name = "pdf_reader_settings")
 private val NIGHT_MODE_KEY = booleanPreferencesKey("is_night_mode")
 private val READING_MODE_KEY = androidx.datastore.preferences.core.stringPreferencesKey("reading_mode")
 private val ONBOARDING_DONE_KEY = booleanPreferencesKey("onboarding_done")
@@ -240,10 +237,21 @@ class PdfViewModel(
             _isOnboardingDone.filterNotNull().first()
             _isReady.value = true
         }
-        // ملاحظة: تم نقل بلوك "currentPage.debounce(...)" الخاص بالـ Prefetch
-        // إلى init {} ثانٍ أسفل الملف (بعد تعريف _currentPage/_selectedUri/_totalPages/
-        // _prefetchEnabled/prefetchManager) لأن وضعه هنا كان يسبب NullPointerException،
-        // لأن هذه الخصائص لم تكن قد تم تهيئتها بعد عند تنفيذ هذا الـ init الأول.
+        viewModelScope.launch {
+            currentPage
+                .debounce(200L)
+                .collect { page ->
+                    val fileUriString = _selectedUri.value
+                    if (fileUriString != null && _prefetchEnabled.value) {
+                        try {
+                            val fUri = Uri.parse(fileUriString)
+                            prefetchManager.prefetchAround(page, _totalPages.value, fUri, context)
+                        } catch (e: Exception) {
+                            // Silently ignore prefetch errors
+                        }
+                    }
+                }
+        }
     }
 
     fun completeOnboarding() {
@@ -324,27 +332,6 @@ class PdfViewModel(
     val prefetchManager = PdfPrefetchManager()
     private val _prefetchEnabled = MutableStateFlow(true)
     val prefetchEnabled: StateFlow<Boolean> = _prefetchEnabled.asStateFlow()
-
-    // ✅ تم نقل هذا الـ init إلى هنا (بعد تعريف كل الخصائص المستخدمة بالأسفل)
-    // لحل مشكلة: NullPointerException عند تشغيل debounce على currentPage
-    // قبل أن يتم تهيئته (ترتيب التنفيذ في Kotlin يكون من أعلى الملف لأسفله)
-    init {
-        viewModelScope.launch {
-            currentPage
-                .debounce(200L)
-                .collect { page ->
-                    val fileUriString = _selectedUri.value
-                    if (fileUriString != null && _prefetchEnabled.value) {
-                        try {
-                            val fUri = Uri.parse(fileUriString)
-                            prefetchManager.prefetchAround(page, _totalPages.value, fUri, context)
-                        } catch (e: Exception) {
-                            // Silently ignore prefetch errors
-                        }
-                    }
-                }
-        }
-    }
 
     fun setTableOfContents(toc: List<com.shockwave.pdfium.PdfDocument.Bookmark>) {
         _tableOfContents.value = toc

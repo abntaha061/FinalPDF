@@ -2189,7 +2189,7 @@ fun PdfPageImage(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    AndroidView(
+    AndroidView<PDFView>(
         factory = { ctx ->
             PDFView(ctx, null).apply {
                 val fileUri = Uri.parse(pdfUriString)
