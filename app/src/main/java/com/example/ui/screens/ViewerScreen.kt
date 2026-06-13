@@ -330,10 +330,14 @@ fun ViewerScreen(
         ttsInstance.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
             override fun onStart(utteranceId: String?) {}
             override fun onDone(utteranceId: String?) {
-                com.example.util.AudioPlayerManager.setSpeechState(null, null, false)
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    com.example.util.AudioPlayerManager.setSpeechState(null, null, false)
+                }, 500)
             }
             override fun onError(utteranceId: String?) {
-                com.example.util.AudioPlayerManager.setSpeechState(null, null, false)
+                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                    com.example.util.AudioPlayerManager.setSpeechState(null, null, false)
+                }, 500)
             }
         })
         tts = ttsInstance
@@ -774,7 +778,10 @@ fun ViewerScreen(
                                                 }
                                                 val simulatedRect = android.graphics.RectF(offset.x - 60f, offset.y - 18f, offset.x + 60f, offset.y + 18f)
                                                 com.example.util.AudioPlayerManager.setSpeechState(textToSpeak, simulatedRect, true)
-                                                textToSpeech.speak(textToSpeak, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "PDF_TTS_ID")
+                                                val ttsParams = android.os.Bundle().apply {
+                                                    putString(android.speech.tts.TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "PDF_TTS_ID")
+                                                }
+                                                textToSpeech.speak(textToSpeak, android.speech.tts.TextToSpeech.QUEUE_FLUSH, ttsParams, "PDF_TTS_ID")
                                             }
                                         } catch (e: Exception) {
                                             android.util.Log.e("ViewerScreen", "Error playing automatic pronunciation on long press", e)
@@ -2610,7 +2617,10 @@ fun ViewerScreen(
                                             }
                                             val simulatedRect = selectionPos?.let { android.graphics.RectF(it.x - 60f, it.y - 18f, it.x + 60f, it.y + 18f) }
                                             com.example.util.AudioPlayerManager.setSpeechState(selectedText, simulatedRect, true)
-                                            textToSpeech.speak(selectedText, TextToSpeech.QUEUE_FLUSH, null, "PDF_TTS_ID")
+                                            val ttsParams = android.os.Bundle().apply {
+                                                putString(android.speech.tts.TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "PDF_TTS_ID")
+                                            }
+                                            textToSpeech.speak(selectedText, TextToSpeech.QUEUE_FLUSH, ttsParams, "PDF_TTS_ID")
                                         }
                                         isTextSelected = false
                                     },
@@ -3229,7 +3239,7 @@ fun MiniAudioBar(
             }
 
             val textToDisplay = if (!currentWord.isNullOrBlank()) {
-                "جاري نطق: $currentWord"
+                currentWord
             } else {
                 when (audioState) {
                     is AudioState.Loading -> "جاري تحميل النطق..."
@@ -3276,12 +3286,13 @@ fun PdfPageImage(
     AndroidView<PDFView>(
         factory = { ctx ->
             PDFView(ctx, null).apply {
+                setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
                 val fileUri = Uri.parse(pdfUriString)
                 fromUri(fileUri)
                     .pages(pageNumber)
                     .enableSwipe(false)
                     .enableDoubletap(true)
-                    .enableAntialiasing(true)
+                    .enableAntialiasing(false)
                     .enableAnnotationRendering(true)
                     .nightMode(readingMode == "night")
                     .load()

@@ -170,7 +170,7 @@ fun PdfViewerWidget(
                             }
                             setLayerType(android.view.View.LAYER_TYPE_HARDWARE, paint)
                         } else {
-                            setLayerType(android.view.View.LAYER_TYPE_NONE, null)
+                            setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
                         }
                         
                         // Removed custom touch listener to prevent breaking the native pinch-to-zoom/scroll drag and drop interactions of the PDFView.
@@ -246,7 +246,7 @@ fun PdfViewerWidget(
                                     onLongPress?.invoke(androidx.compose.ui.geometry.Offset(e.x, e.y))
                                 }
                                 .enableAnnotationRendering(true)          // renders PDF annotations
-                                .enableAntialiasing(true)                 // smooth rendering, no pixelation
+                                .enableAntialiasing(false)                 // Optimized for maximum scrolling performance
                                 .spacing(pageSpacing.toInt())                               // custom space between pages
                                 .pageFitPolicy(if (fitMode == "height") FitPolicy.HEIGHT else FitPolicy.WIDTH)
                                 .nightMode(readingMode == "night")

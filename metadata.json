@@ -1,5 +1,5 @@
 {
-  "name": "FinalPDF",
+  "name": "قارئ الكتب والمستندات",
   "description": "Professional jetpack-compose based Android PDF Reader. Responsive UI, support bookmarked view, search inside, night mode and fluid scrolling.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
