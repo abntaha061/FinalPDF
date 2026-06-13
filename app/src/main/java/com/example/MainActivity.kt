@@ -3,10 +3,10 @@ package com.example
 import android.Manifest
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.Environment
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -100,18 +100,52 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        val savedLang = runBlocking { pdfReaderDataStore.data.map { it[APP_LANGUAGE_KEY] ?: "ar" }.first() }
+    // ====================================================================================
+    // FIX (Crash on first launch):
+    // The locale (language) change MUST happen here, in attachBaseContext(), and NOT
+    // inside onCreate(). Calling resources.updateConfiguration() inside onCreate() BEFORE
+    // super.onCreate() / installSplashScreen() can cause the system to treat this as a
+    // configuration change that triggers an immediate Activity recreation. That recreation
+    // collides with the SplashScreen API lifecycle (which requires installSplashScreen()
+    // to run exactly once, before super.onCreate(), without being interrupted) and results
+    // in a crash on the very first cold start. On the second launch, the configuration is
+    // already correct, so no recreation happens and no crash occurs.
+    //
+    // attachBaseContext() runs BEFORE the Activity's configuration is finalized and does
+    // NOT trigger a recreate, so it is the correct, safe place to apply a custom locale.
+    // ====================================================================================
+    override fun attachBaseContext(newBase: Context) {
+        val savedLang = try {
+            runBlocking {
+                newBase.pdfReaderDataStore.data
+                    .map { it[APP_LANGUAGE_KEY] ?: "ar" }
+                    .first()
+            }
+        } catch (e: Exception) {
+            // If DataStore isn't readable yet (first ever launch / IO issue), fall back to "ar"
+            "ar"
+        }
+
         val locale = Locale(savedLang)
         Locale.setDefault(locale)
-        val config = resources.configuration
-        config.setLocale(locale)
-        resources.updateConfiguration(config, resources.displayMetrics)
 
+        val config = Configuration(newBase.resources.configuration)
+        config.setLocale(locale)
+
+        val localizedContext = newBase.createConfigurationContext(config)
+        super.attachBaseContext(localizedContext)
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        // ====================================================================================
+        // FIX: installSplashScreen() MUST be the very first call in onCreate(), strictly
+        // before super.onCreate(). Nothing else (no DataStore reads, no resource/config
+        // changes) should run before it.
+        // ====================================================================================
         val splashScreen = installSplashScreen()
 
         super.onCreate(savedInstanceState)
-        
+
         // Let the system handle notch insets smoothly
         enableEdgeToEdge()
 
