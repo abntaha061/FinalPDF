@@ -5,6 +5,7 @@ import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.net.Uri
 import android.util.Log
+import android.graphics.RectF
 import com.example.ui.AudioState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -16,13 +17,40 @@ object AudioPlayerManager {
     private val _audioState = MutableStateFlow<AudioState>(AudioState.Idle)
     val audioState: StateFlow<AudioState> = _audioState
 
-    fun play(context: Context, url: String, volume: Float = 1.0f) {
+    private val _isSpeakingOrPlaying = MutableStateFlow(false)
+    val isSpeakingOrPlaying: StateFlow<Boolean> = _isSpeakingOrPlaying
+
+    private val _currentWord = MutableStateFlow<String?>(null)
+    val currentWord: StateFlow<String?> = _currentWord
+
+    private val _highlightedRect = MutableStateFlow<RectF?>(null)
+    val highlightedRect: StateFlow<RectF?> = _highlightedRect
+
+    fun setSpeechState(word: String?, rect: RectF?, active: Boolean) {
+        _isSpeakingOrPlaying.value = active
+        _currentWord.value = if (active) word else null
+        _highlightedRect.value = if (active) rect else null
+        if (active) {
+            _audioState.value = AudioState.Playing("")
+        } else {
+            _audioState.value = AudioState.Idle
+        }
+    }
+
+    fun play(context: Context, url: String, volume: Float = 1.0f, wordText: String? = null, rect: RectF? = null) {
         Log.d(TAG, "Playing URL: $url")
         _audioState.value = AudioState.Loading
+        _isSpeakingOrPlaying.value = true
+        _currentWord.value = wordText
+        _highlightedRect.value = rect
         
         try {
             // Stop and release previous instances
             stop()
+
+            _isSpeakingOrPlaying.value = true
+            _currentWord.value = wordText
+            _highlightedRect.value = rect
 
             mediaPlayer = MediaPlayer().apply {
                 setAudioAttributes(
@@ -39,6 +67,9 @@ object AudioPlayerManager {
                 } catch (e: Exception) {
                     Log.e(TAG, "Error setting data source", e)
                     _audioState.value = AudioState.Error(e.message ?: "Failed to load audio source")
+                    _isSpeakingOrPlaying.value = false
+                    _currentWord.value = null
+                    _highlightedRect.value = null
                     return
                 }
                 
@@ -65,6 +96,9 @@ object AudioPlayerManager {
         } catch (e: Exception) {
             Log.e(TAG, "Error initializing MediaPlayer", e)
             _audioState.value = AudioState.Error(e.message ?: "Error initializing MediaPlayer")
+            _isSpeakingOrPlaying.value = false
+            _currentWord.value = null
+            _highlightedRect.value = null
         }
     }
 
@@ -81,6 +115,9 @@ object AudioPlayerManager {
         } finally {
             mediaPlayer = null
             _audioState.value = AudioState.Idle
+            _isSpeakingOrPlaying.value = false
+            _currentWord.value = null
+            _highlightedRect.value = null
         }
     }
 }

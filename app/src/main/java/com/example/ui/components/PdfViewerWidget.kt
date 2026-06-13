@@ -64,29 +64,11 @@ fun PdfViewerWidget(
     var isLoaded by remember { mutableStateOf(false) }
     var loadError by remember { mutableStateOf<String?>(null) }
 
-    var activeLinkHighlight by remember { mutableStateOf<RectF?>(null) }
-    var targetAlpha by remember { mutableStateOf(0f) }
-    val highlightAlpha by animateFloatAsState(
-        targetValue = targetAlpha,
-        animationSpec = tween(400),
-        label = "HighlightAlpha",
-        finishedListener = { alpha ->
-            if (alpha == 0f) {
-                activeLinkHighlight = null
-            }
-        }
-    )
     val coroutineScope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
 
     val onLinkTapped: (RectF) -> Unit = { rect ->
         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-        activeLinkHighlight = rect
-        targetAlpha = 1f
-        coroutineScope.launch {
-            kotlinx.coroutines.delay(100)
-            targetAlpha = 0f
-        }
     }
 
     // Pre-calculate page count for the .pages(...) configuration
@@ -212,7 +194,7 @@ fun PdfViewerWidget(
                                 .swipeHorizontal(if (isPaged) true else false)
                                 .pageSnap(if (isPaged) true else false)
                                 .autoSpacing(true)                        // Always spacing enabled for beautiful clean page separation
-                                .pageFling(true)                          // ALWAYS enable pageFling for smooth momentum physics scrolling!
+                                .pageFling(isPaged)                       // Enable pageFling only in paged mode for smooth momentum scrolling
                                 .enableDoubletap(true)                    // native double tap zoom enabled
                                 .defaultPage(currentPage)                 // start from current page
                                 .onLoad { totalPages ->
@@ -254,10 +236,11 @@ fun PdfViewerWidget(
                                 }
                                 .onTap { e ->
                                     val isLink = com.github.barteksc.pdfviewer.CustomLinkHandler.isTapOnLink(this@apply, e.x, e.y)
+                                     if (isLink) return@onTap true
                                     if (!isLink) {
                                         onTap?.invoke()
                                     }
-                                    false
+                                    true
                                 }
                                 .onLongPress { e ->
                                     onLongPress?.invoke(androidx.compose.ui.geometry.Offset(e.x, e.y))
@@ -300,7 +283,8 @@ fun PdfViewerWidget(
         }
 
         val density = LocalDensity.current
-        activeLinkHighlight?.let { rect ->
+        val globalHighlightRect by com.example.util.AudioPlayerManager.highlightedRect.collectAsState()
+        globalHighlightRect?.let { rect ->
             val leftDp = with(density) { rect.left.toDp() }
             val topDp = with(density) { rect.top.toDp() }
             val widthDp = with(density) { (rect.right - rect.left).toDp() }
@@ -310,7 +294,7 @@ fun PdfViewerWidget(
                 modifier = Modifier
                     .offset(x = leftDp, y = topDp)
                     .size(width = widthDp, height = heightDp)
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.25f * highlightAlpha))
+                    .background(Color(0xFF2196F3).copy(alpha = 0.35f)) // Translucent light-blue visual shade highlight
             )
         }
     }

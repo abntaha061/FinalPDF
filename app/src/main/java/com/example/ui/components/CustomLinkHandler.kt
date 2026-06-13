@@ -34,6 +34,15 @@ class CustomLinkHandler(
             tts = android.speech.tts.TextToSpeech(context.applicationContext) { status ->
                 if (status == android.speech.tts.TextToSpeech.SUCCESS) {
                     tts?.language = java.util.Locale.GERMAN
+                    tts?.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
+                        override fun onStart(utteranceId: String?) {}
+                        override fun onDone(utteranceId: String?) {
+                            AudioPlayerManager.setSpeechState(null, null, false)
+                        }
+                        override fun onError(utteranceId: String?) {
+                            AudioPlayerManager.setSpeechState(null, null, false)
+                        }
+                    })
                 }
             }
         } catch (e: Exception) {
@@ -106,14 +115,15 @@ class CustomLinkHandler(
             if (lowerUri.endsWith(".mp3") || lowerUri.endsWith(".wav") || lowerUri.endsWith(".ogg") ||
                 lowerUri.endsWith(".m4a") || lowerUri.endsWith(".aac")) {
                 Log.d("CustomLinkHandler", "Tapped audio URL, sending to AudioPlayerManager: $uriString with autoPlay: $autoPlayAudio, vol: $audioVolume")
+                val extractedWord = getWordAtLink(link?.bounds, event, page)
                 if (autoPlayAudio) {
-                    AudioPlayerManager.play(context, uriString, audioVolume)
+                    AudioPlayerManager.play(context, uriString, audioVolume, wordText = extractedWord, rect = finalRect)
                 } else {
                     android.app.AlertDialog.Builder(context)
                         .setTitle("تشغيل الصوت")
                         .setMessage("هل تريد تشغيل هذا الملف الصوتي؟")
                         .setPositiveButton("تشغيل") { _, _ ->
-                            AudioPlayerManager.play(context, uriString, audioVolume)
+                            AudioPlayerManager.play(context, uriString, audioVolume, wordText = extractedWord, rect = finalRect)
                         }
                         .setNegativeButton("إلغاء", null)
                         .show()
@@ -171,6 +181,7 @@ class CustomLinkHandler(
                                 } else {
                                     textToSpeech.language = java.util.Locale.GERMAN
                                 }
+                                AudioPlayerManager.setSpeechState(decodedWord, finalRect, true)
                                 textToSpeech.speak(decodedWord, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "LINK_TTS_ID")
                             }
                         }

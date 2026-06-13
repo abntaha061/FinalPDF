@@ -91,6 +91,7 @@ import com.example.util.PdfPrintAdapter
 import com.example.util.PdfDocumentAdapter
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.rememberInfiniteTransition
@@ -324,10 +325,17 @@ fun ViewerScreen(
     var tts by remember { mutableStateOf<TextToSpeech?>(null) }
     DisposableEffect(context) {
         val ttsInstance = TextToSpeech(context) { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                // Success callback
-            }
+            // Success handler callback
         }
+        ttsInstance.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
+            override fun onStart(utteranceId: String?) {}
+            override fun onDone(utteranceId: String?) {
+                com.example.util.AudioPlayerManager.setSpeechState(null, null, false)
+            }
+            override fun onError(utteranceId: String?) {
+                com.example.util.AudioPlayerManager.setSpeechState(null, null, false)
+            }
+        })
         tts = ttsInstance
         onDispose {
             ttsInstance.stop()
@@ -764,6 +772,8 @@ fun ViewerScreen(
                                                 } else {
                                                     textToSpeech.language = java.util.Locale.GERMAN
                                                 }
+                                                val simulatedRect = android.graphics.RectF(offset.x - 60f, offset.y - 18f, offset.x + 60f, offset.y + 18f)
+                                                com.example.util.AudioPlayerManager.setSpeechState(textToSpeak, simulatedRect, true)
                                                 textToSpeech.speak(textToSpeak, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "PDF_TTS_ID")
                                             }
                                         } catch (e: Exception) {
@@ -1289,14 +1299,7 @@ fun ViewerScreen(
             ) {
                 CenterAlignedTopAppBar(
                     title = {
-                        Text(
-                            text = documentName,
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            fontSize = 16.sp,
-                            color = AppTextPrimary
-                        )
+                        // Title is kept empty to satisfy user request to remove the static document name "FinalPDF"
                     },
                     navigationIcon = {
                         IconButton(
@@ -2605,6 +2608,8 @@ fun ViewerScreen(
                                             } else {
                                                 textToSpeech.language = java.util.Locale.GERMAN
                                             }
+                                            val simulatedRect = selectionPos?.let { android.graphics.RectF(it.x - 60f, it.y - 18f, it.x + 60f, it.y + 18f) }
+                                            com.example.util.AudioPlayerManager.setSpeechState(selectedText, simulatedRect, true)
                                             textToSpeech.speak(selectedText, TextToSpeech.QUEUE_FLUSH, null, "PDF_TTS_ID")
                                         }
                                         isTextSelected = false
@@ -2732,8 +2737,10 @@ fun ViewerScreen(
                     .statusBarsPadding()
                     .padding(horizontal = 16.dp, vertical = 8.dp)
             ) {
+                val currentWord by com.example.util.AudioPlayerManager.currentWord.collectAsState()
                 MiniAudioBar(
                     audioState = audioState,
+                    currentWord = currentWord,
                     onStopClick = {
                         audioViewModel.stopAudio()
                     }
@@ -3185,27 +3192,28 @@ fun WaveformAnimation() {
 @Composable
 fun MiniAudioBar(
     audioState: AudioState,
+    currentWord: String?,
     onStopClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Card(
-        shape = RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp),
-        colors = CardDefaults.cardColors(containerColor = AppPrimary),
-        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = AppPrimary.copy(alpha = 0.95f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
         modifier = modifier
             .fillMaxWidth()
-            .height(56.dp)
+            .height(44.dp)
             .testTag("mini_audio_bar")
     ) {
         Row(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 16.dp),
+                .padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Box(
-                modifier = Modifier.width(40.dp),
+                modifier = Modifier.width(32.dp),
                 contentAlignment = Alignment.CenterStart
             ) {
                 if (audioState is AudioState.Playing) {
@@ -3215,34 +3223,42 @@ fun MiniAudioBar(
                         imageVector = Icons.Default.VolumeUp,
                         contentDescription = null,
                         tint = Color.White,
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             }
 
-            val textToDisplay = when (audioState) {
-                is AudioState.Loading -> "جاري تحميل النطق..."
-                is AudioState.Error -> "خطأ في تشغيل الصوت"
-                else -> "جاري تشغيل النطق..."
+            val textToDisplay = if (!currentWord.isNullOrBlank()) {
+                "جاري نطق: $currentWord"
+            } else {
+                when (audioState) {
+                    is AudioState.Loading -> "جاري تحميل النطق..."
+                    is AudioState.Error -> "خطأ في تشغيل الصوت"
+                    else -> "جاري تشغيل النطق..."
+                }
             }
             Text(
                 text = textToDisplay,
-                color = AppTextPrimary,
-                fontWeight = FontWeight.Bold,
-                fontSize = 14.sp,
+                color = Color.White,
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 12.sp,
                 modifier = Modifier.weight(1f),
-                textAlign = TextAlign.Center
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
 
             IconButton(
                 onClick = onStopClick,
-                modifier = Modifier.testTag("stop_audio_button")
+                modifier = Modifier
+                    .size(32.dp)
+                    .testTag("stop_audio_button")
             ) {
                 Icon(
                     imageVector = Icons.Default.Stop,
                     contentDescription = "Stop pronunciation",
                     tint = Color.White,
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(20.dp)
                 )
             }
         }
