@@ -1,6 +1,7 @@
 package com.example.ui
 
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.datastore.preferences.core.booleanPreferencesKey
@@ -231,7 +232,34 @@ class PdfViewModel(
         _showLargeFileWarningSnackbar.value = false
     }
 
+    // ====================================================================================
+    // FIX (Bottom sheet "لا يوجد إذن للوصول" appearing when opening a PDF):
+    // takePersistableUriPermission() MUST be called FIRST, before any attempt to query
+    // metadata or open a FileDescriptor for the Uri. Previously this permission was only
+    // taken inside proceedWithLoading(), which runs AFTER the size/SecurityException
+    // checks in selectDocument(). That meant the very first openFileDescriptor() call
+    // could throw SecurityException (because the persistable grant hadn't been taken yet),
+    // which set _securityExceptionUri and triggered the "no access permission" dialog -
+    // even though the user had just picked the file and Android DID grant a one-time
+    // read permission via the SAF picker.
+    //
+    // Calling takePersistableUriPermission() is safe to call multiple times and is a
+    // no-op if the Uri doesn't support persistable grants (it's wrapped in try/catch).
+    // ====================================================================================
+    private fun takePersistablePermission(context: Context, uri: Uri) {
+        try {
+            val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+            context.contentResolver.takePersistableUriPermission(uri, flags)
+        } catch (e: Exception) {
+            // Not a persistable SAF Uri (e.g. a one-shot content Uri from another app) - ignore.
+            // The Uri can usually still be read for the duration of this process.
+        }
+    }
+
     fun selectDocumentForced(context: Context, uri: Uri) {
+        // Take permission FIRST (see comment above takePersistablePermission)
+        takePersistablePermission(context, uri)
+
         _largeFileUriPending.value = null
         _showLargeFileWarningSnackbar.value = true
         _prefetchEnabled.value = false // disable prefetch for forced large files
@@ -407,6 +435,12 @@ class PdfViewModel(
         _securityExceptionUri.value = null
         _largeFileUriPending.value = null
 
+        // ====================================================================================
+        // FIX: Take the persistable read permission FIRST, before any metadata query or
+        // FileDescriptor access. See the detailed comment above takePersistablePermission().
+        // ====================================================================================
+        takePersistablePermission(context, uri)
+
         // 1. Get file size from metadata safely first (which does not throw SecurityException)
         val metadata = getUriMetadata(context, uri)
         var sizeBytes = metadata.second
@@ -469,13 +503,9 @@ class PdfViewModel(
         _isViewerLoading.value = true
         
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            // Take persistable permission if possible
-            try {
-                val flags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
-                context.contentResolver.takePersistableUriPermission(uri, flags)
-            } catch (e: Exception) {
-                // Ignore if it's not a persistent URI
-            }
+            // Permission is already taken in selectDocument()/selectDocumentForced() before
+            // this point, but we call it again here as a harmless safety net (it's idempotent).
+            takePersistablePermission(context, uri)
 
             val metadata = getUriMetadata(context, uri)
             var doc = repository.getPdfByUri(uri.toString())
