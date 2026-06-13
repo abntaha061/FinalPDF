@@ -6,6 +6,7 @@ import com.example.data.AppDatabase
 import com.example.data.RecentFileDao
 import com.example.data.BookmarkDao
 import com.example.data.HighlightDao
+import com.example.data.ReadingSessionDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -35,4 +36,8 @@ object AppModule {
     @Provides
     @Singleton
     fun provideHighlightDao(db: AppDatabase): HighlightDao = db.highlightDao()
+
+    @Provides
+    @Singleton
+    fun provideReadingSessionDao(db: AppDatabase): ReadingSessionDao = db.readingSessionDao()
 }

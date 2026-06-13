@@ -86,3 +86,21 @@ interface HighlightDao {
     @Query("DELETE FROM highlights")
     suspend fun deleteAll()
 }
+
+@Dao
+interface ReadingSessionDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(session: ReadingSessionEntity)
+
+    @Query("SELECT * FROM reading_sessions WHERE fileUri = :uri ORDER BY date DESC")
+    fun getSessionsByUri(uri: String): Flow<List<ReadingSessionEntity>>
+
+    @Query("SELECT * FROM reading_sessions ORDER BY date DESC")
+    fun getAllSessions(): Flow<List<ReadingSessionEntity>>
+
+    @Query("SELECT COALESCE(SUM(durationSeconds), 0) FROM reading_sessions")
+    fun getTotalReadingTime(): Flow<Long>
+
+    @Query("DELETE FROM reading_sessions")
+    suspend fun deleteAll()
+}

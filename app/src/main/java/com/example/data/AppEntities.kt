@@ -33,3 +33,12 @@ data class HighlightEntity(
     val colorHex: String,
     val createdAt: Long = System.currentTimeMillis()
 )
+
+@Entity(tableName = "reading_sessions")
+data class ReadingSessionEntity(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val fileUri: String,
+    val durationSeconds: Long,
+    val pagesRead: Int,
+    val date: Long
+)

@@ -12,6 +12,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.HighlightEntity
 import com.example.data.RecentFileEntity
 import com.example.data.BookmarkEntity
+import com.example.data.ReadingSessionEntity
 import com.example.data.PdfRepository
 import com.example.util.PdfPrefetchManager
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -50,8 +51,22 @@ class PdfViewModel(
     private val context: Context
 ) : ViewModel() {
 
+    val timerManager by lazy { ReadingTimerManager(repository) }
+
     private val _isReady = MutableStateFlow(false)
     val isReady: StateFlow<Boolean> = _isReady.asStateFlow()
+
+    val allReadingSessions = repository.allReadingSessions
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val totalReadingTime = repository.totalReadingTime
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0L)
+
+    fun clearAllReadingSessions() {
+        viewModelScope.launch {
+            repository.clearAllReadingSessions()
+        }
+    }
 
     private val _isOnboardingDone = MutableStateFlow<Boolean?>(null)
     val isOnboardingDone: StateFlow<Boolean?> = _isOnboardingDone.asStateFlow()

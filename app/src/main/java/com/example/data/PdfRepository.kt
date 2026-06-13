@@ -11,9 +11,26 @@ import javax.inject.Singleton
 class PdfRepository @Inject constructor(
     private val recentFileDao: RecentFileDao,
     private val bookmarkDao: BookmarkDao,
-    private val highlightDao: HighlightDao
+    private val highlightDao: HighlightDao,
+    private val readingSessionDao: ReadingSessionDao
 ) {
     val allRecentPdfs: Flow<List<RecentFileEntity>> = recentFileDao.getAll()
+    
+    // Reading Sessions
+    val allReadingSessions: Flow<List<ReadingSessionEntity>> = readingSessionDao.getAllSessions()
+    val totalReadingTime: Flow<Long> = readingSessionDao.getTotalReadingTime()
+
+    fun getReadingSessionsForUri(fileUri: String): Flow<List<ReadingSessionEntity>> {
+        return readingSessionDao.getSessionsByUri(fileUri)
+    }
+
+    suspend fun insertReadingSession(session: ReadingSessionEntity) = withContext(Dispatchers.IO) {
+        readingSessionDao.insert(session)
+    }
+
+    suspend fun clearAllReadingSessions() = withContext(Dispatchers.IO) {
+        readingSessionDao.deleteAll()
+    }
     
     fun getFilteredPdfs(
         minSize: Long,

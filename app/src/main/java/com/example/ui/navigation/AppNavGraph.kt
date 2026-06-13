@@ -20,6 +20,8 @@ sealed class Screen(val route: String) {
         fun createRoute(encodedUri: String) = "pdf_reader?uri=$encodedUri"
     }
     object Settings  : Screen("settings")
+    object Statistics: Screen("statistics")
+    object MergePdfs  : Screen("merge_pdfs")
     object About     : Screen("about")
     object Language  : Screen("language")
     object WebView   : Screen("webview?url={url}") {
@@ -70,8 +72,34 @@ fun AppNavGraph(
         // SETTINGS
         composable(Screen.Settings.route) { SettingsScreen(navController) }
 
+        // STATISTICS
+        composable(Screen.Statistics.route) {
+            val context = androidx.compose.ui.platform.LocalContext.current
+            val activity = context as? androidx.activity.ComponentActivity
+                ?: throw IllegalStateException("Context must be ComponentActivity")
+            val viewModel = androidx.compose.runtime.remember(context) {
+                androidx.lifecycle.ViewModelProvider(activity)[com.example.ui.PdfViewModel::class.java]
+            }
+            StatisticsScreen(
+                viewModel = viewModel,
+                onBack = { navController.popBackStack() }
+            )
+        }
+
         // ABOUT
         composable(Screen.About.route) { AboutScreen(navController) }
+
+        // MERGE PDFS
+        composable(Screen.MergePdfs.route) {
+            MergePdfScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToReader = { encodedUri ->
+                    navController.navigate(Screen.PdfReader.createRoute(encodedUri)) {
+                        popUpTo(Screen.Home.route)
+                    }
+                }
+            )
+        }
 
         // LANGUAGE
         composable(Screen.Language.route) { LanguageScreen(navController) }

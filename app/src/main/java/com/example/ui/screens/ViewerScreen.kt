@@ -12,6 +12,18 @@ import android.provider.MediaStore
 import android.print.PrintManager
 import android.util.Log
 import com.example.ui.components.setPageRotation
+import java.io.File
+import java.io.FileOutputStream
+import java.io.ByteArrayOutputStream
+import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import androidx.core.content.FileProvider
+import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
+import com.tom_roush.pdfbox.pdmodel.graphics.image.LosslessFactory
+import com.tom_roush.pdfbox.pdmodel.graphics.image.JPEGFactory
+import kotlinx.coroutines.Dispatchers
+import java.util.Locale
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -226,6 +238,12 @@ fun ViewerScreen(
     var showJumpDialog by remember { mutableStateOf(false) }
     var showFileInfoDialog by remember { mutableStateOf(false) }
     var showReadingModeBottomSheet by remember { mutableStateOf(false) }
+    var showCompressionBottomSheet by remember { mutableStateOf(false) }
+    var selectedCompressionLevel by remember { mutableStateOf(2) } // 1, 2, 3
+    var isCompressing by remember { mutableStateOf(false) }
+    var showCompressionResultDialog by remember { mutableStateOf(false) }
+    var compressionResultText by remember { mutableStateOf("") }
+    var compressedFileUriString by remember { mutableStateOf("") }
 
     var zoomLevel by remember { mutableStateOf(1.0f) }
     var showZoomBadge by remember { mutableStateOf(false) }
@@ -1565,6 +1583,52 @@ fun ViewerScreen(
                             } else {
                                 annotationViewModel.setTool(AnnotationTool.None)
                             }
+                        },
+                        onShareCurrentPageAsPdfClick = {
+                            coroutineScope.launch(Dispatchers.IO) {
+                                try {
+                                    val currentUri = activeUri
+                                    if (currentUri != null) {
+                                        val fileUri = Uri.parse(currentUri)
+                                        val inputStream = context.contentResolver.openInputStream(fileUri)
+                                        val document = PDDocument.load(inputStream)
+                                        val currentPageIndex = currentPage // 0-based
+                                        
+                                        val newDoc = PDDocument()
+                                        val page = document.getPage(currentPageIndex)
+                                        newDoc.addPage(page)
+                                        
+                                        val outputFile = File(context.cacheDir, "page_${currentPageIndex + 1}.pdf")
+                                        val fos = FileOutputStream(outputFile)
+                                        newDoc.save(fos)
+                                        fos.close()
+                                        newDoc.close()
+                                        document.close()
+                                        
+                                        val shareUri = FileProvider.getUriForFile(
+                                            context,
+                                            "${context.packageName}.fileprovider",
+                                            outputFile
+                                        )
+                                        
+                                        val intent = Intent(Intent.ACTION_SEND).apply {
+                                            type = "application/pdf"
+                                            putExtra(Intent.EXTRA_STREAM, shareUri)
+                                            putExtra(Intent.EXTRA_SUBJECT, "صفحة ${currentPageIndex + 1} من ${documentName}")
+                                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                        }
+                                        context.startActivity(Intent.createChooser(intent, "مشاركة الصفحة"))
+                                    }
+                                } catch (e: Exception) {
+                                    Log.e("ViewerScreen", "Error sharing current page as PDF", e)
+                                    coroutineScope.launch(Dispatchers.Main) {
+                                        snackbarHostState.showSnackbar("خطأ أثناء استخراج ومشاركة الصفحة")
+                                    }
+                                }
+                            }
+                        },
+                        onCompressPdfClick = {
+                            showCompressionBottomSheet = true
                         }
                     )
                 }
@@ -1983,6 +2047,299 @@ fun ViewerScreen(
                         }
                     }
                 }
+            }
+
+            if (showCompressionBottomSheet) {
+                ModalBottomSheet(
+                    onDismissRequest = { if (!isCompressing) showCompressionBottomSheet = false },
+                    sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+                    containerColor = AppSurface
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 36.dp, start = 20.dp, end = 20.dp, top = 8.dp)
+                            .navigationBarsPadding(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "ضغط الملف لتقليل الحجم",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = AppPrimary,
+                            modifier = Modifier.padding(bottom = 20.dp)
+                        )
+
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            // Level 1: ضغط خفيف
+                            Card(
+                                onClick = { if (!isCompressing) selectedCompressionLevel = 1 },
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (selectedCompressionLevel == 1) AppPrimary.copy(alpha = 0.1f) else Color(0xFF1E1E24)
+                                ),
+                                border = if (selectedCompressionLevel == 1) androidx.compose.foundation.BorderStroke(2.dp, AppPrimary) else null,
+                                modifier = Modifier.fillMaxWidth().testTag("compress_level_1_card")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Speed,
+                                        contentDescription = null,
+                                        tint = if (selectedCompressionLevel == 1) AppPrimary else AppTextSecondary,
+                                        modifier = Modifier.size(28.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(16.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "ضغط خفيف",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 15.sp,
+                                            color = AppTextPrimary
+                                        )
+                                        Text(
+                                            text = "جودة صور ١٥٠ DPI (تقليل ٢٠-٣٠٪)",
+                                            fontSize = 12.sp,
+                                            color = AppTextSecondary
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Level 2: ضغط متوسط
+                            Card(
+                                onClick = { if (!isCompressing) selectedCompressionLevel = 2 },
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (selectedCompressionLevel == 2) AppPrimary.copy(alpha = 0.1f) else Color(0xFF1E1E24)
+                                ),
+                                border = if (selectedCompressionLevel == 2) androidx.compose.foundation.BorderStroke(2.dp, AppPrimary) else null,
+                                modifier = Modifier.fillMaxWidth().testTag("compress_level_2_card")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.CheckCircle,
+                                        contentDescription = null,
+                                        tint = if (selectedCompressionLevel == 2) AppPrimary else AppTextSecondary,
+                                        modifier = Modifier.size(28.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(16.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Text(
+                                                text = "ضغط متوسط",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 15.sp,
+                                                color = AppTextPrimary
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Surface(
+                                                color = AppPrimary,
+                                                shape = RoundedCornerShape(8.dp)
+                                            ) {
+                                                Text(
+                                                    text = "موصى به",
+                                                    color = Color.White,
+                                                    fontSize = 10.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        }
+                                        Text(
+                                            text = "جودة صور ١٠٠ DPI (تقليل ٤٠-٦٠٪)",
+                                            fontSize = 12.sp,
+                                            color = AppTextSecondary
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Level 3: ضغط عالي
+                            Card(
+                                onClick = { if (!isCompressing) selectedCompressionLevel = 3 },
+                                shape = RoundedCornerShape(16.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (selectedCompressionLevel == 3) AppPrimary.copy(alpha = 0.1f) else Color(0xFF1E1E24)
+                                ),
+                                border = if (selectedCompressionLevel == 3) androidx.compose.foundation.BorderStroke(2.dp, AppPrimary) else null,
+                                modifier = Modifier.fillMaxWidth().testTag("compress_level_3_card")
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Warning,
+                                        contentDescription = null,
+                                        tint = if (selectedCompressionLevel == 3) Color.Red else AppTextSecondary,
+                                        modifier = Modifier.size(28.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(16.dp))
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "ضغط عالي",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 15.sp,
+                                            color = AppTextPrimary
+                                        )
+                                        Text(
+                                            text = "جودة صور ٧٢ DPI (تقليل ٦٠-٨٠٪)",
+                                            fontSize = 12.sp,
+                                            color = AppTextSecondary
+                                        )
+                                        Text(
+                                            text = "قد تنخفض جودة الصور",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = Color.Red,
+                                            modifier = Modifier.padding(top = 2.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(24.dp))
+
+                        Button(
+                            onClick = {
+                                isCompressing = true
+                                coroutineScope.launch(Dispatchers.IO) {
+                                    try {
+                                        val currentUri = activeUri
+                                        if (currentUri != null) {
+                                            val fileUri = Uri.parse(currentUri)
+                                            val inputStream = context.contentResolver.openInputStream(fileUri)
+                                            val document = PDDocument.load(inputStream)
+                                            
+                                            val selectedDpi = when (selectedCompressionLevel) {
+                                                1 -> 150
+                                                3 -> 72
+                                                else -> 100
+                                            }
+                                            val selectedQuality = when (selectedCompressionLevel) {
+                                                1 -> 85
+                                                3 -> 50
+                                                else -> 70
+                                            }
+                                            
+                                            // Process pages
+                                            document.pages.forEach { page ->
+                                                val resources = page.resources
+                                                resources.xObjectNames.forEach { name ->
+                                                    val xObject = resources.getXObject(name)
+                                                    if (xObject is PDImageXObject) {
+                                                        val originalImage = xObject.image
+                                                        if (originalImage != null) {
+                                                            val compressed = compressBitmap(originalImage, selectedDpi, selectedQuality)
+                                                            val newImage = try {
+                                                                JPEGFactory.createFromImage(document, compressed)
+                                                            } catch (e: Exception) {
+                                                                LosslessFactory.createFromImage(document, compressed)
+                                                            }
+                                                            resources.put(name, newImage)
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            
+                                            val outputFile = File(context.getExternalFilesDir(null), "compressed_${System.currentTimeMillis()}.pdf")
+                                            val fos = FileOutputStream(outputFile)
+                                            document.save(fos)
+                                            fos.close()
+                                            document.close()
+                                            
+                                            val originalSize = try {
+                                                context.contentResolver.openAssetFileDescriptor(fileUri, "r")?.use { 
+                                                    it.length 
+                                                } ?: 0L
+                                            } catch (e: Exception) {
+                                                0L
+                                            }
+                                            val newSize = outputFile.length()
+                                            
+                                            val originalSizeMB = String.format(Locale.getDefault(), "%.2f", originalSize.toFloat() / (1024 * 1024))
+                                            val newSizeMB = String.format(Locale.getDefault(), "%.2f", newSize.toFloat() / (1024 * 1024))
+                                            val savedPercent = if (originalSize > 0) {
+                                                val diff = originalSize - newSize
+                                                if (diff > 0) ((diff.toFloat() / originalSize.toFloat()) * 100).toInt() else 0
+                                            } else {
+                                                0
+                                            }
+                                            
+                                            coroutineScope.launch(Dispatchers.Main) {
+                                                isCompressing = false
+                                                showCompressionBottomSheet = false
+                                                compressionResultText = "تم الضغط: $originalSizeMB MB ← $newSizeMB MB (وفّرت $savedPercent%)"
+                                                compressedFileUriString = Uri.fromFile(outputFile).toString()
+                                                showCompressionResultDialog = true
+                                            }
+                                        }
+                                    } catch (e: Exception) {
+                                        Log.e("ViewerScreen", "Error compressing PDF", e)
+                                        coroutineScope.launch(Dispatchers.Main) {
+                                            isCompressing = false
+                                            showCompressionBottomSheet = false
+                                            snackbarHostState.showSnackbar("فشل ضغط الملف")
+                                        }
+                                    }
+                                }
+                            },
+                            enabled = !isCompressing,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                                .testTag("start_compress_button"),
+                            colors = ButtonDefaults.buttonColors(containerColor = AppPrimary)
+                        ) {
+                            if (isCompressing) {
+                                CircularProgressIndicator(color = Color.White, modifier = Modifier.size(24.dp))
+                            } else {
+                                Text("ابدأ الضغط", color = Color.White, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (showCompressionResultDialog) {
+                AlertDialog(
+                    onDismissRequest = { showCompressionResultDialog = false },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                showCompressionResultDialog = false
+                                if (compressedFileUriString.isNotEmpty()) {
+                                    val encoded = Uri.encode(compressedFileUriString)
+                                    onNavigateToReader?.invoke(encoded)
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = AppPrimary)
+                        ) {
+                            Text("فتح الملف المضغوط", color = Color.White)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showCompressionResultDialog = false }) {
+                            Text("إلغاء", color = AppTextSecondary)
+                        }
+                    },
+                    title = {
+                        Text("تم ضغط الملف بنجاح", fontWeight = FontWeight.Bold, color = AppTextPrimary)
+                    },
+                    text = {
+                        Text(compressionResultText, color = AppTextSecondary)
+                    },
+                    containerColor = AppSurface
+                )
             }
 
             // Custom Text Selection Popup
@@ -2762,4 +3119,42 @@ fun PdfPageImage(
         },
         modifier = modifier
     )
+}
+
+private fun compressBitmap(original: Bitmap, targetDpi: Int, quality: Int): Bitmap {
+    val maxDimension = when (targetDpi) {
+        150 -> 1600
+        100 -> 1000
+        72 -> 600
+        else -> 1200
+    }
+    
+    val width = original.width
+    val height = original.height
+    val scale = if (width > maxDimension || height > maxDimension) {
+        val maxFromOrig = Math.max(width, height)
+        maxDimension.toFloat() / maxFromOrig.toFloat()
+    } else {
+        1.0f
+    }
+    
+    val scaledBitmap = if (scale < 1.0f) {
+        val matrix = Matrix()
+        matrix.postScale(scale, scale)
+        Bitmap.createBitmap(original, 0, 0, width, height, matrix, true)
+    } else {
+        original
+    }
+    
+    val outputStream = ByteArrayOutputStream()
+    scaledBitmap.compress(Bitmap.CompressFormat.JPEG, quality, outputStream)
+    val byteArray = outputStream.toByteArray()
+    
+    val compressedBitmap = BitmapFactory.decodeByteArray(byteArray, 0, byteArray.size)
+    
+    if (scaledBitmap != original && !scaledBitmap.isRecycled) {
+        scaledBitmap.recycle()
+    }
+    
+    return compressedBitmap ?: original
 }

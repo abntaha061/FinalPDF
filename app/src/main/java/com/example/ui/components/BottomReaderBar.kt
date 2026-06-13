@@ -58,6 +58,8 @@ fun BottomReaderBar(
     onDoublePageModeToggle: () -> Unit,
     isAnnotationModeActive: Boolean,
     onAnnotationClick: () -> Unit,
+    onShareCurrentPageAsPdfClick: () -> Unit = {},
+    onCompressPdfClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -289,6 +291,24 @@ fun BottomReaderBar(
                             onSavePageAsImageClick()
                         },
                         modifier = Modifier.testTag("save_page_as_image_option")
+                    )
+                    DropdownMenuItem(
+                        text = { Text("مشاركة الصفحة الحالية كـ PDF", color = AppTextPrimary, fontSize = 14.sp) },
+                        leadingIcon = { Icon(Icons.Default.Share, contentDescription = null, tint = AppPrimary) },
+                        onClick = {
+                            showMoreMenu = false
+                            onShareCurrentPageAsPdfClick()
+                        },
+                        modifier = Modifier.testTag("share_page_as_pdf_option")
+                    )
+                    DropdownMenuItem(
+                        text = { Text("ضغط الملف لتقليل الحجم", color = AppTextPrimary, fontSize = 14.sp) },
+                        leadingIcon = { Icon(Icons.Default.ArrowDownward, contentDescription = null, tint = AppPrimary) },
+                        onClick = {
+                            showMoreMenu = false
+                            onCompressPdfClick()
+                        },
+                        modifier = Modifier.testTag("compress_pdf_option")
                     )
                     DropdownMenuItem(
                         text = { Text("تدوير يميناً ٩٠°", color = AppTextPrimary, fontSize = 14.sp) },
