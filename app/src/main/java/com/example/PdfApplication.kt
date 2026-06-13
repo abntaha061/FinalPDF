@@ -8,9 +8,9 @@ import com.github.barteksc.pdfviewer.util.Constants
 class PdfApplication : Application() {
     override fun onCreate() {
         super.onCreate()
-        // Set PDFView page cache size to 5 pages to avoid OutOfMemory on large files
-        Constants.Cache.CACHE_SIZE = 5
-        Constants.PART_SIZE = 512f // Render high-resolution tiles for crisp text quality
+        // Set tile cache size to a robust limit (150 tiles) to prevent high-res tile eviction and fix blurry pages.
+        Constants.Cache.CACHE_SIZE = 150
+        Constants.PART_SIZE = 256f // Default tile size for crisp and standard rendering
     }
 
     override fun onTrimMemory(level: Int) {

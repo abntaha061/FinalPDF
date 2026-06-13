@@ -118,17 +118,46 @@ class CustomLinkHandler(
                 // Automatically speech-pronounce the word from the dictionary URL
                 try {
                     val parsedUri = Uri.parse(uriString)
-                    var lastSeg = parsedUri.lastPathSegment
-                    if (uriString.contains("dict.cc", ignoreCase = true) || uriString.contains("dict.leo.org", ignoreCase = true)) {
-                        val sParam = parsedUri.getQueryParameter("s") ?: parsedUri.getQueryParameter("search")
-                        if (!sParam.isNullOrBlank()) {
-                            lastSeg = sParam
+                    var wordToSpeak = ""
+                    
+                    // 1. Try to extract from common dictionary query parameters
+                    val queryParams = listOf("q", "s", "search", "query", "word", "text")
+                    for (param in queryParams) {
+                        val value = parsedUri.getQueryParameter(param)
+                        if (!value.isNullOrBlank()) {
+                            wordToSpeak = value
+                            break
                         }
                     }
-                    if (!lastSeg.isNullOrEmpty()) {
-                        val decodedWord = Uri.decode(lastSeg).trim()
+                    
+                    // 2. If no query param, look for common path patterns
+                    if (wordToSpeak.isBlank()) {
+                        val path = parsedUri.path ?: ""
+                        if (path.contains("deutsch-arabisch/", ignoreCase = true)) {
+                            val idx = path.indexOf("deutsch-arabisch/", ignoreCase = true)
+                            val sub = path.substring(idx + "deutsch-arabisch/".length)
+                            wordToSpeak = sub.split("/").firstOrNull { it.isNotEmpty() } ?: ""
+                        } else if (path.contains("de-ar/", ignoreCase = true)) {
+                            val idx = path.indexOf("de-ar/", ignoreCase = true)
+                            val sub = path.substring(idx + "de-ar/".length)
+                            wordToSpeak = sub.split("/").firstOrNull { it.isNotEmpty() } ?: ""
+                        } else {
+                            wordToSpeak = parsedUri.lastPathSegment ?: ""
+                        }
+                    }
+                    
+                    if (wordToSpeak.isNotEmpty()) {
+                        val decodedWord = Uri.decode(wordToSpeak).trim()
                         if (decodedWord.isNotEmpty()) {
-                            tts?.speak(decodedWord, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "LINK_TTS_ID")
+                            tts?.let { textToSpeech ->
+                                val isArabic = decodedWord.any { it in '\u0600'..'\u06FF' }
+                                if (isArabic) {
+                                    textToSpeech.language = java.util.Locale("ar")
+                                } else {
+                                    textToSpeech.language = java.util.Locale.GERMAN
+                                }
+                                textToSpeech.speak(decodedWord, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "LINK_TTS_ID")
+                            }
                         }
                     }
                 } catch (e: Exception) {

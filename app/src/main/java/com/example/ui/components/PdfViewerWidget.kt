@@ -261,7 +261,7 @@ fun PdfViewerWidget(
                                 }
                                 .onTap { e ->
                                     onTap?.invoke()
-                                    true
+                                    false
                                 }
                                 .onLongPress { e ->
                                     onLongPress?.invoke(androidx.compose.ui.geometry.Offset(e.x, e.y))
