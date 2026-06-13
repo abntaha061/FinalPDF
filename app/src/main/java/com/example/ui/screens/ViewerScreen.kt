@@ -383,34 +383,84 @@ fun ViewerScreen(
         pdfViewHeight: Float
     ): String {
         return try {
-            val pageText = getPageText(context, pdfUri, page)
+            PDFBoxResourceLoader.init(context.applicationContext)
+            var pageWidth = 595f
+            var pageHeight = 842f
+            var pageText = ""
+            
+            context.contentResolver.openInputStream(pdfUri)?.use { inputStream ->
+                PDDocument.load(inputStream).use { document ->
+                    if (page < document.numberOfPages) {
+                        val stripper = PDFTextStripper()
+                        stripper.startPage = page + 1
+                        stripper.endPage = page + 1
+                        pageText = stripper.getText(document) ?: ""
+                        
+                        val pageObj = document.getPage(page)
+                        val mediaBox = pageObj.mediaBox
+                        if (mediaBox != null) {
+                            pageWidth = mediaBox.width
+                            pageHeight = mediaBox.height
+                        }
+                    }
+                }
+            }
+
             if (pageText.isBlank()) return ""
             
             val lines = pageText.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
             if (lines.isEmpty()) return ""
             
-            val ratioY = (offset.y / pdfViewHeight).coerceIn(0f, 1f)
-            val targetLineIndex = (ratioY * lines.size).toInt().coerceIn(0, lines.size - 1)
+            // Calculate precise bounds of the PDF page within the PDFView widget
+            val viewRatio = pdfViewWidth / pdfViewHeight
+            val pageRatio = pageWidth / pageHeight
+            
+            var renderedWidth = pdfViewWidth
+            var renderedHeight = pdfViewHeight
+            var leftOffset = 0f
+            var topOffset = 0f
+            
+            if (viewRatio > pageRatio) {
+                // Pillarbox: blank margins on left and right
+                renderedHeight = pdfViewHeight
+                renderedWidth = pdfViewHeight * pageRatio
+                leftOffset = (pdfViewWidth - renderedWidth) / 2f
+            } else {
+                // Letterbox: blank margins on top and bottom
+                renderedWidth = pdfViewWidth
+                renderedHeight = pdfViewWidth / pageRatio
+                topOffset = (pdfViewHeight - renderedHeight) / 2f
+            }
+
+            val rx = ((offset.x - leftOffset) / renderedWidth).coerceIn(0f, 1f)
+            val ry = ((offset.y - topOffset) / renderedHeight).coerceIn(0f, 1f)
+
+            val targetLineIndex = (ry * lines.size).toInt().coerceIn(0, lines.size - 1)
             val lineText = lines[targetLineIndex]
             
-            val words = lineText.split(Regex("\\s+")).filter { it.isNotBlank() }
+            val words = lineText.split(Regex("\\s+")).map { it.trim() }.filter { it.isNotEmpty() && it != "|" && it != "/" && it != "-" }
             if (words.isEmpty()) return lineText
             
-            val ratioX = (offset.x / pdfViewWidth).coerceIn(0f, 1f)
             val isRtl = lineText.any { it in '\u0600'..'\u06FF' }
             val targetWordIndex = if (isRtl) {
-                (words.size - 1 - (ratioX * words.size).toInt()).coerceIn(0, words.size - 1)
+                (words.size - 1 - (rx * words.size).toInt()).coerceIn(0, words.size - 1)
             } else {
-                ((ratioX * words.size).toInt()).coerceIn(0, words.size - 1)
+                ((rx * words.size).toInt()).coerceIn(0, words.size - 1)
             }
             
             val selectedWord = words[targetWordIndex]
             
-            // For German learning PDFs, if we touched a noun or adjective/word, check if there's an article before it
-            if (targetWordIndex > 0 && !isRtl) {
-                val prevWord = words[targetWordIndex - 1]
-                if (prevWord.lowercase(Locale.ROOT) in listOf("die", "der", "das", "de", "den", "dem", "des")) {
-                    return "$prevWord $selectedWord"
+            // For German learning PDFs: automatically select the article with the noun
+            if (!isRtl) {
+                if (targetWordIndex > 0) {
+                    val prevWord = words[targetWordIndex - 1]
+                    if (prevWord.lowercase(Locale.ROOT) in listOf("die", "der", "das", "de", "den", "dem", "des")) {
+                        return "$prevWord $selectedWord"
+                    }
+                }
+                if (selectedWord.lowercase(Locale.ROOT) in listOf("die", "der", "das", "de", "den", "dem", "des") && targetWordIndex < words.size - 1) {
+                    val nextWord = words[targetWordIndex + 1]
+                    return "$selectedWord $nextWord"
                 }
             }
             selectedWord
@@ -698,7 +748,23 @@ fun ViewerScreen(
                                     } else {
                                         ""
                                     }
-                                    selectedText = if (!realText.isNullOrBlank()) realText else getSelectionText(documentName, currentPage)
+                                    val textToSpeak = if (!realText.isNullOrBlank()) realText.trim() else getSelectionText(documentName, currentPage).trim()
+                                    selectedText = textToSpeak
+                                    if (textToSpeak.isNotEmpty()) {
+                                        try {
+                                            tts?.let { textToSpeech ->
+                                                val isArabic = textToSpeak.any { it in '\u0600'..'\u06FF' }
+                                                if (isArabic) {
+                                                    textToSpeech.language = java.util.Locale("ar")
+                                                } else {
+                                                    textToSpeech.language = java.util.Locale.GERMAN
+                                                }
+                                                textToSpeech.speak(textToSpeak, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "PDF_TTS_ID")
+                                            }
+                                        } catch (e: Exception) {
+                                            android.util.Log.e("ViewerScreen", "Error playing automatic pronunciation on long press", e)
+                                        }
+                                    }
                                     isTextSelected = true
                                     showColorPicker = false
                                 },

@@ -117,25 +117,6 @@ fun PdfViewerWidget(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .pointerInput(Unit) {
-                awaitEachGesture {
-                    while (true) {
-                        val event = awaitPointerEvent()
-                        if (event.changes.size == 2) {
-                            val activeChanges = event.changes.filter { it.pressed }
-                            if (activeChanges.size == 2) {
-                                val deltaY = event.changes.map { it.position.y - it.previousPosition.y }
-                                                 .average().toFloat()
-                                if (Math.abs(deltaY) > 0.5f) {
-                                    showFastScrollBadge = true
-                                    localPdfViewRef?.moveRelativeTo(0f, deltaY * 3f)
-                                }
-                                event.changes.forEach { it.consume() }
-                            }
-                        }
-                    }
-                }
-            }
     ) {
         if (!isLoaded && loadError == null) {
             CircularProgressIndicator(
