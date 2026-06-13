@@ -19,6 +19,8 @@ import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import androidx.core.content.FileProvider
 import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.text.PDFTextStripper
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
 import com.tom_roush.pdfbox.pdmodel.graphics.image.LosslessFactory
 import com.tom_roush.pdfbox.pdmodel.graphics.image.JPEGFactory
@@ -350,6 +352,74 @@ fun ViewerScreen(
         }
     }
 
+    fun getPageText(context: Context, uri: Uri, page: Int): String {
+        return try {
+            PDFBoxResourceLoader.init(context.applicationContext)
+            context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                PDDocument.load(inputStream).use { document ->
+                    if (page < document.numberOfPages) {
+                        val stripper = PDFTextStripper()
+                        stripper.startPage = page + 1
+                        stripper.endPage = page + 1
+                        val text = stripper.getText(document)
+                        text ?: ""
+                    } else {
+                        ""
+                    }
+                }
+            } ?: ""
+        } catch (e: Exception) {
+            Log.e("PdfViewerWidget", "Error extracting page text", e)
+            ""
+        }
+    }
+
+    fun getRealSelectionText(
+        context: Context,
+        pdfUri: Uri,
+        page: Int,
+        offset: Offset,
+        pdfViewWidth: Float,
+        pdfViewHeight: Float
+    ): String {
+        return try {
+            val pageText = getPageText(context, pdfUri, page)
+            if (pageText.isBlank()) return ""
+            
+            val lines = pageText.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
+            if (lines.isEmpty()) return ""
+            
+            val ratioY = (offset.y / pdfViewHeight).coerceIn(0f, 1f)
+            val targetLineIndex = (ratioY * lines.size).toInt().coerceIn(0, lines.size - 1)
+            val lineText = lines[targetLineIndex]
+            
+            val words = lineText.split(Regex("\\s+")).filter { it.isNotBlank() }
+            if (words.isEmpty()) return lineText
+            
+            val ratioX = (offset.x / pdfViewWidth).coerceIn(0f, 1f)
+            val isRtl = lineText.any { it in '\u0600'..'\u06FF' }
+            val targetWordIndex = if (isRtl) {
+                (words.size - 1 - (ratioX * words.size).toInt()).coerceIn(0, words.size - 1)
+            } else {
+                ((ratioX * words.size).toInt()).coerceIn(0, words.size - 1)
+            }
+            
+            val selectedWord = words[targetWordIndex]
+            
+            // For German learning PDFs, if we touched a noun or adjective/word, check if there's an article before it
+            if (targetWordIndex > 0 && !isRtl) {
+                val prevWord = words[targetWordIndex - 1]
+                if (prevWord.lowercase(Locale.ROOT) in listOf("die", "der", "das", "de", "den", "dem", "des")) {
+                    return "$prevWord $selectedWord"
+                }
+            }
+            selectedWord
+        } catch (e: Exception) {
+            Log.e("PdfViewerWidget", "Error in getRealSelectionText", e)
+            ""
+        }
+    }
+
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
@@ -615,7 +685,20 @@ fun ViewerScreen(
                                 onLongPress = { offset ->
                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                     selectionPos = offset
-                                    selectedText = getSelectionText(documentName, currentPage)
+                                    val uriString = activeUri ?: ""
+                                    val realText = if (uriString.isNotEmpty()) {
+                                        getRealSelectionText(
+                                            context = context,
+                                            pdfUri = Uri.parse(uriString),
+                                            page = currentPage,
+                                            offset = offset,
+                                            pdfViewWidth = pdfViewInst?.width?.toFloat() ?: 1000f,
+                                            pdfViewHeight = pdfViewInst?.height?.toFloat() ?: 1000f
+                                        )
+                                    } else {
+                                        ""
+                                    }
+                                    selectedText = if (!realText.isNullOrBlank()) realText else getSelectionText(documentName, currentPage)
                                     isTextSelected = true
                                     showColorPicker = false
                                 },

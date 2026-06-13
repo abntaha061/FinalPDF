@@ -210,14 +210,7 @@ fun PdfViewerWidget(
                             setLayerType(android.view.View.LAYER_TYPE_NONE, null)
                         }
                         
-                        val gestureDetector = android.view.GestureDetector(ctx, object : android.view.GestureDetector.SimpleOnGestureListener() {
-                            override fun onLongPress(e: android.view.MotionEvent) {
-                                onLongPress?.invoke(androidx.compose.ui.geometry.Offset(e.x, e.y))
-                            }
-                        })
-                        
                         setOnTouchListener { _, event ->
-                            gestureDetector.onTouchEvent(event)
                             val action = event.actionMasked
                             if (action == android.view.MotionEvent.ACTION_MOVE || 
                                 action == android.view.MotionEvent.ACTION_UP || 
@@ -288,6 +281,9 @@ fun PdfViewerWidget(
                                 .onTap { e ->
                                     onTap?.invoke()
                                     true
+                                }
+                                .onLongPress { e ->
+                                    onLongPress?.invoke(androidx.compose.ui.geometry.Offset(e.x, e.y))
                                 }
                                 .enableAnnotationRendering(true)          // renders PDF annotations
                                 .enableAntialiasing(true)                 // smooth rendering, no pixelation

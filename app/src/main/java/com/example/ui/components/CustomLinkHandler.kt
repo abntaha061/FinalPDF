@@ -21,6 +21,20 @@ class CustomLinkHandler(
     private val onNavigateToWebView: ((String) -> Unit)? = null
 ) : LinkHandler {
 
+    private var tts: android.speech.tts.TextToSpeech? = null
+
+    init {
+        try {
+            tts = android.speech.tts.TextToSpeech(context.applicationContext) { status ->
+                if (status == android.speech.tts.TextToSpeech.SUCCESS) {
+                    tts?.language = java.util.Locale.GERMAN
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("CustomLinkHandler", "Failed to initialize TTS", e)
+        }
+    }
+
     override fun handleLinkEvent(event: LinkTapEvent) {
         val link = event.link
         if (link == null) {
@@ -100,6 +114,27 @@ class CustomLinkHandler(
                 }
             } else if (uriString.startsWith("http://") || uriString.startsWith("https://")) {
                 Log.d("CustomLinkHandler", "Tapped http/https URI: $uriString with mode: $linkOpenMode")
+                
+                // Automatically speech-pronounce the word from the dictionary URL
+                try {
+                    val parsedUri = Uri.parse(uriString)
+                    var lastSeg = parsedUri.lastPathSegment
+                    if (uriString.contains("dict.cc", ignoreCase = true) || uriString.contains("dict.leo.org", ignoreCase = true)) {
+                        val sParam = parsedUri.getQueryParameter("s") ?: parsedUri.getQueryParameter("search")
+                        if (!sParam.isNullOrBlank()) {
+                            lastSeg = sParam
+                        }
+                    }
+                    if (!lastSeg.isNullOrEmpty()) {
+                        val decodedWord = Uri.decode(lastSeg).trim()
+                        if (decodedWord.isNotEmpty()) {
+                            tts?.speak(decodedWord, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "LINK_TTS_ID")
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e("CustomLinkHandler", "Error pronouncing word in web link", e)
+                }
+
                 when (linkOpenMode) {
                     "داخل التطبيق (WebView)" -> {
                         if (onNavigateToWebView != null) {

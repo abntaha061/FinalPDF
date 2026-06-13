@@ -10,6 +10,7 @@ class PdfApplication : Application() {
         super.onCreate()
         // Set PDFView page cache size to 5 pages to avoid OutOfMemory on large files
         Constants.Cache.CACHE_SIZE = 5
+        Constants.PART_SIZE = 512f // Render high-resolution tiles for crisp text quality
     }
 
     override fun onTrimMemory(level: Int) {
