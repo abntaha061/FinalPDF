@@ -97,6 +97,7 @@ dependencies {
   implementation(libs.hilt.navigation.compose)
   implementation(libs.coil.compose)
   implementation("com.github.mhiew:android-pdf-viewer:3.2.0-beta.1")
+  implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
   implementation("androidx.documentfile:documentfile:1.0.1")
   implementation("org.burnoutcrew.composereorderable:reorderable:0.9.6")
   implementation("com.tom-roush:pdfbox-android:2.0.27.0")

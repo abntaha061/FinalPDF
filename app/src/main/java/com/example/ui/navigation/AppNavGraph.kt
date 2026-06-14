@@ -20,6 +20,7 @@ sealed class Screen(val route: String) {
         fun createRoute(encodedUri: String) = "pdf_reader?uri=$encodedUri"
     }
     object Settings  : Screen("settings")
+    object GestureSettings: Screen("gesture_settings")
     object Statistics: Screen("statistics")
     object MergePdfs  : Screen("merge_pdfs")
     object About     : Screen("about")
@@ -103,6 +104,17 @@ fun AppNavGraph(
 
         // LANGUAGE
         composable(Screen.Language.route) { LanguageScreen(navController) }
+
+        // GESTURE SETTINGS
+        composable(Screen.GestureSettings.route) {
+            val context = androidx.compose.ui.platform.LocalContext.current
+            val activity = context as? androidx.activity.ComponentActivity
+                ?: throw IllegalStateException("Context must be ComponentActivity")
+            val viewModel = androidx.compose.runtime.remember(context) {
+                androidx.lifecycle.ViewModelProvider(activity)[com.example.ui.PdfViewModel::class.java]
+            }
+            GestureSettingsScreen(navController, viewModel)
+        }
 
         // WEBVIEW — slide from bottom
         composable(

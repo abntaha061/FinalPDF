@@ -148,6 +148,7 @@ fun ViewerScreen(
     val readingScrollMode by viewModel.readingScrollMode.collectAsState()
     val fitMode by viewModel.fitMode.collectAsState()
     val isDoublePageMode by viewModel.isDoublePageMode.collectAsState()
+    val gestureMappings by viewModel.gestureMappings.collectAsState()
     
     // Bottom Reader Bar visibility state connected to the ViewModel Flow
     val isToolbarVisible by viewModel.isToolbarVisible.collectAsState()
@@ -314,6 +315,73 @@ fun ViewerScreen(
 
     // Document metadata
     val documentName = activeDocument?.name ?: "قارئ الكتب"
+
+    val executeGestureAction: (com.example.data.GestureAction, com.github.barteksc.pdfviewer.PDFView?, androidx.compose.ui.geometry.Offset?) -> Unit = { action, pdfView, offset ->
+        when (action) {
+            com.example.data.GestureAction.NOTHING -> { /* Do nothing */ }
+            com.example.data.GestureAction.TOGGLE_TOOLBAR -> {
+                viewModel.toggleToolbarVisibility()
+            }
+            com.example.data.GestureAction.NEXT_PAGE -> {
+                val total = pdfView?.pageCount ?: 0
+                if (currentPage < total - 1) {
+                    pdfView?.jumpTo(currentPage + 1)
+                    viewModel.setCurrentPage(currentPage + 1)
+                }
+            }
+            com.example.data.GestureAction.PREV_PAGE -> {
+                if (currentPage > 0) {
+                    pdfView?.jumpTo(currentPage - 1)
+                    viewModel.setCurrentPage(currentPage - 1)
+                }
+            }
+            com.example.data.GestureAction.ZOOM_IN -> {
+                pdfView?.let {
+                    val nextZoom = it.zoom * 1.25f
+                    it.zoomTo(if (nextZoom <= it.maxZoom) nextZoom else it.maxZoom)
+                }
+            }
+            com.example.data.GestureAction.ZOOM_OUT -> {
+                pdfView?.let {
+                    val nextZoom = it.zoom / 1.25f
+                    it.zoomTo(if (nextZoom >= it.minZoom) nextZoom else it.minZoom)
+                }
+            }
+            com.example.data.GestureAction.TOGGLE_NIGHT_MODE -> {
+                viewModel.toggleNightMode()
+            }
+            com.example.data.GestureAction.ADD_BOOKMARK -> {
+                viewModel.toggleCurrentPageBookmark()
+            }
+            com.example.data.GestureAction.OPEN_TOC -> {
+                coroutineScope.launch {
+                    drawerState.open()
+                }
+            }
+            com.example.data.GestureAction.OPEN_SEARCH -> {
+                isSearching = true
+            }
+            com.example.data.GestureAction.SCROLL_TO_TOP -> {
+                pdfView?.jumpTo(0)
+                viewModel.setCurrentPage(0)
+            }
+            com.example.data.GestureAction.SCROLL_TO_BOTTOM -> {
+                val total = pdfView?.pageCount ?: 0
+                if (total > 0) {
+                    pdfView?.jumpTo(total - 1)
+                    viewModel.setCurrentPage(total - 1)
+                }
+            }
+            com.example.data.GestureAction.TOGGLE_ANNOTATION -> {
+                isAnnotationBarVisible = !isAnnotationBarVisible
+                if (isAnnotationBarVisible) {
+                    annotationViewModel.setTool(com.example.ui.AnnotationTool.Pen)
+                } else {
+                    annotationViewModel.setTool(com.example.ui.AnnotationTool.None)
+                }
+            }
+        }
+    }
 
     // Text Selection & Touch Popup States
     var isTextSelected by remember { mutableStateOf(false) }
@@ -794,7 +862,11 @@ fun ViewerScreen(
                                     zoomLevel = zoom
                                 },
                                 viewModel = viewModel,
-                                onNavigateToWebView = onNavigateToWebView
+                                onNavigateToWebView = onNavigateToWebView,
+                                onGestureTriggered = { gestureType, offset ->
+                                    val act = gestureMappings[gestureType] ?: com.example.data.GestureAction.NOTHING
+                                    executeGestureAction(act, pdfViewInst, offset)
+                                }
                             )
                         }
                     }
@@ -1289,60 +1361,6 @@ fun ViewerScreen(
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
                     )
                 }
-            }
-
-            // Overlay top app bar with Slide-Out transitions
-            AnimatedVisibility(
-                visible = isToolbarVisible,
-                enter = slideInVertically(
-                    initialOffsetY = { -it },
-                    animationSpec = tween(durationMillis = 300)
-                ),
-                exit = slideOutVertically(
-                    targetOffsetY = { -it },
-                    animationSpec = tween(durationMillis = 300)
-                ),
-                modifier = Modifier.align(Alignment.TopCenter)
-            ) {
-                CenterAlignedTopAppBar(
-                    title = {
-                        // Title is kept empty to satisfy user request to remove the static document name "FinalPDF"
-                    },
-                    navigationIcon = {
-                        IconButton(
-                            onClick = {
-                                viewModel.closeDocument()
-                                onBack()
-                            },
-                            modifier = Modifier
-                                .testTag("back_home_button")
-                                .minimumInteractiveComponentSize()
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "الرجوع",
-                                tint = AppTextPrimary
-                            )
-                        }
-                    },
-                    actions = {
-                        // Toggle Night mode directly from top or bottom
-                        IconButton(
-                            onClick = { viewModel.toggleNightMode() },
-                            modifier = Modifier.minimumInteractiveComponentSize()
-                        ) {
-                            Icon(
-                                imageVector = if (isNightMode) Icons.Default.LightMode else Icons.Default.DarkMode,
-                                contentDescription = "الوضع المظلم",
-                                tint = AppTextPrimary
-                            )
-                        }
-                    },
-                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                        containerColor = AppSurface.copy(alpha = 0.9f)
-                    ),
-                    modifier = Modifier.statusBarsPadding()
-                )
             }
 
             // Overlay Search Bar sliding DOWN from the top of the screen (AnimatedVisibility, slide-in-top, 250ms)
@@ -2752,7 +2770,13 @@ fun ViewerScreen(
                     audioState = audioState,
                     currentWord = currentWord,
                     onStopClick = {
+                        try {
+                            tts?.stop()
+                        } catch (e: Exception) {
+                            android.util.Log.e("ViewerScreen", "Error stopping TTS", e)
+                        }
                         audioViewModel.stopAudio()
+                        com.example.util.AudioPlayerManager.setSpeechState(null, null, false)
                     }
                 )
             }

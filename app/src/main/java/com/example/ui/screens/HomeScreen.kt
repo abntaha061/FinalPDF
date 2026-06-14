@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import android.net.Uri
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -311,6 +312,7 @@ fun HomeScreen(
     onNavigateToMerge: () -> Unit = {}
 ) {
     val context = LocalContext.current
+    var selectedTab by rememberSaveable { mutableStateOf(0) }
     val recentPdfs by viewModel.recentDocuments.collectAsState()
     val isReady by viewModel.isReady.collectAsState()
     var isLoading by remember { mutableStateOf(true) }
@@ -377,129 +379,173 @@ fun HomeScreen(
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
         Scaffold(
             containerColor = AppBackground,
-            floatingActionButton = {
-                var isFabExpanded by remember { mutableStateOf(false) }
-                
-                Column(
-                    horizontalAlignment = Alignment.End,
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.padding(bottom = 16.dp, start = 16.dp)
+            bottomBar = {
+                NavigationBar(
+                    containerColor = Color(0xFF0D0D0F),
+                    tonalElevation = 8.dp
                 ) {
-                    if (isFabExpanded) {
-                        // Mini FAB 1: "فتح ملف PDF"
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Surface(
-                                color = AppSurface,
-                                shape = RoundedCornerShape(8.dp),
-                                shadowElevation = 4.dp
-                            ) {
-                                Text(
-                                    text = "فتح ملف PDF",
-                                    color = AppTextPrimary,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                                )
-                            }
-                            FloatingActionButton(
-                                onClick = {
-                                    isFabExpanded = false
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    pdfPickerLauncher.launch(arrayOf("application/pdf"))
-                                },
-                                containerColor = AppSurface,
-                                contentColor = AppPrimary,
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier
-                                    .size(48.dp)
-                                    .testTag("open_pdf_mini_fab")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.FolderOpen,
-                                    contentDescription = "فتح ملف",
-                                    modifier = Modifier.size(22.dp)
-                                )
-                            }
-                        }
-
-                        // Mini FAB 2: "دمج ملفات PDF"
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Surface(
-                                color = AppSurface,
-                                shape = RoundedCornerShape(8.dp),
-                                shadowElevation = 4.dp
-                            ) {
-                                Text(
-                                    text = "دمج ملفات PDF",
-                                    color = AppTextPrimary,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                                )
-                            }
-                            FloatingActionButton(
-                                onClick = {
-                                    isFabExpanded = false
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    onNavigateToMerge()
-                                },
-                                containerColor = AppSurface,
-                                contentColor = AppPrimary,
-                                shape = RoundedCornerShape(12.dp),
-                                modifier = Modifier
-                                    .size(48.dp)
-                                    .testTag("merge_pdf_mini_fab")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.CallMerge,
-                                    contentDescription = "دمج ملفات PDF",
-                                    modifier = Modifier.size(22.dp)
-                                )
-                            }
-                        }
-                    }
-
-                    // Main FAB
-                    FloatingActionButton(
-                        onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            isFabExpanded = !isFabExpanded
-                        },
-                        containerColor = AppPrimary,
-                        contentColor = Color.White,
-                        shape = RoundedCornerShape(16.dp),
-                        modifier = Modifier
-                            .testTag("open_pdf_fab")
+                    NavigationBarItem(
+                        selected = selectedTab == 0,
+                        onClick = { selectedTab = 0 },
+                        icon = { Icon(imageVector = Icons.Default.Home, contentDescription = "الرئيسية") },
+                        label = { Text("الرئيسية") },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = Color.White,
+                            selectedTextColor = AppPrimary,
+                            unselectedIconColor = AppTextSecondary,
+                            unselectedTextColor = AppTextSecondary,
+                            indicatorColor = AppPrimary
+                        ),
+                        modifier = Modifier.testTag("home_tab")
+                    )
+                    NavigationBarItem(
+                        selected = selectedTab == 1,
+                        onClick = { selectedTab = 1 },
+                        icon = { Icon(imageVector = Icons.Default.FolderOpen, contentDescription = "الملفات") },
+                        label = { Text("الملفات") },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = Color.White,
+                            selectedTextColor = AppPrimary,
+                            unselectedIconColor = AppTextSecondary,
+                            unselectedTextColor = AppTextSecondary,
+                            indicatorColor = AppPrimary
+                        ),
+                        modifier = Modifier.testTag("files_tab")
+                    )
+                }
+            },
+            floatingActionButton = {
+                if (selectedTab == 0) {
+                    var isFabExpanded by remember { mutableStateOf(false) }
+                    
+                    Column(
+                        horizontalAlignment = Alignment.End,
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.padding(bottom = 16.dp, start = 16.dp)
                     ) {
-                        val rotationAngle by animateFloatAsState(
-                            targetValue = if (isFabExpanded) 45f else 0f,
-                            animationSpec = tween(durationMillis = 200),
-                            label = "FabRotation"
-                        )
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = "قائمة الإجراءات",
+                        if (isFabExpanded) {
+                            // Mini FAB 1: "فتح ملف PDF"
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Surface(
+                                    color = AppSurface,
+                                    shape = RoundedCornerShape(8.dp),
+                                    shadowElevation = 4.dp
+                                ) {
+                                    Text(
+                                        text = "فتح ملف PDF",
+                                        color = AppTextPrimary,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                    )
+                                }
+                                FloatingActionButton(
+                                    onClick = {
+                                        isFabExpanded = false
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        pdfPickerLauncher.launch(arrayOf("application/pdf"))
+                                    },
+                                    containerColor = AppSurface,
+                                    contentColor = AppPrimary,
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .testTag("open_pdf_mini_fab")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.FolderOpen,
+                                        contentDescription = "فتح ملف",
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                            }
+
+                            // Mini FAB 2: "دمج ملفات PDF"
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Surface(
+                                    color = AppSurface,
+                                    shape = RoundedCornerShape(8.dp),
+                                    shadowElevation = 4.dp
+                                ) {
+                                    Text(
+                                        text = "دمج ملفات PDF",
+                                        color = AppTextPrimary,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                    )
+                                }
+                                FloatingActionButton(
+                                    onClick = {
+                                        isFabExpanded = false
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        onNavigateToMerge()
+                                    },
+                                    containerColor = AppSurface,
+                                    contentColor = AppPrimary,
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .testTag("merge_pdf_mini_fab")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.CallMerge,
+                                        contentDescription = "دمج ملفات PDF",
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        // Main FAB
+                        FloatingActionButton(
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                isFabExpanded = !isFabExpanded
+                            },
+                            containerColor = AppPrimary,
+                            contentColor = Color.White,
+                            shape = RoundedCornerShape(16.dp),
                             modifier = Modifier
-                                .size(28.dp)
-                                .rotate(rotationAngle)
-                        )
+                                .testTag("open_pdf_fab")
+                        ) {
+                            val rotationAngle by animateFloatAsState(
+                                targetValue = if (isFabExpanded) 45f else 0f,
+                                animationSpec = tween(durationMillis = 200),
+                                label = "FabRotation"
+                            )
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = "قائمة الإجراءات",
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .rotate(rotationAngle)
+                            )
+                        }
                     }
                 }
             },
             modifier = modifier
         ) { innerPadding ->
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-                    .padding(horizontal = 20.dp, vertical = 16.dp)
-            ) {
+            if (selectedTab == 1) {
+                FileBrowserScreen(
+                    viewModel = viewModel,
+                    onPdfOpened = onPdfOpened,
+                    modifier = Modifier.padding(innerPadding)
+                )
+            } else {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(innerPadding)
+                        .padding(horizontal = 20.dp, vertical = 16.dp)
+                ) {
                 // 1. App Title and Settings Icon Row
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -621,6 +667,7 @@ fun HomeScreen(
                 }
             }
         }
+    }
 
         if (showSortSheet) {
             ModalBottomSheet(

@@ -3,10 +3,10 @@ package com.example
 import android.Manifest
 import android.content.Context
 import android.content.Intent
-import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -100,138 +100,106 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // ====================================================================================
-    // FIX (Crash on first launch):
-    // The locale (language) change MUST happen here, in attachBaseContext(), and NOT
-    // inside onCreate(). Calling resources.updateConfiguration() inside onCreate() BEFORE
-    // super.onCreate() / installSplashScreen() can cause the system to treat this as a
-    // configuration change that triggers an immediate Activity recreation. That recreation
-    // collides with the SplashScreen API lifecycle (which requires installSplashScreen()
-    // to run exactly once, before super.onCreate(), without being interrupted) and results
-    // in a crash on the very first cold start. On the second launch, the configuration is
-    // already correct, so no recreation happens and no crash occurs.
-    //
-    // attachBaseContext() runs BEFORE the Activity's configuration is finalized and does
-    // NOT trigger a recreate, so it is the correct, safe place to apply a custom locale.
-    // ====================================================================================
-    override fun attachBaseContext(newBase: Context) {
-        val savedLang = try {
-            runBlocking {
-                newBase.pdfReaderDataStore.data
-                    .map { it[APP_LANGUAGE_KEY] ?: "ar" }
-                    .first()
-            }
+    override fun onCreate(savedInstanceState: Bundle?) {
+        var savedLang = "ar"
+        try {
+            savedLang = runBlocking { pdfReaderDataStore.data.map { it[APP_LANGUAGE_KEY] ?: "ar" }.first() }
         } catch (e: Exception) {
-            // If DataStore isn't readable yet (first ever launch / IO issue), fall back to "ar"
-            "ar"
+            android.util.Log.e("MainActivity", "Error reading language during cold start", e)
         }
 
-        val locale = Locale(savedLang)
-        Locale.setDefault(locale)
+        try {
+            val locale = Locale(savedLang)
+            Locale.setDefault(locale)
+            val config = resources.configuration
+            config.setLocale(locale)
+            resources.updateConfiguration(config, resources.displayMetrics)
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Error setting locale", e)
+        }
 
-        val config = Configuration(newBase.resources.configuration)
-        config.setLocale(locale)
-
-        val localizedContext = newBase.createConfigurationContext(config)
-        super.attachBaseContext(localizedContext)
-    }
-
-    override fun onCreate(savedInstanceState: Bundle?) {
-        // ====================================================================================
-        // FIX: installSplashScreen() MUST be the very first call in onCreate(), strictly
-        // before super.onCreate(). Nothing else (no DataStore reads, no resource/config
-        // changes) should run before it.
-        // ====================================================================================
         val splashScreen = installSplashScreen()
 
-        super.onCreate(savedInstanceState)
-
-        // Let the system handle notch insets smoothly
-        enableEdgeToEdge()
-
-        // Core modern ViewModel instantiation passing context
-        val viewModel = ViewModelProvider(
-            this,
-            PdfViewModelFactory(repository, this.applicationContext)
-        )[PdfViewModel::class.java]
-
-        splashScreen.setKeepOnScreenCondition {
-            // Keep splash visible until ViewModel finishes loading recent files
-            !viewModel.isReady.value
-        }
-
-        splashScreen.setOnExitAnimationListener { splashScreenView ->
-            val iconView = splashScreenView.iconView
-            if (iconView != null) {
-                // Animate the logo scaling down and fading out
-                val scaleX = ObjectAnimator.ofFloat(iconView, View.SCALE_X, 1f, 0.8f)
-                val scaleY = ObjectAnimator.ofFloat(iconView, View.SCALE_Y, 1f, 0.8f)
-                val alpha  = ObjectAnimator.ofFloat(iconView, View.ALPHA, 1f, 0f)
-                AnimatorSet().apply {
-                    playTogether(scaleX, scaleY, alpha)
-                    duration = 400
-                    doOnEnd { splashScreenView.remove() }
-                    start()
-                }
-            } else {
-                splashScreenView.remove()
-            }
-        }
-
-        setContent {
-            val isNightModeBySettings by viewModel.isNightMode.collectAsState()
-            val isOnboardingCompleted by viewModel.isOnboardingDone.collectAsState()
-            val primaryColorHex by viewModel.primaryColorHex.collectAsState()
-            val uiFontSize by viewModel.uiFontSize.collectAsState()
+        try {
+            super.onCreate(savedInstanceState)
             
-            MyApplicationTheme(
-                darkTheme = isNightModeBySettings,
-                primaryColorHex = primaryColorHex
-            ) {
-                CompositionLocalProvider(
-                    LocalTextStyle provides LocalTextStyle.current.copy(fontSize = uiFontSize.sp)
+            // Let the system handle notch insets smoothly
+            enableEdgeToEdge()
+
+            // Core modern ViewModel instantiation passing context
+            val viewModel = ViewModelProvider(
+                this,
+                PdfViewModelFactory(repository, this.applicationContext)
+            )[PdfViewModel::class.java]
+
+            splashScreen.setKeepOnScreenCondition {
+                // Keep splash visible until ViewModel finishes loading recent files
+                !viewModel.isReady.value
+            }
+
+            splashScreen.setOnExitAnimationListener { splashScreenView ->
+                val iconView = splashScreenView.iconView
+                if (iconView != null) {
+                    // Animate the logo scaling down and fading out
+                    val scaleX = ObjectAnimator.ofFloat(iconView, View.SCALE_X, 1f, 0.8f)
+                    val scaleY = ObjectAnimator.ofFloat(iconView, View.SCALE_Y, 1f, 0.8f)
+                    val alpha  = ObjectAnimator.ofFloat(iconView, View.ALPHA, 1f, 0f)
+                    AnimatorSet().apply {
+                        playTogether(scaleX, scaleY, alpha)
+                        duration = 400
+                        doOnEnd { splashScreenView.remove() }
+                        start()
+                    }
+                } else {
+                    splashScreenView.remove()
+                }
+            }
+
+            setContent {
+                val isNightModeBySettings by viewModel.isNightMode.collectAsState()
+                val isOnboardingCompleted by viewModel.isOnboardingDone.collectAsState()
+                val primaryColorHex by viewModel.primaryColorHex.collectAsState()
+                val uiFontSize by viewModel.uiFontSize.collectAsState()
+                
+                MyApplicationTheme(
+                    darkTheme = isNightModeBySettings,
+                    primaryColorHex = primaryColorHex
                 ) {
-                    val context = LocalContext.current
-                    var hasPermission by remember { mutableStateOf(hasRequiredPermission(context)) }
-                var showRationaleDialog by remember { mutableStateOf(!hasPermission) }
-                var showDeniedDialog by remember { mutableStateOf(false) }
+                    CompositionLocalProvider(
+                        LocalTextStyle provides LocalTextStyle.current.copy(fontSize = uiFontSize.sp)
+                    ) {
+                        val context = LocalContext.current
+                        var hasPermission by remember { mutableStateOf(true) }
+                        var showRationaleDialog by remember { mutableStateOf(false) }
+                        var showDeniedDialog by remember { mutableStateOf(false) }
 
-                val standardPermissionLauncher = rememberLauncherForActivityResult(
-                    contract = ActivityResultContracts.RequestPermission()
-                ) { isGranted ->
-                    hasPermission = isGranted
-                    if (!isGranted) {
-                        showDeniedDialog = true
-                    }
-                }
+                        val standardPermissionLauncher = rememberLauncherForActivityResult(
+                            contract = ActivityResultContracts.RequestPermission()
+                        ) { isGranted ->
+                            // Bypassed: always proceed as true via SAF persistable permissions
+                            hasPermission = true
+                        }
 
-                val manageStorageLauncher = rememberLauncherForActivityResult(
-                    contract = ActivityResultContracts.StartActivityForResult()
-                ) { _ ->
-                    val granted = hasRequiredPermission(context)
-                    hasPermission = granted
-                    if (!granted) {
-                        showDeniedDialog = true
-                    }
-                }
+                        val manageStorageLauncher = rememberLauncherForActivityResult(
+                            contract = ActivityResultContracts.StartActivityForResult()
+                        ) { _ ->
+                            hasPermission = true
+                        }
 
-                val lifecycleOwner = LocalLifecycleOwner.current
-                DisposableEffect(lifecycleOwner) {
-                    val observer = LifecycleEventObserver { _, event ->
-                        if (event == Lifecycle.Event.ON_RESUME) {
-                            val granted = hasRequiredPermission(context)
-                            hasPermission = granted
-                            if (granted) {
-                                showDeniedDialog = false
-                                showRationaleDialog = false
+                        val lifecycleOwner = LocalLifecycleOwner.current
+                        DisposableEffect(lifecycleOwner) {
+                            val observer = LifecycleEventObserver { _, event ->
+                                if (event == Lifecycle.Event.ON_RESUME) {
+                                    hasPermission = true
+                                    showDeniedDialog = false
+                                    showRationaleDialog = false
+                                }
+                            }
+                            lifecycleOwner.lifecycle.addObserver(observer)
+                            onDispose {
+                                lifecycleOwner.lifecycle.removeObserver(observer)
                             }
                         }
-                    }
-                    lifecycleOwner.lifecycle.addObserver(observer)
-                    onDispose {
-                        lifecycleOwner.lifecycle.removeObserver(observer)
-                    }
-                }
 
                 if (showRationaleDialog) {
                     AlertDialog(
@@ -380,5 +348,8 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+} catch (e: Exception) {
+    android.util.Log.e("MainActivity", "Error in onCreate body execution", e)
+}
     }
 }

@@ -1,8 +1,8 @@
 package com.example.ui
 
 import android.content.Context
-import android.content.Intent
 import android.net.Uri
+import java.io.File
 import android.provider.OpenableColumns
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
@@ -27,6 +27,8 @@ private val Context.dataStore get() = this.pdfReaderDataStore
 private val NIGHT_MODE_KEY = booleanPreferencesKey("is_night_mode")
 private val READING_MODE_KEY = androidx.datastore.preferences.core.stringPreferencesKey("reading_mode")
 private val ONBOARDING_DONE_KEY = booleanPreferencesKey("onboarding_done")
+
+private val GESTURE_MAPPINGS_KEY = androidx.datastore.preferences.core.stringPreferencesKey("gesture_mappings")
 
 private val DEFAULT_READING_MODE_KEY = androidx.datastore.preferences.core.stringPreferencesKey("default_reading_mode")
 private val PRIMARY_COLOR_KEY = androidx.datastore.preferences.core.stringPreferencesKey("primary_color")
@@ -212,6 +214,9 @@ class PdfViewModel(
     private val _appLanguage = MutableStateFlow("ar")
     val appLanguage: StateFlow<String> = _appLanguage.asStateFlow()
 
+    private val _gestureMappings = MutableStateFlow<Map<com.example.data.GestureType, com.example.data.GestureAction>>(com.example.data.defaultGestures)
+    val gestureMappings: StateFlow<Map<com.example.data.GestureType, com.example.data.GestureAction>> = _gestureMappings.asStateFlow()
+
     fun completeOnboarding() {
         viewModelScope.launch {
             context.dataStore.edit { preferences ->
@@ -232,34 +237,7 @@ class PdfViewModel(
         _showLargeFileWarningSnackbar.value = false
     }
 
-    // ====================================================================================
-    // FIX (Bottom sheet "لا يوجد إذن للوصول" appearing when opening a PDF):
-    // takePersistableUriPermission() MUST be called FIRST, before any attempt to query
-    // metadata or open a FileDescriptor for the Uri. Previously this permission was only
-    // taken inside proceedWithLoading(), which runs AFTER the size/SecurityException
-    // checks in selectDocument(). That meant the very first openFileDescriptor() call
-    // could throw SecurityException (because the persistable grant hadn't been taken yet),
-    // which set _securityExceptionUri and triggered the "no access permission" dialog -
-    // even though the user had just picked the file and Android DID grant a one-time
-    // read permission via the SAF picker.
-    //
-    // Calling takePersistableUriPermission() is safe to call multiple times and is a
-    // no-op if the Uri doesn't support persistable grants (it's wrapped in try/catch).
-    // ====================================================================================
-    private fun takePersistablePermission(context: Context, uri: Uri) {
-        try {
-            val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
-            context.contentResolver.takePersistableUriPermission(uri, flags)
-        } catch (e: Exception) {
-            // Not a persistable SAF Uri (e.g. a one-shot content Uri from another app) - ignore.
-            // The Uri can usually still be read for the duration of this process.
-        }
-    }
-
     fun selectDocumentForced(context: Context, uri: Uri) {
-        // Take permission FIRST (see comment above takePersistablePermission)
-        takePersistablePermission(context, uri)
-
         _largeFileUriPending.value = null
         _showLargeFileWarningSnackbar.value = true
         _prefetchEnabled.value = false // disable prefetch for forced large files
@@ -376,6 +354,9 @@ class PdfViewModel(
                 _filterMaxPages.value = preferences[FILTER_MAX_PAGES_KEY] ?: 500
                 _filterDateRange.value = preferences[FILTER_DATE_RANGE_KEY] ?: "الكل"
                 _appLanguage.value = preferences[APP_LANGUAGE_KEY] ?: "ar"
+
+                val gestureJson = preferences[GESTURE_MAPPINGS_KEY]
+                _gestureMappings.value = com.example.data.GestureSerializer.deserialize(gestureJson)
                 _readingScrollMode.value = preferences[READING_SCROLL_MODE_KEY] ?: "continuous"
                 _fitMode.value = preferences[FIT_MODE_KEY] ?: "width"
             }
@@ -435,11 +416,13 @@ class PdfViewModel(
         _securityExceptionUri.value = null
         _largeFileUriPending.value = null
 
-        // ====================================================================================
-        // FIX: Take the persistable read permission FIRST, before any metadata query or
-        // FileDescriptor access. See the detailed comment above takePersistablePermission().
-        // ====================================================================================
-        takePersistablePermission(context, uri)
+        // Try to take persistable permission FIRST, before anything else!
+        try {
+            val flags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+            context.contentResolver.takePersistableUriPermission(uri, flags)
+        } catch (e: Exception) {
+            // Ignore if it's not a persistent URI or already granted
+        }
 
         // 1. Get file size from metadata safely first (which does not throw SecurityException)
         val metadata = getUriMetadata(context, uri)
@@ -503,9 +486,13 @@ class PdfViewModel(
         _isViewerLoading.value = true
         
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            // Permission is already taken in selectDocument()/selectDocumentForced() before
-            // this point, but we call it again here as a harmless safety net (it's idempotent).
-            takePersistablePermission(context, uri)
+            // Take persistable permission if possible
+            try {
+                val flags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                context.contentResolver.takePersistableUriPermission(uri, flags)
+            } catch (e: Exception) {
+                // Ignore if it's not a persistent URI
+            }
 
             val metadata = getUriMetadata(context, uri)
             var doc = repository.getPdfByUri(uri.toString())
@@ -563,7 +550,14 @@ class PdfViewModel(
         }
     }
 
-    // Setters for Settings
+    fun saveGestureMappings(mappings: Map<com.example.data.GestureType, com.example.data.GestureAction>) {
+        viewModelScope.launch {
+            context.dataStore.edit { preferences ->
+                preferences[GESTURE_MAPPINGS_KEY] = com.example.data.GestureSerializer.serialize(mappings)
+            }
+        }
+    }
+
     fun setDefaultReadingMode(mode: String) {
         viewModelScope.launch {
             context.dataStore.edit { preferences ->
@@ -678,6 +672,29 @@ class PdfViewModel(
             repository.updatePdfBookmarkState(uri, isFavorite)
             if (_currentDocument.value?.uri == uri) {
                 _currentDocument.value = _currentDocument.value?.copy(isBookmarked = isFavorite)
+            }
+        }
+    }
+
+    fun toggleFavoriteForFile(file: File, isFavorite: Boolean) {
+        viewModelScope.launch {
+            val uriStr = Uri.fromFile(file).toString()
+            val existing = repository.getPdfByUri(uriStr)
+            if (existing == null) {
+                if (isFavorite) {
+                    val doc = RecentFileEntity(
+                        uri = uriStr,
+                        name = file.name,
+                        sizeBytes = file.length(),
+                        totalPages = 0,
+                        currentPage = 0,
+                        lastOpenedAt = System.currentTimeMillis(),
+                        isBookmarked = true
+                    )
+                    repository.insertPdf(doc)
+                }
+            } else {
+                repository.updatePdfBookmarkState(uriStr, isFavorite)
             }
         }
     }

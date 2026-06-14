@@ -52,6 +52,9 @@ fun SettingsScreen(navController: androidx.navigation.NavController) {
         },
         onNavigateToAbout = {
             navController.navigate(com.example.ui.navigation.Screen.About.route)
+        },
+        onNavigateToGestureSettings = {
+            navController.navigate(com.example.ui.navigation.Screen.GestureSettings.route)
         }
     )
 }
@@ -62,7 +65,8 @@ fun SettingsScreen(
     viewModel: PdfViewModel,
     onBack: () -> Unit,
     onNavigateToLanguage: () -> Unit,
-    onNavigateToAbout: () -> Unit
+    onNavigateToAbout: () -> Unit,
+    onNavigateToGestureSettings: () -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -875,6 +879,48 @@ fun SettingsScreen(
                                     Text("إلغاء", color = AppTextPrimary)
                                 }
                             }
+                        )
+                    }
+                }
+
+                item {
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), thickness = 1.dp, color = AppSurface)
+                }
+
+                // SECTION: الإيماءات (Gestures Customization Theme)
+                item {
+                    SectionHeader("الإيماءات")
+                }
+
+                item {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(64.dp)
+                            .clickable { onNavigateToGestureSettings() }
+                            .padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.TouchApp,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Column {
+                                Text("تخصيص الإيماءات", color = AppTextPrimary, fontSize = 15.sp)
+                                Text("تعيين وظائف السحب والنقر المتعدد", color = AppTextSecondary, fontSize = 12.sp)
+                            }
+                        }
+
+                        Icon(
+                            imageVector = Icons.Default.ChevronLeft,
+                            contentDescription = "Navigate to gestures",
+                            tint = AppTextSecondary,
+                            modifier = Modifier.size(24.dp)
                         )
                     }
                 }

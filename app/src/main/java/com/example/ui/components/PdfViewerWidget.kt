@@ -57,14 +57,15 @@ fun PdfViewerWidget(
     onTap: (() -> Unit)? = null,
     onLongPress: ((androidx.compose.ui.geometry.Offset) -> Unit)? = null,
     onZoomChanged: ((Float) -> Unit)? = null,
-    onNavigateToWebView: ((String) -> Unit)? = null
+    onNavigateToWebView: ((String) -> Unit)? = null,
+    onGestureTriggered: ((com.example.data.GestureType, androidx.compose.ui.geometry.Offset?) -> Unit)? = null
 ) {
+    val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
     val pageSpacing by viewModel.pageSpacing.collectAsState()
     var isLoaded by remember { mutableStateOf(false) }
     var loadError by remember { mutableStateOf<String?>(null) }
 
-    val coroutineScope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
 
     val onLinkTapped: (RectF) -> Unit = { rect ->
@@ -89,6 +90,15 @@ fun PdfViewerWidget(
     var localPdfViewRef by remember { mutableStateOf<PDFView?>(null) }
     var showFastScrollBadge by remember { mutableStateOf(false) }
 
+    var touchTime by remember { mutableStateOf(0L) }
+    var isMultiTap by remember { mutableStateOf(false) }
+    var startX by remember { mutableStateOf(0f) }
+    var startY by remember { mutableStateOf(0f) }
+    var startX2 by remember { mutableStateOf(0f) }
+    var startY2 by remember { mutableStateOf(0f) }
+    var initialTwoFingerPageY by remember { mutableStateOf(0f) }
+    var lastTapTime by remember { mutableStateOf(0L) }
+
     LaunchedEffect(showFastScrollBadge) {
         if (showFastScrollBadge) {
             kotlinx.coroutines.delay(1000)
@@ -99,6 +109,93 @@ fun PdfViewerWidget(
     Box(
         modifier = modifier
             .fillMaxSize()
+            .pointerInput(onGestureTriggered) {
+                if (onGestureTriggered == null) return@pointerInput
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
+                        val changes = event.changes
+                        
+                        when (event.type) {
+                            androidx.compose.ui.input.pointer.PointerEventType.Press -> {
+                                touchTime = System.currentTimeMillis()
+                                if (changes.size >= 2) {
+                                    isMultiTap = true
+                                    startX = changes[0].position.x
+                                    startY = changes[0].position.y
+                                    startX2 = changes[1].position.x
+                                    startY2 = changes[1].position.y
+                                    initialTwoFingerPageY = (startY + startY2) / 2
+                                } else if (changes.size == 1 && !isMultiTap) {
+                                    startX = changes[0].position.x
+                                    startY = changes[0].position.y
+                                }
+                            }
+                            androidx.compose.ui.input.pointer.PointerEventType.Release -> {
+                                val duration = System.currentTimeMillis() - touchTime
+                                val endX = if (changes.isNotEmpty()) changes[0].position.x else startX
+                                val endY = if (changes.isNotEmpty()) changes[0].position.y else startY
+                                val dx = endX - startX
+                                val dy = endY - startY
+                                
+                                if (isMultiTap) {
+                                    // Multi-touch gestures
+                                    val endX2 = if (changes.size >= 2) changes[1].position.x else startX2
+                                    val endY2 = if (changes.size >= 2) changes[1].position.y else startY2
+                                    val finalTwoFingerY = (endY + endY2) / 2
+                                    val deltaYTwo = finalTwoFingerY - initialTwoFingerPageY
+                                    
+                                    if (deltaYTwo < -150f) {
+                                        // TWO_FINGER_SWIPE_UP
+                                        onGestureTriggered(com.example.data.GestureType.TWO_FINGER_SWIPE_UP, null)
+                                    } else if (deltaYTwo > 150f) {
+                                        // TWO_FINGER_SWIPE_DOWN
+                                        onGestureTriggered(com.example.data.GestureType.TWO_FINGER_SWIPE_DOWN, null)
+                                    } else if (duration < 400) {
+                                        // TWO_FINGER_TAP
+                                        onGestureTriggered(com.example.data.GestureType.TWO_FINGER_TAP, null)
+                                    }
+                                    isMultiTap = false
+                                } else {
+                                    // Single-finger gestures
+                                    if (kotlin.math.abs(dx) > 120f && kotlin.math.abs(dx) > kotlin.math.abs(dy)) {
+                                        if (dx < 0) {
+                                            onGestureTriggered(com.example.data.GestureType.SWIPE_LEFT, null)
+                                        } else {
+                                            onGestureTriggered(com.example.data.GestureType.SWIPE_RIGHT, null)
+                                        }
+                                    } else if (kotlin.math.abs(dy) > 120f && kotlin.math.abs(dy) > kotlin.math.abs(dx)) {
+                                        if (dy < 0) {
+                                            onGestureTriggered(com.example.data.GestureType.SWIPE_UP, null)
+                                        } else {
+                                            onGestureTriggered(com.example.data.GestureType.SWIPE_DOWN, null)
+                                        }
+                                    } else if (kotlin.math.abs(dx) < 20f && kotlin.math.abs(dy) < 20f) {
+                                        if (duration > 500) {
+                                            onGestureTriggered(com.example.data.GestureType.LONG_PRESS, androidx.compose.ui.geometry.Offset(endX, endY))
+                                        } else {
+                                            val now = System.currentTimeMillis()
+                                            if (now - lastTapTime < 300) {
+                                                onGestureTriggered(com.example.data.GestureType.DOUBLE_TAP, null)
+                                                lastTapTime = 0L
+                                            } else {
+                                                lastTapTime = now
+                                                coroutineScope.launch {
+                                                    kotlinx.coroutines.delay(260)
+                                                    if (lastTapTime == now) {
+                                                        onGestureTriggered(com.example.data.GestureType.SINGLE_TAP, null)
+                                                        lastTapTime = 0L
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
     ) {
         if (!isLoaded && loadError == null) {
             CircularProgressIndicator(
