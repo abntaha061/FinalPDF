@@ -42,3 +42,12 @@ data class ReadingSessionEntity(
     val pagesRead: Int,
     val date: Long
 )
+
+@Entity(tableName = "ocr_results")
+data class OcrResultEntity(
+    @PrimaryKey val fileUri: String,
+    val extractedText: String,   // full text all pages concatenated
+    val pageTexts: String,       // JSON array of per-page text
+    val language: String,
+    val createdAt: Long
+)

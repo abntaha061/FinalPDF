@@ -60,6 +60,10 @@ fun BottomReaderBar(
     onAnnotationClick: () -> Unit,
     onShareCurrentPageAsPdfClick: () -> Unit = {},
     onCompressPdfClick: () -> Unit = {},
+    hasOcrResult: Boolean = false,
+    onCopyPageTextClick: () -> Unit = {},
+    onExportTextAsTxtClick: () -> Unit = {},
+    onSearchExtractedTextClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -310,6 +314,43 @@ fun BottomReaderBar(
                         },
                         modifier = Modifier.testTag("compress_pdf_option")
                     )
+                    if (hasOcrResult) {
+                        HorizontalDivider(color = AppTextSecondary.copy(alpha = 0.2f), thickness = 1.dp)
+                        Text(
+                            text = "النص المستخرج (OCR):",
+                            color = AppTextSecondary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                        )
+                        DropdownMenuItem(
+                            text = { Text("نسخ نص الصفحة الحالية", color = AppTextPrimary, fontSize = 14.sp) },
+                            leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null, tint = AppPrimary) },
+                            onClick = {
+                                showMoreMenu = false
+                                onCopyPageTextClick()
+                            },
+                            modifier = Modifier.testTag("ocr_copy_page_text_option")
+                        )
+                        DropdownMenuItem(
+                            text = { Text("تصدير النص كملف TXT", color = AppTextPrimary, fontSize = 14.sp) },
+                            leadingIcon = { Icon(Icons.Default.Save, contentDescription = null, tint = AppPrimary) },
+                            onClick = {
+                                showMoreMenu = false
+                                onExportTextAsTxtClick()
+                            },
+                            modifier = Modifier.testTag("ocr_export_txt_option")
+                        )
+                        DropdownMenuItem(
+                            text = { Text("البحث في النص المستخرج", color = AppTextPrimary, fontSize = 14.sp) },
+                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = AppPrimary) },
+                            onClick = {
+                                showMoreMenu = false
+                                onSearchExtractedTextClick()
+                            },
+                            modifier = Modifier.testTag("ocr_search_extracted_option")
+                        )
+                    }
                     DropdownMenuItem(
                         text = { Text("تدوير يميناً ٩٠°", color = AppTextPrimary, fontSize = 14.sp) },
                         leadingIcon = { Icon(Icons.Default.RotateRight, contentDescription = null, tint = AppPrimary) },

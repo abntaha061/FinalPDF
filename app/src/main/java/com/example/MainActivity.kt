@@ -80,7 +80,7 @@ private val APP_LANGUAGE_KEY = androidx.datastore.preferences.core.stringPrefere
 class MainActivity : ComponentActivity() {
 
     private val database by lazy { AppDatabase.getDatabase(this) }
-    private val repository by lazy { PdfRepository(database.recentFileDao(), database.bookmarkDao(), database.highlightDao(), database.readingSessionDao()) }
+    private val repository by lazy { PdfRepository(database.recentFileDao(), database.bookmarkDao(), database.highlightDao(), database.readingSessionDao(), database.ocrResultDao()) }
 
     private fun hasRequiredPermission(context: Context): Boolean {
         return when {

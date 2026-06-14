@@ -104,3 +104,22 @@ interface ReadingSessionDao {
     @Query("DELETE FROM reading_sessions")
     suspend fun deleteAll()
 }
+
+@Dao
+interface OcrResultDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(ocrResult: OcrResultEntity)
+
+    @Query("SELECT * FROM ocr_results WHERE fileUri = :uri LIMIT 1")
+    suspend fun getByFileUri(uri: String): OcrResultEntity?
+
+    @Query("SELECT * FROM ocr_results")
+    fun getAll(): Flow<List<OcrResultEntity>>
+
+    @Query("DELETE FROM ocr_results WHERE fileUri = :uri")
+    suspend fun deleteByFileUri(uri: String)
+
+    @Query("DELETE FROM ocr_results")
+    suspend fun deleteAll()
+}
+

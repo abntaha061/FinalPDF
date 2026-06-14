@@ -22,6 +22,15 @@ import kotlinx.coroutines.launch
 
 import com.example.util.pdfReaderDataStore
 
+import android.graphics.Bitmap
+import android.graphics.pdf.PdfRenderer
+import android.util.Log
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.isActive
+
 private val Context.dataStore get() = this.pdfReaderDataStore
 
 private val NIGHT_MODE_KEY = booleanPreferencesKey("is_night_mode")
@@ -61,6 +70,31 @@ class PdfViewModel(
 
     private val _isReady = MutableStateFlow(false)
     val isReady: StateFlow<Boolean> = _isReady.asStateFlow()
+
+    private val _isPdfSearchable = MutableStateFlow<Boolean?>(null)
+    val isPdfSearchable: StateFlow<Boolean?> = _isPdfSearchable.asStateFlow()
+
+    private val _dismissedOcrBanners = MutableStateFlow<Set<String>>(emptySet())
+    val dismissedOcrBanners: StateFlow<Set<String>> = _dismissedOcrBanners.asStateFlow()
+
+    private val _ocrResultForActiveFile = MutableStateFlow<com.example.data.OcrResultEntity?>(null)
+    val ocrResultForActiveFile: StateFlow<com.example.data.OcrResultEntity?> = _ocrResultForActiveFile.asStateFlow()
+
+    private val _ocrProgress = MutableStateFlow<Pair<Int, Int>?>(null) // Pair(currentPage, totalPages)
+    val ocrProgress: StateFlow<Pair<Int, Int>?> = _ocrProgress.asStateFlow()
+
+    private val _isOcrRunning = MutableStateFlow(false)
+    val isOcrRunning: StateFlow<Boolean> = _isOcrRunning.asStateFlow()
+
+    private val _isSearchableRunning = MutableStateFlow(false)
+    val isSearchableRunning: StateFlow<Boolean> = _isSearchableRunning.asStateFlow()
+
+    private val _searchableProgress = MutableStateFlow<Pair<Int, Int>?>(null)
+    val searchableProgress: StateFlow<Pair<Int, Int>?> = _searchableProgress.asStateFlow()
+
+    fun dismissOcrBanner(uri: String) {
+        _dismissedOcrBanners.update { it + uri }
+    }
 
     val allReadingSessions = repository.allReadingSessions
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -535,6 +569,7 @@ class PdfViewModel(
             _currentPage.value = savedPage
             _currentDocument.value = doc
             checkIfCurrentPageIsBookmarked()
+            checkIfPdfIsSearchable(context, uri)
         }
     }
 
@@ -953,6 +988,294 @@ class PdfViewModel(
                 preferences[FILTER_MIN_PAGES_KEY] = 1
                 preferences[FILTER_MAX_PAGES_KEY] = 500
                 preferences[FILTER_DATE_RANGE_KEY] = "الكل"
+            }
+        }
+    }
+
+    suspend fun getOcrResultByUri(uri: String): com.example.data.OcrResultEntity? {
+        return repository.getOcrResultByUri(uri)
+    }
+
+    suspend fun insertOcrResult(ocrResult: com.example.data.OcrResultEntity) {
+        repository.insertOcrResult(ocrResult)
+    }
+
+    suspend fun deleteOcrResult(uri: String) {
+        repository.deleteOcrResult(uri)
+    }
+
+    fun checkIfPdfIsSearchable(context: Context, uri: Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val existing = repository.getOcrResultByUri(uri.toString())
+            _ocrResultForActiveFile.value = existing
+            if (existing != null) {
+                _isPdfSearchable.value = true
+                return@launch
+            }
+            var isSearchable = true
+            try {
+                com.tom_roush.pdfbox.android.PDFBoxResourceLoader.init(context)
+                context.contentResolver.openInputStream(uri)?.use { stream ->
+                    val document = com.tom_roush.pdfbox.pdmodel.PDDocument.load(stream)
+                    val stripper = com.tom_roush.pdfbox.text.PDFTextStripper()
+                    stripper.startPage = 1
+                    stripper.endPage = 1
+                    val pageText = stripper.getText(document)
+                    document.close()
+                    isSearchable = pageText.trim().length > 50
+                }
+            } catch (e: Exception) {
+                Log.e("PdfViewModel", "Error checking if pdf is searchable", e)
+            }
+            _isPdfSearchable.value = isSearchable
+        }
+    }
+
+    fun renderPageToBitmap(context: Context, fileUri: Uri, pageIndex: Int): Bitmap? {
+        return try {
+            context.contentResolver.openFileDescriptor(fileUri, "r")?.use { pfd ->
+                val renderer = android.graphics.pdf.PdfRenderer(pfd)
+                try {
+                    if (pageIndex < renderer.pageCount) {
+                        val page = renderer.openPage(pageIndex)
+                        try {
+                            val originalWidth = page.width
+                            val originalHeight = page.height
+                            val scale = (2048f / originalWidth).coerceAtLeast(1.5f)
+                            val targetWidth = (originalWidth * scale).toInt()
+                            val targetHeight = (originalHeight * scale).toInt()
+                            val bitmap = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
+                            val canvas = android.graphics.Canvas(bitmap)
+                            canvas.drawColor(android.graphics.Color.WHITE)
+                            page.render(bitmap, null, null, android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                            bitmap
+                        } finally {
+                            page.close()
+                        }
+                    } else {
+                        null
+                    }
+                } finally {
+                    renderer.close()
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("PdfViewModel", "Failed to render page to bitmap", e)
+            null
+        }
+    }
+
+    private suspend fun processImageAwait(
+        recognizer: com.google.mlkit.vision.text.TextRecognizer,
+        image: com.google.mlkit.vision.common.InputImage
+    ): com.google.mlkit.vision.text.Text = suspendCancellableCoroutine { continuation ->
+        recognizer.process(image)
+            .addOnSuccessListener { text ->
+                if (continuation.isActive) {
+                    continuation.resume(text)
+                }
+            }
+            .addOnFailureListener { exception ->
+                if (continuation.isActive) {
+                    continuation.resumeWithException(exception)
+                }
+            }
+    }
+
+    private var ocrJob: kotlinx.coroutines.Job? = null
+
+    fun cancelOcr() {
+        ocrJob?.cancel()
+        _isOcrRunning.value = false
+        _ocrProgress.value = null
+    }
+
+    fun startOcr(context: Context, uri: Uri, lang: String, onSuccess: () -> Unit, onFailure: (String) -> Unit) {
+        cancelOcr()
+        _isOcrRunning.value = true
+        _ocrProgress.value = 0 to 1
+        ocrJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val pfd = context.contentResolver.openFileDescriptor(uri, "r") ?: throw Exception("Cannot open file")
+                val totalPages = pfd.use { fd ->
+                    val r = android.graphics.pdf.PdfRenderer(fd)
+                    val count = r.pageCount
+                    r.close()
+                    count
+                }
+                _ocrProgress.value = 0 to totalPages
+                val pageTextsList = ArrayList<String>()
+                val options = if (lang == "en") {
+                    com.google.mlkit.vision.text.latin.TextRecognizerOptions.DEFAULT_OPTIONS
+                } else {
+                    com.google.mlkit.vision.text.arabic.ArabicTextRecognizerOptions.Builder().build()
+                }
+                val recognizer = com.google.mlkit.vision.text.TextRecognition.getClient(options)
+                for (i in 0 until totalPages) {
+                    if (!isActive) break
+                    _ocrProgress.value = i to totalPages
+                    val bitmap = renderPageToBitmap(context, uri, i)
+                    if (bitmap != null) {
+                        val inputImage = com.google.mlkit.vision.common.InputImage.fromBitmap(bitmap, 0)
+                        val textResult = processImageAwait(recognizer, inputImage)
+                        pageTextsList.add(textResult.text)
+                        bitmap.recycle()
+                    } else {
+                        pageTextsList.add("")
+                    }
+                }
+                if (isActive) {
+                    val fullText = pageTextsList.joinToString("\n\n")
+                    val pageTextsJson = org.json.JSONArray(pageTextsList).toString()
+                    val ocrResult = com.example.data.OcrResultEntity(
+                        fileUri = uri.toString(),
+                        extractedText = fullText,
+                        pageTexts = pageTextsJson,
+                        language = lang,
+                        createdAt = System.currentTimeMillis()
+                    )
+                    repository.insertOcrResult(ocrResult)
+                    _ocrResultForActiveFile.value = ocrResult
+                    _isPdfSearchable.value = true
+                    _isOcrRunning.value = false
+                    _ocrProgress.value = null
+                    launch(Dispatchers.Main) {
+                        onSuccess()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("PdfViewModel", "OCR Failed", e)
+                _isOcrRunning.value = false
+                _ocrProgress.value = null
+                launch(Dispatchers.Main) {
+                    onFailure(e.localizedMessage ?: "OCR Failed")
+                }
+            }
+        }
+    }
+
+    fun makePdfSearchable(
+        context: Context,
+        fileUri: Uri,
+        lang: String,
+        onSuccess: (java.io.File) -> Unit,
+        onFailure: (String) -> Unit
+    ) {
+        _isSearchableRunning.value = true
+        _searchableProgress.value = 0 to 1
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                com.tom_roush.pdfbox.android.PDFBoxResourceLoader.init(context)
+                val originalInputStream = context.contentResolver.openInputStream(fileUri) ?: throw Exception("Cannot open file")
+                val document = com.tom_roush.pdfbox.pdmodel.PDDocument.load(originalInputStream)
+                val totalPages = document.numberOfPages
+                _searchableProgress.value = 0 to totalPages
+                val fontFiles = listOf(
+                    "/system/fonts/NotoNaskhArabic-Regular.ttf",
+                    "/system/fonts/NotoSansArabic-Regular.ttf",
+                    "/system/fonts/DroidSansArabic.ttf",
+                    "/system/fonts/NotoSansCJK-Regular.ttc",
+                    "/system/fonts/Roboto-Regular.ttf"
+                )
+                var pdfFont: com.tom_roush.pdfbox.pdmodel.font.PDFont? = null
+                for (path in fontFiles) {
+                    val file = java.io.File(path)
+                    if (file.exists()) {
+                        try {
+                            pdfFont = com.tom_roush.pdfbox.pdmodel.font.PDType0Font.load(document, file)
+                            break
+                        } catch (e: Exception) {
+                            Log.e("PdfViewModel", "Failed to load $path", e)
+                        }
+                    }
+                }
+                val isFontUnicode = pdfFont != null && pdfFont !is com.tom_roush.pdfbox.pdmodel.font.PDType1Font
+                if (pdfFont == null) {
+                    pdfFont = com.tom_roush.pdfbox.pdmodel.font.PDType1Font.HELVETICA
+                }
+                val options = if (lang == "en") {
+                    com.google.mlkit.vision.text.latin.TextRecognizerOptions.DEFAULT_OPTIONS
+                } else {
+                    com.google.mlkit.vision.text.arabic.ArabicTextRecognizerOptions.Builder().build()
+                }
+                val recognizer = com.google.mlkit.vision.text.TextRecognition.getClient(options)
+                for (i in 0 until totalPages) {
+                    if (!isActive) break
+                    _searchableProgress.value = i to totalPages
+                    val page = document.getPage(i)
+                    val originalWidthPt = page.mediaBox.width
+                    val originalHeightPt = page.mediaBox.height
+                    val bitmap = renderPageToBitmap(context, fileUri, i)
+                    if (bitmap != null) {
+                        val inputImage = com.google.mlkit.vision.common.InputImage.fromBitmap(bitmap, 0)
+                        val textResult = processImageAwait(recognizer, inputImage)
+                        val contentStream = com.tom_roush.pdfbox.pdmodel.PDPageContentStream(
+                            document,
+                            page,
+                            com.tom_roush.pdfbox.pdmodel.PDPageContentStream.AppendMode.APPEND,
+                            true,
+                            true
+                        )
+                        contentStream.beginText()
+                        contentStream.setRenderingMode(com.tom_roush.pdfbox.pdmodel.graphics.state.RenderingMode.NEITHER)
+                        val bitmapWidth = bitmap.width.toFloat()
+                        val bitmapHeight = bitmap.height.toFloat()
+                        val scaleX = originalWidthPt / bitmapWidth
+                        val scaleY = originalHeightPt / bitmapHeight
+                        for (block in textResult.textBlocks) {
+                            for (line in block.lines) {
+                                val boundingBox = line.boundingBox ?: continue
+                                var text = line.text
+                                if (!isFontUnicode) {
+                                    text = text.filter { it.code in 0..255 }
+                                }
+                                text = text.replace("\n", " ").trim()
+                                if (text.isEmpty()) continue
+                                val pixelX = boundingBox.left.toFloat()
+                                val pixelY = boundingBox.bottom.toFloat()
+                                val pdfX = pixelX * scaleX
+                                val pdfY = (bitmapHeight - pixelY) * scaleY
+                                val fontHeightPx = boundingBox.height().toFloat()
+                                val fontSizePt = (fontHeightPx * scaleY).coerceAtLeast(6f).coerceAtMost(24f)
+                                try {
+                                    contentStream.setFont(pdfFont, fontSizePt)
+                                    val matrix = com.tom_roush.pdfbox.util.Matrix(1f, 0f, 0f, 1f, pdfX, pdfY)
+                                    contentStream.setTextMatrix(matrix)
+                                    contentStream.showText(text)
+                                } catch (e: Exception) {
+                                    Log.e("PdfViewModel", "Error rendering line text in PDF: $text", e)
+                                }
+                            }
+                        }
+                        contentStream.endText()
+                        contentStream.close()
+                        bitmap.recycle()
+                    }
+                }
+                if (isActive) {
+                    val dir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS)
+                    val originalNameFile = getUriMetadata(context, fileUri).first
+                    val baseName = originalNameFile.replace(".pdf", "", ignoreCase = true)
+                    val searchablePdfFile = java.io.File(dir, "${baseName}_searchable.pdf")
+                    val fos = java.io.FileOutputStream(searchablePdfFile)
+                    document.save(fos)
+                    fos.close()
+                    document.close()
+                    _isSearchableRunning.value = false
+                    _searchableProgress.value = null
+                    launch(Dispatchers.Main) {
+                        onSuccess(searchablePdfFile)
+                    }
+                } else {
+                    document.close()
+                }
+            } catch (e: Exception) {
+                Log.e("PdfViewModel", "Making searchable PDF failed", e)
+                _isSearchableRunning.value = false
+                _searchableProgress.value = null
+                launch(Dispatchers.Main) {
+                    onFailure(e.localizedMessage ?: "Process Failed")
+                }
             }
         }
     }

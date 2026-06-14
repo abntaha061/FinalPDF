@@ -24,6 +24,12 @@ import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject
 import com.tom_roush.pdfbox.pdmodel.graphics.image.LosslessFactory
 import com.tom_roush.pdfbox.pdmodel.graphics.image.JPEGFactory
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.arabic.ArabicTextRecognizerOptions
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import org.json.JSONArray
 import kotlinx.coroutines.Dispatchers
 import java.util.Locale
 import androidx.compose.animation.*
@@ -128,6 +134,7 @@ fun ViewerScreen(
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
     val snackbarHostState = remember { SnackbarHostState() }
+    val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
     
     val audioViewModel: AudioViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
     val audioState by audioViewModel.audioState.collectAsState()
@@ -178,6 +185,255 @@ fun ViewerScreen(
     var isAddingStickyNote by remember { mutableStateOf(false) } // distinguish TextNote or StickyNote
     // Save confirmation dialog
     var showSaveConfirmDialog by remember { mutableStateOf(false) }
+
+    // OCR states
+    var showOcrBanner by remember { mutableStateOf(false) }
+    var showOcrConfirmDialog by remember { mutableStateOf(false) }
+    var ocrSelectedLanguage by remember { mutableStateOf("ar") }
+    var showOcrProgressDialog by remember { mutableStateOf(false) }
+    var ocrProgressText by remember { mutableStateOf("") }
+    var ocrProgressPercent by remember { mutableStateOf(0f) }
+    var ocrIsCancelled by remember { mutableStateOf(false) }
+    var ocrJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    var hasOcrResult by remember { mutableStateOf(false) }
+    var ocrResultEntity by remember { mutableStateOf<com.example.data.OcrResultEntity?>(null) }
+    
+    // OCR Search Dialog states
+    var showOcrSearchDialog by remember { mutableStateOf(false) }
+    var ocrSearchQuery by remember { mutableStateOf("") }
+    var ocrSearchResults by remember { mutableStateOf<List<Pair<Int, String>>>(emptyList()) }
+
+    // Read OCR database entry on load
+    LaunchedEffect(activeUri) {
+        val uriStr = activeUri
+        if (uriStr != null) {
+            val result = viewModel.getOcrResultByUri(uriStr)
+            ocrResultEntity = result
+            hasOcrResult = result != null
+        } else {
+            ocrResultEntity = null
+            hasOcrResult = false
+            showOcrBanner = false
+        }
+    }
+
+    val checkSearchabilityAndOcrBanner: (String) -> Unit = { uriStr ->
+        coroutineScope.launch(Dispatchers.IO) {
+            val prefs = context.getSharedPreferences("ocr_prefs", Context.MODE_PRIVATE)
+            val isDismissed = prefs.getBoolean("dismissed_${uriStr.hashCode()}", false)
+            if (isDismissed) {
+                withContext(Dispatchers.Main) { showOcrBanner = false }
+                return@launch
+            }
+
+            // Check db first
+            val existingResult = viewModel.getOcrResultByUri(uriStr)
+            if (existingResult != null) {
+                withContext(Dispatchers.Main) { 
+                    ocrResultEntity = existingResult
+                    hasOcrResult = true
+                    showOcrBanner = false 
+                }
+                return@launch
+            }
+
+            // Otherwise check searchable using PDFBox
+            var searchable = true
+            try {
+                com.tom_roush.pdfbox.android.PDFBoxResourceLoader.init(context)
+                context.contentResolver.openInputStream(Uri.parse(uriStr))?.use { inputStream ->
+                    val document = com.tom_roush.pdfbox.pdmodel.PDDocument.load(inputStream)
+                    val stripper = com.tom_roush.pdfbox.text.PDFTextStripper()
+                    stripper.startPage = 1
+                    stripper.endPage = 1
+                    val pageText = stripper.getText(document)
+                    searchable = pageText?.trim()?.length ?: 0 > 50
+                    document.close()
+                }
+            } catch (e: Exception) {
+                Log.e("ViewerScreen", "Error checking searchable", e)
+            }
+
+            withContext(Dispatchers.Main) {
+                showOcrBanner = !searchable
+            }
+        }
+    }
+
+    val startOcrFlow: (String) -> Unit = { language ->
+        ocrJob?.cancel()
+        ocrIsCancelled = false
+        showOcrConfirmDialog = false
+        showOcrProgressDialog = true
+        ocrProgressPercent = 0f
+        ocrProgressText = "تهيئة عملية التحويل..."
+
+        ocrJob = coroutineScope.launch(Dispatchers.IO) {
+            try {
+                val uriStr = activeUri ?: return@launch
+                val contentResolver = context.contentResolver
+                val pfd = contentResolver.openFileDescriptor(Uri.parse(uriStr), "r")
+                if (pfd == null) {
+                    withContext(Dispatchers.Main) {
+                        showOcrProgressDialog = false
+                        snackbarHostState.showSnackbar("لا يمكن فتح ملف PDF")
+                    }
+                    return@launch
+                }
+
+                pfd.use { fd ->
+                    val renderer = android.graphics.pdf.PdfRenderer(fd)
+                    val totalPages = renderer.pageCount
+                    val pageTextsList = mutableListOf<String>()
+                    val jsonPageTexts = org.json.JSONArray()
+
+                    val recognizer = if (language == "en") {
+                        TextRecognition.getClient(com.google.mlkit.vision.text.latin.TextRecognizerOptions.DEFAULT_OPTIONS)
+                    } else {
+                        TextRecognition.getClient(com.google.mlkit.vision.text.arabic.ArabicTextRecognizerOptions.Builder().build())
+                    }
+
+                    try {
+                        for (i in 0 until totalPages) {
+                            if (ocrIsCancelled) {
+                                break
+                            }
+
+                            withContext(Dispatchers.Main) {
+                                ocrProgressText = "تحليل الصفحة ${i + 1} من $totalPages..."
+                                ocrProgressPercent = (i.toFloat()) / totalPages
+                            }
+
+                            // Render bitmap
+                            val page = renderer.openPage(i)
+                            val width = (page.width * 1.5).toInt()
+                            val height = (page.height * 1.5).toInt()
+                            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                            val canvas = android.graphics.Canvas(bitmap)
+                            canvas.drawColor(android.graphics.Color.WHITE)
+                            page.render(bitmap, null, null, android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                            page.close()
+
+                            val image = InputImage.fromBitmap(bitmap, 0)
+                            
+                            // Process with ML Kit (blocking await on IO dispatcher)
+                            val visionResult = com.google.android.gms.tasks.Tasks.await(recognizer.process(image))
+                            val cleanText = visionResult.text
+                            bitmap.recycle() // free memory
+
+                            pageTextsList.add(cleanText)
+                            
+                            // Store per page JSON structure: { "page": i, "text": cleanText }
+                            val pageObj = org.json.JSONObject()
+                            pageObj.put("page", i)
+                            pageObj.put("text", cleanText)
+                            jsonPageTexts.put(pageObj)
+                        }
+
+                        if (!ocrIsCancelled) {
+                            // Concatenate all text
+                            val fullExtractedText = pageTextsList.joinToString("\n\n")
+
+                            // Create OCR Entity
+                            val ocrEntity = com.example.data.OcrResultEntity(
+                                fileUri = uriStr,
+                                extractedText = fullExtractedText,
+                                pageTexts = jsonPageTexts.toString(),
+                                language = language,
+                                createdAt = System.currentTimeMillis()
+                            )
+
+                            viewModel.insertOcrResult(ocrEntity)
+
+                            withContext(Dispatchers.Main) {
+                                ocrResultEntity = ocrEntity
+                                hasOcrResult = true
+                                showOcrBanner = false
+                                showOcrProgressDialog = false
+                                snackbarHostState.showSnackbar("تمت عملية الـ OCR بنجاح واستخراج النص!")
+                            }
+                        } else {
+                            withContext(Dispatchers.Main) {
+                                showOcrProgressDialog = false
+                                snackbarHostState.showSnackbar("تم إلغاء عملية الـ OCR")
+                            }
+                        }
+                    } finally {
+                        try {
+                            recognizer.close()
+                        } catch (e: Exception) {
+                            // Ignore close errors
+                        }
+                        try {
+                            renderer.close()
+                        } catch (e: Exception) {
+                            // Ignore close errors
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("ViewerScreen", "OCR process error", e)
+                withContext(Dispatchers.Main) {
+                    showOcrProgressDialog = false
+                    snackbarHostState.showSnackbar("فشلت عملية الـ OCR: ${e.localizedMessage}")
+                }
+            }
+        }
+    }
+
+    val ocrViewJumpPage: (Int) -> Unit = { pageIdx ->
+        pdfViewInst?.jumpTo(pageIdx)
+        viewModel.setCurrentPage(pageIdx)
+        showOcrSearchDialog = false
+        coroutineScope.launch {
+            snackbarHostState.showSnackbar("انتقلت إلى صفحة ${pageIdx + 1}")
+        }
+    }
+
+    val ocrCopyCurrentPageText: () -> Unit = {
+        val entity = ocrResultEntity
+        if (entity != null) {
+            try {
+                val jsonArr = org.json.JSONArray(entity.pageTexts)
+                var foundText = ""
+                for (i in 0 until jsonArr.length()) {
+                    val obj = jsonArr.getJSONObject(i)
+                    if (obj.getInt("page") == currentPage) {
+                        foundText = obj.getString("text")
+                        break
+                    }
+                }
+                if (foundText.isNotBlank()) {
+                    clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(foundText))
+                    coroutineScope.launch {
+                        snackbarHostState.showSnackbar("تم نسخ نص الصفحة الحالية ✓")
+                    }
+                } else {
+                    coroutineScope.launch {
+                        snackbarHostState.showSnackbar("هذه الصفحة فارغة أو لا يوجد نص بها")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("ViewerScreen", "Error copying text", e)
+            }
+        }
+    }
+
+    val ocrExportTextAsTxt: () -> Unit = {
+        val entity = ocrResultEntity
+        if (entity != null && entity.extractedText.isNotBlank()) {
+            try {
+                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_SUBJECT, "النص المستخرج من ${activeDocument?.name ?: "المستند"}")
+                    putExtra(Intent.EXTRA_TEXT, entity.extractedText)
+                }
+                context.startActivity(Intent.createChooser(shareIntent, "تصدير النص المستخرج"))
+            } catch (e: Exception) {
+                Log.e("ViewerScreen", "Error exporting text", e)
+            }
+        }
+    }
 
     val pdfPickerLauncher = rememberLauncherForActivityResult(
         contract = androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
@@ -421,7 +677,8 @@ fun ViewerScreen(
         showColorPicker = false
     }
 
-    val clipboardManager = LocalClipboardManager.current
+    // Deleted redundant clipboardManager variable definition
+    // val clipboardManager = LocalClipboardManager.current
 
     fun getSelectionText(docName: String, page: Int): String {
         val cleanName = docName.replace(".pdf", "", ignoreCase = true)
@@ -793,6 +1050,7 @@ fun ViewerScreen(
                                 onLoadComplete = { pageCount ->
                                     viewModel.setViewerLoading(false)
                                     viewModel.updateProgress(activeUri!!, currentPage, pageCount)
+                                    activeUri?.let { checkSearchabilityAndOcrBanner(it) }
                                     if (currentPage > 0 && viewModel.shouldShowRestoreSnackbar(activeUri!!)) {
                                         coroutineScope.launch {
                                             val result = snackbarHostState.showSnackbar(
@@ -1363,6 +1621,93 @@ fun ViewerScreen(
                 }
             }
 
+            // OCR Scanner Prompt Banner (non-intrusive banner below TopAppBar space)
+            AnimatedVisibility(
+                visible = showOcrBanner && !isSearching,
+                enter = slideInVertically(initialOffsetY = { -it }),
+                exit = slideOutVertically(targetOffsetY = { -it }),
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .testTag("ocr_banner")
+            ) {
+                Surface(
+                    color = AppPrimary.copy(alpha = 0.15f),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, AppPrimary.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        IconButton(
+                            onClick = {
+                                context.getSharedPreferences("ocr_prefs", Context.MODE_PRIVATE)
+                                    .edit()
+                                    .putBoolean("dismissed_${activeUri.hashCode()}", true)
+                                    .apply()
+                                showOcrBanner = false
+                            },
+                            modifier = Modifier.size(36.dp).testTag("ocr_banner_close")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "إغلاق",
+                                tint = AppPrimary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            TextButton(
+                                onClick = {
+                                    showOcrConfirmDialog = true
+                                },
+                                modifier = Modifier.testTag("ocr_banner_convert_button")
+                            ) {
+                                Text(
+                                    text = "تحويل",
+                                    color = AppPrimary,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(8.dp))
+
+                            Text(
+                                text = "هذا الملف ممسوح ضوئياً - هل تريد تحويله لنص قابل للبحث؟",
+                                color = AppTextPrimary,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                                textAlign = TextAlign.End,
+                                modifier = Modifier.weight(1f)
+                            )
+
+                            Spacer(modifier = Modifier.width(8.dp))
+
+                            Icon(
+                                imageVector = Icons.Default.DocumentScanner,
+                                contentDescription = null,
+                                tint = AppPrimary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
             // Overlay Search Bar sliding DOWN from the top of the screen (AnimatedVisibility, slide-in-top, 250ms)
             AnimatedVisibility(
                 visible = isSearching,
@@ -1811,9 +2156,317 @@ fun ViewerScreen(
                         },
                         onCompressPdfClick = {
                             showCompressionBottomSheet = true
+                        },
+                        hasOcrResult = hasOcrResult,
+                        onCopyPageTextClick = {
+                            ocrCopyCurrentPageText()
+                        },
+                        onExportTextAsTxtClick = {
+                            ocrExportTextAsTxt()
+                        },
+                        onSearchExtractedTextClick = {
+                            showOcrSearchDialog = true
+                            ocrSearchQuery = ""
+                            ocrSearchResults = emptyList()
                         }
                     )
                 }
+            }
+
+            // OCR Dialog overlays
+            if (showOcrConfirmDialog) {
+                AlertDialog(
+                    onDismissRequest = { showOcrConfirmDialog = false },
+                    title = {
+                        Text(
+                            text = "تحويل الملف بالـ OCR",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp,
+                            color = AppTextPrimary,
+                            textAlign = TextAlign.End,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    },
+                    text = {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalAlignment = Alignment.End
+                        ) {
+                            Text(
+                                text = "سيتم تحليل الصفحات واستخراج النص باستخدام الذكاء الاصطناعي على الجهاز. قد يستغرق هذا وقتاً طويلاً حسب حجم الملف.",
+                                color = AppTextSecondary,
+                                fontSize = 14.sp,
+                                textAlign = TextAlign.End,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Spacer(modifier = Modifier.height(16.dp))
+                            Text(
+                                text = "اختر لغة المستند:",
+                                fontWeight = FontWeight.Bold,
+                                color = AppTextPrimary,
+                                fontSize = 14.sp,
+                                modifier = Modifier.padding(bottom = 8.dp)
+                            )
+                            
+                            var expanded by remember { mutableStateOf(false) }
+                            val languages = listOf(
+                                Pair("ar", "عربي"),
+                                Pair("en", "إنجليزي"),
+                                Pair("ar_en", "عربي + إنجليزي")
+                            )
+                            val currentLangLabel = languages.firstOrNull { it.first == ocrSelectedLanguage }?.second ?: "عربي"
+                            
+                            Box(modifier = Modifier.fillMaxWidth()) {
+                                Button(
+                                    onClick = { expanded = true },
+                                    colors = ButtonDefaults.buttonColors(containerColor = AppSurface),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = AppPrimary)
+                                        Text(currentLangLabel, color = AppTextPrimary)
+                                    }
+                                }
+                                DropdownMenu(
+                                    expanded = expanded,
+                                    onDismissRequest = { expanded = false },
+                                    modifier = Modifier.background(AppSurface)
+                                ) {
+                                    languages.forEach { (code, label) ->
+                                        DropdownMenuItem(
+                                            text = { Text(label, color = AppTextPrimary) },
+                                            onClick = {
+                                                ocrSelectedLanguage = code
+                                                expanded = false
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                startOcrFlow(ocrSelectedLanguage)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = AppPrimary),
+                            modifier = Modifier.testTag("ocr_start_button")
+                        ) {
+                            Text("ابدأ التحويل", color = Color.White)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(
+                            onClick = { showOcrConfirmDialog = false },
+                            modifier = Modifier.testTag("ocr_cancel_dialog_button")
+                        ) {
+                            Text("إلغاء", color = AppTextSecondary)
+                        }
+                    }
+                )
+            }
+
+            if (showOcrProgressDialog) {
+                AlertDialog(
+                    onDismissRequest = {}, // Disable dismiss on tap outside
+                    title = {
+                        Text(
+                            text = "جاري استخراج النص...",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp,
+                            color = AppTextPrimary,
+                            textAlign = TextAlign.End,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    },
+                    text = {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = ocrProgressText,
+                                color = AppTextSecondary,
+                                fontSize = 14.sp,
+                                textAlign = TextAlign.End,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 12.dp)
+                            )
+                            LinearProgressIndicator(
+                                progress = { ocrProgressPercent },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(8.dp)
+                                    .clip(RoundedCornerShape(4.dp)),
+                                color = AppPrimary,
+                                trackColor = AppPrimary.copy(alpha = 0.2f)
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "${(ocrProgressPercent * 100).toInt()}%",
+                                color = AppPrimary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                        }
+                    },
+                    confirmButton = {},
+                    dismissButton = {
+                        TextButton(
+                            onClick = {
+                                ocrIsCancelled = true
+                                ocrJob?.cancel()
+                                showOcrProgressDialog = false
+                            },
+                            modifier = Modifier.testTag("ocr_progress_cancel_button")
+                        ) {
+                            Text("إلغاء", color = Color.Red)
+                        }
+                    }
+                )
+            }
+
+            if (showOcrSearchDialog) {
+                AlertDialog(
+                    onDismissRequest = { showOcrSearchDialog = false },
+                    title = {
+                        Text(
+                            text = "البحث في النص المستخرج (OCR)",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp,
+                            color = AppTextPrimary,
+                            textAlign = TextAlign.End,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    },
+                    text = {
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalAlignment = Alignment.End
+                        ) {
+                            TextField(
+                                value = ocrSearchQuery,
+                                onValueChange = { query ->
+                                    ocrSearchQuery = query
+                                    // Perform dynamic search
+                                    val entity = ocrResultEntity
+                                    if (entity != null && query.isNotBlank()) {
+                                        val results = mutableListOf<Pair<Int, String>>()
+                                        try {
+                                            val jsonArr = org.json.JSONArray(entity.pageTexts)
+                                            for (i in 0 until jsonArr.length()) {
+                                                val obj = jsonArr.getJSONObject(i)
+                                                val pageIdx = obj.getInt("page")
+                                                val pageText = obj.getString("text")
+                                                if (pageText.contains(query, ignoreCase = true)) {
+                                                    results.add(Pair(pageIdx, pageText))
+                                                }
+                                            }
+                                        } catch (e: Exception) {
+                                            Log.e("ViewerScreen", "Error parsing ocr json during search", e)
+                                        }
+                                        ocrSearchResults = results
+                                    } else {
+                                        ocrSearchResults = emptyList()
+                                    }
+                                },
+                                placeholder = { Text("أدخل كلمة البحث...", textAlign = TextAlign.End, modifier = Modifier.fillMaxWidth()) },
+                                singleLine = true,
+                                colors = TextFieldDefaults.colors(
+                                    focusedContainerColor = AppSurface,
+                                    unfocusedContainerColor = AppSurface,
+                                    focusedTextColor = AppTextPrimary,
+                                    unfocusedTextColor = AppTextPrimary
+                                ),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("ocr_search_input_dialog")
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Text(
+                                text = "النتائج المطابقة: ${ocrSearchResults.size}",
+                                color = AppTextSecondary,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(bottom = 8.dp)
+                            )
+                            
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(max = 250.dp)
+                            ) {
+                                if (ocrSearchResults.isEmpty()) {
+                                    Box(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = if (ocrSearchQuery.isBlank()) "ابدأ بكتابة كلمة للبحث" else "لا توجد نتائج مطابقة",
+                                            color = AppTextSecondary,
+                                            fontSize = 14.sp
+                                        )
+                                    }
+                                } else {
+                                    LazyColumn(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        items(ocrSearchResults) { (pageIdx, fullText) ->
+                                            val snippet = fullText.lines()
+                                                .filter { it.contains(ocrSearchQuery, ignoreCase = true) }
+                                                .joinToString(" ... ")
+                                                .take(120)
+                                            
+                                            Card(
+                                                colors = CardDefaults.cardColors(containerColor = AppSurface),
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clickable {
+                                                        ocrViewJumpPage(pageIdx)
+                                                    }
+                                            ) {
+                                                Column(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(10.dp),
+                                                    horizontalAlignment = Alignment.End
+                                                ) {
+                                                    Text(
+                                                        text = "الصفحة ${pageIdx + 1}",
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = AppPrimary,
+                                                        fontSize = 12.sp
+                                                    )
+                                                    Spacer(modifier = Modifier.height(4.dp))
+                                                    Text(
+                                                        text = "... $snippet ...",
+                                                        color = AppTextPrimary,
+                                                        fontSize = 12.sp,
+                                                        textAlign = TextAlign.End,
+                                                        maxLines = 2,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { showOcrSearchDialog = false }) {
+                            Text("إغلاق", color = AppPrimary)
+                        }
+                    }
+                )
             }
 
             // Annotation Text Dialogue

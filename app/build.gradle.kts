@@ -101,6 +101,8 @@ dependencies {
   implementation("androidx.documentfile:documentfile:1.0.1")
   implementation("org.burnoutcrew.composereorderable:reorderable:0.9.6")
   implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+  implementation("com.google.mlkit:text-recognition:16.0.0")
+  implementation("com.google.mlkit:text-recognition-arabic:16.0.0-beta6")
   implementation("com.github.PhilJay:MPAndroidChart:v3.1.0")
   implementation(libs.converter.moshi)
   // implementation(libs.firebase.ai)

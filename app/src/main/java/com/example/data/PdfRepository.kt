@@ -12,7 +12,8 @@ class PdfRepository @Inject constructor(
     private val recentFileDao: RecentFileDao,
     private val bookmarkDao: BookmarkDao,
     private val highlightDao: HighlightDao,
-    private val readingSessionDao: ReadingSessionDao
+    private val readingSessionDao: ReadingSessionDao,
+    private val ocrResultDao: OcrResultDao
 ) {
     val allRecentPdfs: Flow<List<RecentFileEntity>> = recentFileDao.getAll()
     
@@ -108,5 +109,17 @@ class PdfRepository @Inject constructor(
 
     suspend fun clearAllHighlights() = withContext(Dispatchers.IO) {
         highlightDao.deleteAll()
+    }
+
+    suspend fun getOcrResultByUri(uri: String): OcrResultEntity? = withContext(Dispatchers.IO) {
+        ocrResultDao.getByFileUri(uri)
+    }
+
+    suspend fun insertOcrResult(ocrResult: OcrResultEntity) = withContext(Dispatchers.IO) {
+        ocrResultDao.insert(ocrResult)
+    }
+
+    suspend fun deleteOcrResult(uri: String) = withContext(Dispatchers.IO) {
+        ocrResultDao.deleteByFileUri(uri)
     }
 }
