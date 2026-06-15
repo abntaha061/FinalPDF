@@ -27,6 +27,10 @@ sealed class Screen(val route: String) {
     object About     : Screen("about")
     object Language  : Screen("language")
     object Signature : Screen("signature")
+    object PdfTools  : Screen("pdf_tools")
+    object PdfToImages : Screen("pdf_to_images")
+    object ImagesToPdf : Screen("images_to_pdf")
+    object PdfToWord : Screen("pdf_to_word")
     object WebView   : Screen("webview?url={url}") {
         fun createRoute(encodedUrl: String) = "webview?url=$encodedUrl"
     }
@@ -135,6 +139,47 @@ fun AppNavGraph(
             exitTransition  = { slideOutVertically(tween(350)) { it } + fadeOut(tween(350)) }
         ) {
             SignatureScreen(navController = navController)
+        }
+
+        // PDF TOOLS
+        composable(Screen.PdfTools.route) {
+            PdfToolsScreen(
+                onNavigateToMerge = { navController.navigate(Screen.MergePdfs.route) },
+                onNavigateToMultiSearch = { navController.navigate(Screen.MultiFileSearch.route) },
+                onNavigateToPdfToImages = { navController.navigate(Screen.PdfToImages.route) },
+                onNavigateToImagesToPdf = { navController.navigate(Screen.ImagesToPdf.route) },
+                onNavigateToPdfToWord = { navController.navigate(Screen.PdfToWord.route) },
+                onNavigateToSignature = { navController.navigate(Screen.Signature.route) }
+            )
+        }
+
+        // PDF TO IMAGES
+        composable(Screen.PdfToImages.route) {
+            PdfToImagesScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToFileBrowser = { path ->
+                    navController.popBackStack()
+                }
+            )
+        }
+
+        // IMAGES TO PDF
+        composable(Screen.ImagesToPdf.route) {
+            ImagesToPdfScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToReader = { encodedUri ->
+                    navController.navigate(Screen.PdfReader.createRoute(encodedUri)) {
+                        popUpTo(Screen.Home.route)
+                    }
+                }
+            )
+        }
+
+        // PDF TO WORD
+        composable(Screen.PdfToWord.route) {
+            PdfToWordScreen(
+                onNavigateBack = { navController.popBackStack() }
+            )
         }
 
         // WEBVIEW — slide from bottom

@@ -12,7 +12,7 @@ android {
 
   defaultConfig {
     applicationId = "com.aistudio.finalpdf.rpxkml"
-    minSdk = 24
+    minSdk = 26
     targetSdk = 36
     versionCode = 1
     versionName = "1.0"
@@ -98,6 +98,7 @@ dependencies {
   implementation(libs.hilt.navigation.compose)
   implementation(libs.coil.compose)
   implementation("com.github.mhiew:android-pdf-viewer:3.2.0-beta.1")
+  implementation("org.apache.poi:poi-ooxml:5.2.5")
   implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
   implementation("androidx.documentfile:documentfile:1.0.1")
   implementation("org.burnoutcrew.composereorderable:reorderable:0.9.6")

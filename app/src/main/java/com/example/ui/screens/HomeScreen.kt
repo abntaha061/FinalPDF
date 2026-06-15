@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.RecentFileEntity
 import com.example.ui.PdfViewModel
+import com.example.ui.navigation.Screen
 import com.example.ui.theme.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -593,6 +594,20 @@ fun HomeScreen(
                         ),
                         modifier = Modifier.testTag("files_tab")
                     )
+                    NavigationBarItem(
+                        selected = selectedTab == 2,
+                        onClick = { selectedTab = 2 },
+                        icon = { Icon(imageVector = Icons.Default.Category, contentDescription = "الأدوات") },
+                        label = { Text("الأدوات") },
+                        colors = NavigationBarItemDefaults.colors(
+                            selectedIconColor = Color.White,
+                            selectedTextColor = AppPrimary,
+                            unselectedIconColor = AppTextSecondary,
+                            unselectedTextColor = AppTextSecondary,
+                            indicatorColor = AppPrimary
+                        ),
+                        modifier = Modifier.testTag("tools_tab")
+                    )
                 }
             },
             floatingActionButton = {
@@ -757,6 +772,16 @@ fun HomeScreen(
                 FileBrowserScreen(
                     viewModel = viewModel,
                     onPdfOpened = onPdfOpened,
+                    modifier = Modifier.padding(innerPadding)
+                )
+            } else if (selectedTab == 2) {
+                PdfToolsScreen(
+                    onNavigateToMerge = { navController.navigate(Screen.MergePdfs.route) },
+                    onNavigateToMultiSearch = { navController.navigate(Screen.MultiFileSearch.route) },
+                    onNavigateToPdfToImages = { navController.navigate(Screen.PdfToImages.route) },
+                    onNavigateToImagesToPdf = { navController.navigate(Screen.ImagesToPdf.route) },
+                    onNavigateToPdfToWord = { navController.navigate(Screen.PdfToWord.route) },
+                    onNavigateToSignature = { navController.navigate(Screen.Signature.route) },
                     modifier = Modifier.padding(innerPadding)
                 )
             } else {
