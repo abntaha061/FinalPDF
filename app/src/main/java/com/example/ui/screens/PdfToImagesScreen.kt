@@ -91,7 +91,7 @@ fun PdfToImagesScreen(
                 try {
                     context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
                         val renderer = PdfRenderer(pfd)
-                        totalPagesInPdf = renderer.numberOfPages
+                        totalPagesInPdf = renderer.pageCount
                         customPageTo = totalPagesInPdf.toString()
                         renderer.close()
                     }
@@ -620,7 +620,7 @@ suspend fun renderPdfToImages(
             val pdfRenderer = PdfRenderer(pfd)
             
             for (i in startPageZeroBased..endPageZeroBased) {
-                if (i >= pdfRenderer.numberOfPages) break
+                if (i >= pdfRenderer.pageCount) break
                 
                 val page = pdfRenderer.openPage(i)
                 

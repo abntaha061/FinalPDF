@@ -474,10 +474,22 @@ fun HomeScreen(navController: androidx.navigation.NavController) {
             navController.navigate("statistics")
         },
         onNavigateToMerge = {
-            navController.navigate("merge_pdfs")
+            navController.navigate(com.example.ui.navigation.Screen.MergePdfs.route)
         },
         onNavigateToMultiSearch = {
-            navController.navigate("multi_file_search")
+            navController.navigate(com.example.ui.navigation.Screen.MultiFileSearch.route)
+        },
+        onNavigateToPdfToImages = {
+            navController.navigate(com.example.ui.navigation.Screen.PdfToImages.route)
+        },
+        onNavigateToImagesToPdf = {
+            navController.navigate(com.example.ui.navigation.Screen.ImagesToPdf.route)
+        },
+        onNavigateToPdfToWord = {
+            navController.navigate(com.example.ui.navigation.Screen.PdfToWord.route)
+        },
+        onNavigateToSignature = {
+            navController.navigate(com.example.ui.navigation.Screen.Signature.route)
         }
     )
 }
@@ -491,7 +503,11 @@ fun HomeScreen(
     onNavigateToSettings: () -> Unit = {},
     onNavigateToStatistics: () -> Unit = {},
     onNavigateToMerge: () -> Unit = {},
-    onNavigateToMultiSearch: () -> Unit = {}
+    onNavigateToMultiSearch: () -> Unit = {},
+    onNavigateToPdfToImages: () -> Unit = {},
+    onNavigateToImagesToPdf: () -> Unit = {},
+    onNavigateToPdfToWord: () -> Unit = {},
+    onNavigateToSignature: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var selectedTab by rememberSaveable { mutableStateOf(0) }
@@ -776,12 +792,12 @@ fun HomeScreen(
                 )
             } else if (selectedTab == 2) {
                 PdfToolsScreen(
-                    onNavigateToMerge = { navController.navigate(Screen.MergePdfs.route) },
-                    onNavigateToMultiSearch = { navController.navigate(Screen.MultiFileSearch.route) },
-                    onNavigateToPdfToImages = { navController.navigate(Screen.PdfToImages.route) },
-                    onNavigateToImagesToPdf = { navController.navigate(Screen.ImagesToPdf.route) },
-                    onNavigateToPdfToWord = { navController.navigate(Screen.PdfToWord.route) },
-                    onNavigateToSignature = { navController.navigate(Screen.Signature.route) },
+                    onNavigateToMerge = onNavigateToMerge,
+                    onNavigateToMultiSearch = onNavigateToMultiSearch,
+                    onNavigateToPdfToImages = onNavigateToPdfToImages,
+                    onNavigateToImagesToPdf = onNavigateToImagesToPdf,
+                    onNavigateToPdfToWord = onNavigateToPdfToWord,
+                    onNavigateToSignature = onNavigateToSignature,
                     modifier = Modifier.padding(innerPadding)
                 )
             } else {
