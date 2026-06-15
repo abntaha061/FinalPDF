@@ -14,9 +14,32 @@ class PdfRepository @Inject constructor(
     private val highlightDao: HighlightDao,
     private val readingSessionDao: ReadingSessionDao,
     private val ocrResultDao: OcrResultDao,
-    private val audioBookmarkDao: AudioBookmarkDao
+    private val audioBookmarkDao: AudioBookmarkDao,
+    private val commentDao: CommentDao
 ) {
     val allRecentPdfs: Flow<List<RecentFileEntity>> = recentFileDao.getAll()
+    
+    // Comments
+    fun getCommentsForPdf(fileUri: String): Flow<List<CommentEntity>> {
+        return commentDao.getByUri(fileUri)
+    }
+
+    suspend fun insertComment(comment: CommentEntity) = withContext(Dispatchers.IO) {
+        commentDao.insert(comment)
+    }
+
+    suspend fun deleteComment(commentId: Int) = withContext(Dispatchers.IO) {
+        commentDao.deleteById(commentId)
+    }
+
+    suspend fun clearAllComments() = withContext(Dispatchers.IO) {
+        commentDao.deleteAll()
+    }
+
+    suspend fun insertComments(comments: List<CommentEntity>) = withContext(Dispatchers.IO) {
+        commentDao.insertAll(comments)
+    }
+
     
     // Reading Sessions
     val allReadingSessions: Flow<List<ReadingSessionEntity>> = readingSessionDao.getAllSessions()

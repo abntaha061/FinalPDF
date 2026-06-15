@@ -141,4 +141,26 @@ interface AudioBookmarkDao {
     suspend fun deleteAll()
 }
 
+@Dao
+interface CommentDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(comment: CommentEntity)
+
+    @Delete
+    suspend fun delete(comment: CommentEntity)
+
+    @Query("DELETE FROM comments WHERE id = :id OR parentId = :id")
+    suspend fun deleteById(id: Int)
+
+    @Query("SELECT * FROM comments WHERE fileUri = :uri ORDER BY createdAt ASC")
+    fun getByUri(uri: String): Flow<List<CommentEntity>>
+
+    @Query("DELETE FROM comments")
+    suspend fun deleteAll()
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(comments: List<CommentEntity>)
+}
+
+
 

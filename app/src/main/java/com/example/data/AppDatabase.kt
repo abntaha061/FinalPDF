@@ -5,7 +5,7 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 
-@Database(entities = [RecentFileEntity::class, BookmarkEntity::class, HighlightEntity::class, ReadingSessionEntity::class, OcrResultEntity::class, AudioBookmarkEntity::class], version = 3, exportSchema = false)
+@Database(entities = [RecentFileEntity::class, BookmarkEntity::class, HighlightEntity::class, ReadingSessionEntity::class, OcrResultEntity::class, AudioBookmarkEntity::class, CommentEntity::class], version = 4, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun recentFileDao(): RecentFileDao
     abstract fun bookmarkDao(): BookmarkDao
@@ -13,6 +13,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun readingSessionDao(): ReadingSessionDao
     abstract fun ocrResultDao(): OcrResultDao
     abstract fun audioBookmarkDao(): AudioBookmarkDao
+    abstract fun commentDao(): CommentDao
 
     companion object {
         @Volatile

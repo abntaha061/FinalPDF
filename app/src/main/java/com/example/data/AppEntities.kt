@@ -62,3 +62,17 @@ data class AudioBookmarkEntity(
     val createdAt: Long = System.currentTimeMillis()
 )
 
+@Entity(tableName = "comments")
+data class CommentEntity(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val fileUri: String,
+    val pageNumber: Int,
+    val positionX: Float,
+    val positionY: Float,
+    val parentId: Int? = null,  // null = root comment, else reply
+    val authorName: String = "أنا", // "أنا" by default
+    val text: String,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
+
