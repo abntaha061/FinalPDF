@@ -66,6 +66,7 @@ fun BottomReaderBar(
     onSearchExtractedTextClick: () -> Unit = {},
     onAddSignatureClick: () -> Unit = {},
     onRedactModeClick: () -> Unit = {},
+    onTtsPlayClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -333,6 +334,15 @@ fun BottomReaderBar(
                             onRedactModeClick()
                         },
                         modifier = Modifier.testTag("redact_sensitive_content_option")
+                    )
+                    DropdownMenuItem(
+                        text = { Text("قراءة الصفحة بصوت عالٍ", color = AppTextPrimary, fontSize = 14.sp) },
+                        leadingIcon = { Icon(Icons.Default.VolumeUp, contentDescription = null, tint = AppPrimary) },
+                        onClick = {
+                            showMoreMenu = false
+                            onTtsPlayClick()
+                        },
+                        modifier = Modifier.testTag("tts_play_option")
                     )
                     if (hasOcrResult) {
                         HorizontalDivider(color = AppTextSecondary.copy(alpha = 0.2f), thickness = 1.dp)

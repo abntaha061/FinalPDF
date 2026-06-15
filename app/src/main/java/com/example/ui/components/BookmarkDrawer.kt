@@ -1,13 +1,25 @@
 package com.example.ui.components
 
+import android.Manifest
+import android.app.Activity
 import android.content.Context
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.pdf.PdfRenderer
+import android.media.MediaPlayer
+import android.media.MediaRecorder
 import android.net.Uri
+import android.os.Build
 import android.util.Log
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
@@ -16,16 +28,10 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Bookmark
-import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowLeft
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.shrinkVertically
-import androidx.compose.animation.core.tween
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -33,23 +39,28 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import com.example.data.BookmarkEntity
+import com.example.data.AudioBookmarkEntity
 import com.example.ui.theme.*
 import com.github.barteksc.pdfviewer.PDFView
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -58,10 +69,13 @@ fun BookmarkDrawer(
     currentPage: Int,
     totalPages: Int,
     pageBookmarks: List<BookmarkEntity>,
+    audioBookmarks: List<AudioBookmarkEntity> = emptyList(),
     pdfViewInst: PDFView?,
     onJumpToPage: (Int) -> Unit,
     onAddBookmark: (String) -> Unit,
     onDeleteBookmark: (BookmarkEntity) -> Unit,
+    onAddAudioBookmark: (AudioBookmarkEntity) -> Unit = {},
+    onDeleteAudioBookmark: (AudioBookmarkEntity) -> Unit = {},
     onCloseDrawer: () -> Unit,
     modifier: Modifier = Modifier,
     tableOfContents: List<com.shockwave.pdfium.PdfDocument.Bookmark> = emptyList(),
@@ -78,6 +92,37 @@ fun BookmarkDrawer(
     // Delete Bookmark state
     var showDeleteDialog by remember { mutableStateOf(false) }
     var bookmarkToDelete by remember { mutableStateOf<BookmarkEntity?>(null) }
+
+    // Delete Audio Bookmark state
+    var showAudioDeleteDialog by remember { mutableStateOf(false) }
+    var audioBookmarkToDelete by remember { mutableStateOf<AudioBookmarkEntity?>(null) }
+
+    // Audio Playback in sidebar state
+    var currentlyPlayingPath by remember { mutableStateOf<String?>(null) }
+    val sidebarPlayer = remember { MediaPlayer() }
+
+    LaunchedEffect(currentlyPlayingPath) {
+        if (currentlyPlayingPath == null) {
+            try {
+                if (sidebarPlayer.isPlaying) {
+                    sidebarPlayer.stop()
+                }
+                sidebarPlayer.reset()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            try {
+                sidebarPlayer.release()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
 
     // Render caching map for Thumbnails
     val thumbnailCache = remember { mutableStateMapOf<Int, Bitmap>() }
@@ -109,69 +154,51 @@ fun BookmarkDrawer(
                     .fillMaxSize()
                     .padding(top = 16.dp)
             ) {
+                // Header details
                 Text(
-                    text = "محتويات الملف",
-                    style = MaterialTheme.typography.titleLarge,
+                    text = "محتويات المستند",
+                    style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
-                    color = AppPrimary,
-                    modifier = Modifier.padding(horizontal = 24.dp)
+                    color = AppTextPrimary,
+                    modifier = Modifier
+                        .padding(horizontal = 20.dp, vertical = 8.dp)
+                        .testTag("drawer_header_title")
                 )
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
-                val showTocTab = tableOfContents.isNotEmpty()
-
-                // Tab selectors: "الإشارات المرجعية" and "الصفحات المصغرة"
+                // Modern visual Switch tabs
                 TabRow(
                     selectedTabIndex = selectedDrawerTab,
-                    containerColor = Color.Transparent,
+                    containerColor = AppBottomBarBg,
                     contentColor = AppPrimary,
+                    indicator = { tabPositions ->
+                        TabRowDefaults.SecondaryIndicator(
+                            modifier = Modifier.tabIndicatorOffset(tabPositions[selectedDrawerTab]),
+                            color = AppPrimary
+                        )
+                    },
                     modifier = Modifier
-                        .padding(horizontal = 12.dp)
-                        .testTag("drawer_tab_row")
+                        .padding(horizontal = 16.dp)
+                        .clip(RoundedCornerShape(8.dp))
                 ) {
                     Tab(
                         selected = selectedDrawerTab == 0,
                         onClick = { selectedDrawerTab = 0 },
-                        text = {
-                            Text(
-                                "الإشارات المرجعية",
-                                fontSize = 13.sp,
-                                fontWeight = if (selectedDrawerTab == 0) FontWeight.Bold else FontWeight.Normal
-                            )
-                        },
-                        modifier = Modifier.testTag("bookmarks_tab")
+                        text = { Text("الإشارات", fontSize = 13.sp, fontWeight = FontWeight.Bold) },
+                        modifier = Modifier.testTag("drawer_tab_bookmarks")
                     )
                     Tab(
                         selected = selectedDrawerTab == 1,
                         onClick = { selectedDrawerTab = 1 },
-                        text = {
-                            Text(
-                                "الصفحات المصغرة",
-                                fontSize = 13.sp,
-                                fontWeight = if (selectedDrawerTab == 1) FontWeight.Bold else FontWeight.Normal
-                            )
-                        },
-                        modifier = Modifier.testTag("thumbnails_tab")
+                        text = { Text("الصفحات", fontSize = 13.sp, fontWeight = FontWeight.Bold) },
+                        modifier = Modifier.testTag("drawer_tab_thumbnails")
                     )
-                    if (showTocTab) {
-                        Tab(
-                            selected = selectedDrawerTab == 2,
-                            onClick = { selectedDrawerTab = 2 },
-                            text = {
-                                Text(
-                                    "الفهرس",
-                                    fontSize = 13.sp,
-                                    fontWeight = if (selectedDrawerTab == 2) FontWeight.Bold else FontWeight.Normal
-                                )
-                            },
-                            modifier = Modifier.testTag("toc_tab")
-                        )
-                    }
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
+                // Scrollable container contents
                 Box(
                     modifier = Modifier
                         .weight(1f)
@@ -181,7 +208,7 @@ fun BookmarkDrawer(
                         // TAB 1: BOOKMARKS
                         Column(modifier = Modifier.fillMaxSize()) {
                             Box(modifier = Modifier.weight(1f)) {
-                                if (pageBookmarks.isEmpty()) {
+                                if (pageBookmarks.isEmpty() && audioBookmarks.isEmpty()) {
                                     Box(
                                         modifier = Modifier.fillMaxSize(),
                                         contentAlignment = Alignment.Center
@@ -199,81 +226,190 @@ fun BookmarkDrawer(
                                             .testTag("bookmarks_lazy_column"),
                                         verticalArrangement = Arrangement.spacedBy(4.dp)
                                     ) {
-                                        items(pageBookmarks) { bookmark ->
-                                            Card(
-                                                colors = CardDefaults.cardColors(
-                                                    containerColor = Color.Transparent
-                                                ),
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .combinedClickable(
-                                                        onLongClick = {
-                                                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                                            bookmarkToDelete = bookmark
-                                                            showDeleteDialog = true
-                                                        },
-                                                        onClick = {
-                                                            // Close drawer + jump to (pageNumber - 1)
-                                                            onCloseDrawer()
-                                                            val targetIndex = (bookmark.pageNumber - 1).coerceAtLeast(0)
-                                                            pdfViewInst?.jumpTo(targetIndex)
-                                                            onJumpToPage(targetIndex)
-                                                        }
-                                                    )
-                                                    .testTag("bookmark_item_card_${bookmark.pageNumber}")
-                                            ) {
-                                                Row(
+                                        if (pageBookmarks.isNotEmpty()) {
+                                            item {
+                                                Text(
+                                                    text = "إشارات مرجعية نصية",
+                                                    color = AppPrimary,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 12.sp,
+                                                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)
+                                                )
+                                            }
+                                            items(pageBookmarks) { bookmark ->
+                                                Card(
+                                                    colors = CardDefaults.cardColors(
+                                                        containerColor = Color.Transparent
+                                                    ),
                                                     modifier = Modifier
                                                         .fillMaxWidth()
-                                                        .padding(horizontal = 20.dp, vertical = 12.dp),
-                                                    verticalAlignment = Alignment.CenterVertically
+                                                        .combinedClickable(
+                                                            onLongClick = {
+                                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                                bookmarkToDelete = bookmark
+                                                                showDeleteDialog = true
+                                                            },
+                                                            onClick = {
+                                                                onCloseDrawer()
+                                                                val targetIndex = (bookmark.pageNumber - 1).coerceAtLeast(0)
+                                                                pdfViewInst?.jumpTo(targetIndex)
+                                                                onJumpToPage(targetIndex)
+                                                            }
+                                                        )
+                                                        .testTag("bookmark_item_card_${bookmark.pageNumber}")
                                                 ) {
-                                                    // Right side: Custom Page Icon (Arabic RTL means first in row)
-                                                    Icon(
-                                                        imageVector = Icons.Default.Bookmark,
-                                                        contentDescription = null,
-                                                        tint = AppPrimary,
+                                                    Row(
                                                         modifier = Modifier
-                                                            .size(20.dp)
-                                                            .testTag("bookmark_icon_primary")
-                                                    )
-
-                                                    Spacer(modifier = Modifier.width(16.dp))
-
-                                                    // Center: Page number and Custom label details
-                                                    Column(
-                                                        modifier = Modifier.weight(1f),
-                                                        horizontalAlignment = Alignment.Start
+                                                            .fillMaxWidth()
+                                                            .padding(horizontal = 20.dp, vertical = 12.dp),
+                                                        verticalAlignment = Alignment.CenterVertically
                                                     ) {
-                                                        Text(
-                                                            text = "صفحة ${bookmark.pageNumber}",
-                                                            style = MaterialTheme.typography.bodyMedium,
-                                                            fontWeight = FontWeight.Bold,
-                                                            color = AppTextPrimary,
-                                                            modifier = Modifier.testTag("bookmark_page_title_${bookmark.pageNumber}")
+                                                        Icon(
+                                                            imageVector = Icons.Default.Bookmark,
+                                                            contentDescription = null,
+                                                            tint = AppPrimary,
+                                                            modifier = Modifier
+                                                                .size(20.dp)
+                                                                .testTag("bookmark_icon_primary")
                                                         )
-                                                        Text(
-                                                            text = bookmark.label,
-                                                            style = MaterialTheme.typography.bodySmall,
-                                                            color = AppTextSecondary,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis,
-                                                            modifier = Modifier.testTag("bookmark_page_label_${bookmark.pageNumber}")
-                                                        )
-                                                    }
 
-                                                    // Left side: Small formatted timestamp
-                                                    val timeStr = remember(bookmark.createdAt) {
-                                                        val sdf = java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.getDefault())
-                                                        sdf.format(java.util.Date(bookmark.createdAt))
+                                                        Spacer(modifier = Modifier.width(16.dp))
+
+                                                        Column(
+                                                            modifier = Modifier.weight(1f),
+                                                            horizontalAlignment = Alignment.Start
+                                                        ) {
+                                                            Text(
+                                                                text = "صفحة ${bookmark.pageNumber}",
+                                                                style = MaterialTheme.typography.bodyMedium,
+                                                                fontWeight = FontWeight.Bold,
+                                                                color = AppTextPrimary,
+                                                                modifier = Modifier.testTag("bookmark_page_title_${bookmark.pageNumber}")
+                                                            )
+                                                            Text(
+                                                                text = bookmark.label,
+                                                                style = MaterialTheme.typography.bodySmall,
+                                                                color = AppTextSecondary,
+                                                                maxLines = 1,
+                                                                overflow = TextOverflow.Ellipsis,
+                                                                modifier = Modifier.testTag("bookmark_page_label_${bookmark.pageNumber}")
+                                                            )
+                                                        }
+
+                                                        val timeStr = remember(bookmark.createdAt) {
+                                                            val sdf = java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.getDefault())
+                                                            sdf.format(java.util.Date(bookmark.createdAt))
+                                                        }
+                                                        Text(
+                                                            text = timeStr,
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            color = AppTextSecondary,
+                                                            fontSize = 10.sp,
+                                                            modifier = Modifier.testTag("bookmark_timestamp_${bookmark.pageNumber}")
+                                                        )
                                                     }
-                                                    Text(
-                                                        text = timeStr,
-                                                        style = MaterialTheme.typography.labelSmall,
-                                                        color = AppTextSecondary,
-                                                        fontSize = 10.sp,
-                                                        modifier = Modifier.testTag("bookmark_timestamp_${bookmark.pageNumber}")
-                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        if (audioBookmarks.isNotEmpty()) {
+                                            item {
+                                                Spacer(modifier = Modifier.height(10.dp))
+                                                Text(
+                                                    text = "إشارات مرجعية صوتية",
+                                                    color = Color(0xFFFF4949),
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 12.sp,
+                                                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp)
+                                                )
+                                            }
+                                            items(audioBookmarks) { audioBookmark ->
+                                                val isPlaying = currentlyPlayingPath == audioBookmark.audioPath
+                                                Card(
+                                                    colors = CardDefaults.cardColors(
+                                                        containerColor = Color.Transparent
+                                                    ),
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .combinedClickable(
+                                                            onLongClick = {
+                                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                                audioBookmarkToDelete = audioBookmark
+                                                                showAudioDeleteDialog = true
+                                                            },
+                                                            onClick = {
+                                                                onCloseDrawer()
+                                                                val targetIndex = (audioBookmark.pageNumber - 1).coerceAtLeast(0)
+                                                                pdfViewInst?.jumpTo(targetIndex)
+                                                                onJumpToPage(targetIndex)
+                                                            }
+                                                        )
+                                                        .testTag("audio_bookmark_card_${audioBookmark.id}")
+                                                ) {
+                                                    Row(
+                                                        modifier = Modifier
+                                                            .fillMaxWidth()
+                                                            .padding(horizontal = 20.dp, vertical = 10.dp),
+                                                        verticalAlignment = Alignment.CenterVertically
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = Icons.Default.Mic,
+                                                            contentDescription = null,
+                                                            tint = AppPrimary,
+                                                            modifier = Modifier.size(20.dp)
+                                                        )
+
+                                                        Spacer(modifier = Modifier.width(16.dp))
+
+                                                        Column(
+                                                            modifier = Modifier.weight(1f),
+                                                            horizontalAlignment = Alignment.Start
+                                                        ) {
+                                                            Text(
+                                                                text = "صفحة ${audioBookmark.pageNumber}",
+                                                                style = MaterialTheme.typography.bodyMedium,
+                                                                fontWeight = FontWeight.Bold,
+                                                                color = AppTextPrimary
+                                                            )
+                                                            val secs = audioBookmark.durationMs / 1000
+                                                            val durationText = String.format("%02d:%02d", secs / 60, secs % 60)
+                                                            Text(
+                                                                text = "مدة التسجيل: $durationText",
+                                                                style = MaterialTheme.typography.bodySmall,
+                                                                color = AppTextSecondary
+                                                            )
+                                                        }
+
+                                                        IconButton(
+                                                            onClick = {
+                                                                if (isPlaying) {
+                                                                    currentlyPlayingPath = null
+                                                                } else {
+                                                                    try {
+                                                                        sidebarPlayer.reset()
+                                                                        sidebarPlayer.setDataSource(audioBookmark.audioPath)
+                                                                        sidebarPlayer.prepare()
+                                                                        sidebarPlayer.start()
+                                                                        currentlyPlayingPath = audioBookmark.audioPath
+                                                                        sidebarPlayer.setOnCompletionListener {
+                                                                            currentlyPlayingPath = null
+                                                                        }
+                                                                    } catch (e: Exception) {
+                                                                        e.printStackTrace()
+                                                                        currentlyPlayingPath = null
+                                                                    }
+                                                                }
+                                                            },
+                                                            modifier = Modifier.size(36.dp)
+                                                        ) {
+                                                            Icon(
+                                                                imageVector = if (isPlaying) Icons.Default.Stop else Icons.Default.PlayArrow,
+                                                                contentDescription = "Play/Stop bookmark",
+                                                                tint = AppPrimary,
+                                                                modifier = Modifier.size(24.dp)
+                                                            )
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
@@ -310,178 +446,126 @@ fun BookmarkDrawer(
                                 modifier = Modifier.fillMaxSize(),
                                 contentAlignment = Alignment.Center
                             ) {
-                                CircularProgressIndicator(color = AppPrimary)
+                                Text(
+                                    text = "جاري قراءة صفحات الملف...",
+                                    color = AppTextSecondary,
+                                    fontSize = 14.sp
+                                )
                             }
                         } else {
                             LazyVerticalGrid(
                                 columns = GridCells.Fixed(2),
                                 state = gridState,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                verticalArrangement = Arrangement.spacedBy(16.dp),
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .padding(horizontal = 16.dp)
-                                    .testTag("thumbnails_lazy_grid")
+                                    .padding(horizontal = 14.dp)
+                                    .testTag("thumbnails_grid"),
+                                contentPadding = PaddingValues(vertical = 12.dp),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                items(totalPages) { pageIndex ->
-                                    val isVisible = remember { derivedStateOf { visibleIndices.contains(pageIndex) } }
-
-                                    // Render thread on visibility bound checking (lazy load)
-                                    LaunchedEffect(pageIndex, isVisible.value) {
-                                        if (isVisible.value && !thumbnailCache.containsKey(pageIndex) && pdfUri.isNotEmpty()) {
-                                            withContext(Dispatchers.IO) {
-                                                try {
-                                                    val uri = Uri.parse(pdfUri)
-                                                    context.contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
-                                                        PdfRenderer(pfd).use { renderer ->
-                                                            if (pageIndex < renderer.pageCount) {
-                                                                renderer.openPage(pageIndex).use { page ->
-                                                                    // High resolution thumbnail
-                                                                    val bitmap = Bitmap.createBitmap(140, 180, Bitmap.Config.ARGB_8888)
-                                                                    bitmap.eraseColor(android.graphics.Color.WHITE)
-                                                                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                                                                    thumbnailCache[pageIndex] = bitmap
+                                items(totalPages) { index ->
+                                    val isCurrent = index == currentPage
+                                    
+                                    val isVisible = index in visibleIndices
+                                    
+                                    var renderedBitmap by remember { mutableStateOf<Bitmap?>(null) }
+                                    val scope = rememberCoroutineScope()
+                                    
+                                    LaunchedEffect(isVisible) {
+                                        if (isVisible && renderedBitmap == null) {
+                                            val cached = thumbnailCache[index]
+                                            if (cached != null) {
+                                                renderedBitmap = cached
+                                            } else {
+                                                scope.launch(Dispatchers.IO) {
+                                                    try {
+                                                        val fileUriObj = Uri.parse(pdfUri)
+                                                        context.contentResolver.openFileDescriptor(fileUriObj, "r")?.use { pfd ->
+                                                            val pdfRenderer = PdfRenderer(pfd)
+                                                            if (index < pdfRenderer.pageCount) {
+                                                                val page = pdfRenderer.openPage(index)
+                                                                
+                                                                val ratio = page.height.toFloat() / page.width.toFloat()
+                                                                val targetWidth = 140
+                                                                val targetHeight = (targetWidth * ratio).toInt().coerceIn(120, 240)
+                                                                
+                                                                val bmp = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.ARGB_8888)
+                                                                bmp.eraseColor(android.graphics.Color.WHITE)
+                                                                page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                                                
+                                                                withContext(Dispatchers.Main) {
+                                                                    thumbnailCache[index] = bmp
+                                                                    renderedBitmap = bmp
                                                                 }
+                                                                page.close()
                                                             }
+                                                            pdfRenderer.close()
                                                         }
+                                                    } catch (e: Exception) {
+                                                        Log.e("BookmarkDrawer", "Error lazy rendering page $index", e)
                                                     }
-                                                } catch (e: Exception) {
-                                                    Log.e("BookmarkDrawer", "Error lazy rendering page $pageIndex", e)
                                                 }
                                             }
                                         }
                                     }
-
-                                    Box(
+                                    
+                                    Card(
+                                        colors = CardDefaults.cardColors(
+                                            containerColor = if (isCurrent) AppPrimary.copy(alpha = 0.12f) else Color.Transparent
+                                        ),
+                                        shape = RoundedCornerShape(8.dp),
+                                        border = if (isCurrent) androidx.compose.foundation.BorderStroke(2.dp, AppPrimary) else null,
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .aspectRatio(0.75f)
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(AppBottomBarBg.copy(alpha = 0.4f))
                                             .clickable {
                                                 onCloseDrawer()
-                                                pdfViewInst?.jumpTo(pageIndex)
-                                                onJumpToPage(pageIndex)
+                                                pdfViewInst?.jumpTo(index)
+                                                onJumpToPage(index)
                                             }
-                                            .testTag("thumbnail_card_item_$pageIndex"),
-                                        contentAlignment = Alignment.Center
+                                            .testTag("thumbnail_card_$index")
                                     ) {
-                                        val cachedBitmap = thumbnailCache[pageIndex]
-                                        if (cachedBitmap != null) {
-                                            Image(
-                                                bitmap = cachedBitmap.asImageBitmap(),
-                                                contentDescription = "الصفحة ${pageIndex + 1}",
-                                                contentScale = ContentScale.Crop,
-                                                modifier = Modifier.fillMaxSize()
-                                            )
-                                        } else {
-                                            CircularProgressIndicator(
-                                                color = AppPrimary,
-                                                modifier = Modifier.size(24.dp).testTag("rendering_progress_$pageIndex")
-                                            )
-                                        }
-
-                                        // Page number badge at the bottom center of each thumbnail
-                                        Box(
+                                        Column(
+                                            horizontalAlignment = Alignment.CenterHorizontally,
                                             modifier = Modifier
-                                                .align(Alignment.BottomCenter)
-                                                .padding(bottom = 6.dp)
-                                                .background(
-                                                    color = Color.Black.copy(alpha = 0.7f),
-                                                    shape = RoundedCornerShape(4.dp)
-                                                )
-                                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                                                .padding(6.dp)
+                                                .fillMaxWidth()
                                         ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .aspectRatio(0.75f)
+                                                    .fillMaxWidth()
+                                                    .clip(RoundedCornerShape(6.dp))
+                                                    .background(Color.White),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                val bmp = renderedBitmap
+                                                if (bmp != null) {
+                                                    Image(
+                                                        bitmap = bmp.asImageBitmap(),
+                                                        contentDescription = "صفحة ${index + 1}",
+                                                        contentScale = ContentScale.Fit,
+                                                        modifier = Modifier.fillMaxSize()
+                                                    )
+                                                } else {
+                                                    CircularProgressIndicator(
+                                                        modifier = Modifier.size(24.dp),
+                                                        strokeWidth = 2.dp,
+                                                        color = AppPrimary.copy(alpha = 0.5f)
+                                                    )
+                                                }
+                                            }
+                                            
+                                            Spacer(modifier = Modifier.height(4.dp))
+                                            
                                             Text(
-                                                text = "${pageIndex + 1}",
-                                                color = Color.White,
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                modifier = Modifier.testTag("thumbnail_badge_text_$pageIndex")
+                                                text = "${index + 1}",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
+                                                color = if (isCurrent) AppPrimary else AppTextSecondary
                                             )
                                         }
                                     }
-                                }
-                            }
-                        }
-                    } else if (selectedDrawerTab == 2 && showTocTab) {
-                        // TAB 3: TOC (Table of Contents)
-                        val expandedMap = remember { mutableStateMapOf<String, Boolean>() }
-
-                        Column(modifier = Modifier.fillMaxSize()) {
-                            // Top controls: "توسيع الكل" and "طي الكل"
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Start
-                            ) {
-                                TextButton(
-                                    onClick = {
-                                        val parentKeys = getAllParentKeys(tableOfContents)
-                                        expandedMap.clear()
-                                        parentKeys.forEach { expandedMap[it] = true }
-                                    },
-                                    modifier = Modifier.testTag("toc_expand_all")
-                                ) {
-                                    Text(
-                                        text = "توسيع الكل",
-                                        color = AppPrimary,
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-
-                                Box(
-                                    modifier = Modifier
-                                        .height(16.dp)
-                                        .width(1.dp)
-                                        .background(AppTextSecondary.copy(alpha = 0.3f))
-                                )
-
-                                TextButton(
-                                    onClick = {
-                                        expandedMap.clear()
-                                    },
-                                    modifier = Modifier.testTag("toc_collapse_all")
-                                ) {
-                                    Text(
-                                        text = "طي الكل",
-                                        color = AppTextSecondary,
-                                        fontSize = 13.sp
-                                    )
-                                }
-                            }
-
-                            HorizontalDivider(
-                                thickness = 1.dp,
-                                color = AppBottomBarBg.copy(alpha = 0.5f)
-                            )
-
-                            LazyColumn(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .testTag("toc_lazy_column")
-                            ) {
-                                items(tableOfContents) { rootItem ->
-                                    TocItemRow(
-                                        item = rootItem,
-                                        level = 0,
-                                        expandedMap = expandedMap,
-                                        onToggleExpand = { key ->
-                                            expandedMap[key] = !(expandedMap[key] ?: false)
-                                        },
-                                        onJumpTo = { item ->
-                                            if (onTocItemClicked != null) {
-                                                onTocItemClicked(item)
-                                            } else {
-                                                onCloseDrawer()
-                                                pdfViewInst?.jumpTo(item.pageIdx.toInt())
-                                                onJumpToPage(item.pageIdx.toInt())
-                                            }
-                                        }
-                                    )
                                 }
                             }
                         }
@@ -490,43 +574,301 @@ fun BookmarkDrawer(
             }
         }
 
-        // Dialog: Add Bookmark label
+        // Dialog: Enhanced Add Bookmark
         if (showAddDialog) {
+            var activeTab by remember { mutableStateOf(0) } // 0 = Text, 1 = Audio
+            val micPermissionLauncher = rememberLauncherForActivityResult(
+                contract = ActivityResultContracts.RequestPermission()
+            ) { isGranted ->
+                if (!isGranted) {
+                    // Show message
+                }
+            }
+
+            fun checkAndRequestMicPermission(onGranted: () -> Unit) {
+                if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                    onGranted()
+                } else {
+                    micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                }
+            }
+
             AlertDialog(
                 onDismissRequest = { showAddDialog = false },
-                title = { Text("إضافة إشارة مرجعية", fontWeight = FontWeight.Bold, color = AppPrimary) },
+                title = { 
+                    Text("إضافة إشارة مرجعية في صفحة ${currentPage + 1}", fontWeight = FontWeight.Bold, color = AppPrimary, fontSize = 16.sp) 
+                },
                 text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("أدخل تسمية توضيحية لصفحة الحالية (${currentPage + 1}):", color = AppTextPrimary)
-                        OutlinedTextField(
-                            value = bookmarkLabelInput,
-                            onValueChange = { bookmarkLabelInput = it },
-                            placeholder = { Text("مثال: بداية الفصل الأول...") },
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = AppTextPrimary,
-                                unfocusedTextColor = AppTextPrimary,
-                                focusedBorderColor = AppPrimary
-                            ),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("bookmark_label_input_field")
-                        )
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        TabRow(
+                            selectedTabIndex = activeTab,
+                            containerColor = AppBottomBarBg,
+                            contentColor = AppPrimary,
+                            modifier = Modifier.clip(RoundedCornerShape(8.dp))
+                        ) {
+                            Tab(
+                                selected = activeTab == 0,
+                                onClick = { activeTab = 0 },
+                                text = { Text("إشارة نصية", fontSize = 12.sp) }
+                            )
+                            Tab(
+                                selected = activeTab == 1,
+                                onClick = { 
+                                    checkAndRequestMicPermission {
+                                        activeTab = 1
+                                    }
+                                },
+                                text = { Text("إشارة صوتية", fontSize = 12.sp) }
+                            )
+                        }
+
+                        if (activeTab == 0) {
+                            // TEXT BOOKMARK TAB
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("أدخل تسمية توضيحية للإشارة:", color = AppTextSecondary, fontSize = 12.sp)
+                                OutlinedTextField(
+                                    value = bookmarkLabelInput,
+                                    onValueChange = { bookmarkLabelInput = it },
+                                    placeholder = { Text("مثال: بداية الفصل الأول...") },
+                                    singleLine = true,
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedTextColor = AppTextPrimary,
+                                        unfocusedTextColor = AppTextPrimary,
+                                        focusedBorderColor = AppPrimary
+                                    ),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("bookmark_label_input_field")
+                                )
+                            }
+                        } else {
+                            // AUDIO BOOKMARK TAB
+                            var isRecording by remember { mutableStateOf(false) }
+                            var hasRecorded by remember { mutableStateOf(false) }
+                            var recorderInstance by remember { mutableStateOf<MediaRecorder?>(null) }
+                            var audioFile by remember { mutableStateOf<File?>(null) }
+                            var startTime by remember { mutableStateOf(0L) }
+                            var timerSeconds by remember { mutableStateOf(0) }
+                            var isPreviewPlaying by remember { mutableStateOf(false) }
+                            val previewPlayer = remember { MediaPlayer() }
+
+                            DisposableEffect(Unit) {
+                                onDispose {
+                                    try {
+                                        recorderInstance?.release()
+                                    } catch (e: Exception) {}
+                                    try {
+                                        previewPlayer.release()
+                                    } catch (e: Exception) {}
+                                }
+                            }
+
+                            LaunchedEffect(isRecording) {
+                                if (isRecording) {
+                                    timerSeconds = 0
+                                    while (isRecording) {
+                                        delay(1000)
+                                        timerSeconds++
+                                    }
+                                }
+                            }
+
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                WaveformVisualizer(isRecording = isRecording)
+                                
+                                val durationText = String.format("%02d:%02d", timerSeconds / 60, timerSeconds % 60)
+                                Text(
+                                    text = if (isRecording) "جاري التسجيل... $durationText" else if (hasRecorded) "تم الانتهاء من التسجيل" else "اضغط على الزر الأحمر لبدء تسجيل صوتك",
+                                    color = if (isRecording) Color.Red else AppTextPrimary,
+                                    fontWeight = FontWeight.Medium,
+                                    fontSize = 13.sp,
+                                    textAlign = TextAlign.Center
+                                )
+
+                                Spacer(modifier = Modifier.height(6.dp))
+
+                                Row(
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    // Big Record Button
+                                    Box(
+                                        modifier = Modifier
+                                            .size(72.dp)
+                                            .clip(CircleShape)
+                                            .background(if (isRecording) Color.Red.copy(alpha = 0.15f) else Color.Transparent)
+                                            .border(2.dp, if (isRecording) Color.Red else AppPrimary, CircleShape)
+                                            .clickable {
+                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                if (isRecording) {
+                                                    // Stop recording
+                                                    try {
+                                                        recorderInstance?.apply {
+                                                            stop()
+                                                            release()
+                                                        }
+                                                        hasRecorded = true
+                                                    } catch (e: Exception) {
+                                                        e.printStackTrace()
+                                                    } finally {
+                                                        isRecording = false
+                                                        recorderInstance = null
+                                                    }
+                                                } else {
+                                                    // Start recording
+                                                    try {
+                                                        if (previewPlayer.isPlaying) {
+                                                            previewPlayer.stop()
+                                                            isPreviewPlaying = false
+                                                        }
+                                                        previewPlayer.reset()
+
+                                                        val file = File(context.filesDir, "bookmark_audio_${System.currentTimeMillis()}.aac")
+                                                        audioFile = file
+                                                        
+                                                        val recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                                            MediaRecorder(context)
+                                                        } else {
+                                                            MediaRecorder()
+                                                        }
+                                                        recorder.apply {
+                                                            setAudioSource(MediaRecorder.AudioSource.MIC)
+                                                            setOutputFormat(MediaRecorder.OutputFormat.AAC_ADTS)
+                                                            setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                                                            setAudioSamplingRate(44100)
+                                                            setAudioEncodingBitRate(128000)
+                                                            setOutputFile(file.absolutePath)
+                                                            prepare()
+                                                            start()
+                                                        }
+                                                        recorderInstance = recorder
+                                                        isRecording = true
+                                                        startTime = System.currentTimeMillis()
+                                                        hasRecorded = false
+                                                    } catch (e: Exception) {
+                                                        e.printStackTrace()
+                                                    }
+                                                }
+                                            }
+                                            .testTag("dialog_mic_record_button"),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isRecording) Icons.Default.Stop else Icons.Default.Mic,
+                                            contentDescription = "Mic Record button",
+                                            tint = if (isRecording) Color.Red else AppPrimary,
+                                            modifier = Modifier.size(36.dp)
+                                        )
+                                    }
+                                }
+
+                                if (hasRecorded && audioFile != null) {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Button(
+                                        onClick = {
+                                            if (isPreviewPlaying) {
+                                                try {
+                                                    if (previewPlayer.isPlaying) {
+                                                        previewPlayer.stop()
+                                                    }
+                                                    previewPlayer.reset()
+                                                } catch (e: Exception) {}
+                                                isPreviewPlaying = false
+                                            } else {
+                                                try {
+                                                    previewPlayer.reset()
+                                                    previewPlayer.setDataSource(audioFile!!.absolutePath)
+                                                    previewPlayer.prepare()
+                                                    previewPlayer.start()
+                                                    isPreviewPlaying = true
+                                                    previewPlayer.setOnCompletionListener {
+                                                        isPreviewPlaying = false
+                                                    }
+                                                } catch (e: Exception) {
+                                                    e.printStackTrace()
+                                                }
+                                            }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = AppBottomBarBg),
+                                        modifier = Modifier.testTag("preview_audio_bookmark_button")
+                                    ) {
+                                        Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Icon(
+                                                imageVector = if (isPreviewPlaying) Icons.Default.Stop else Icons.Default.PlayArrow,
+                                                contentDescription = null,
+                                                tint = AppPrimary,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(
+                                                text = if (isPreviewPlaying) "إيقاف المعاينة" else "تشغيل المعاينة الصوتية",
+                                                color = AppPrimary,
+                                                fontSize = 11.sp
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Button(
+                                        colors = ButtonDefaults.buttonColors(containerColor = AppPrimary),
+                                        onClick = {
+                                            val fileObj = audioFile
+                                            if (fileObj != null && fileObj.exists()) {
+                                                var durationMs = 0L
+                                                try {
+                                                    val tempPlayer = MediaPlayer()
+                                                    tempPlayer.setDataSource(fileObj.absolutePath)
+                                                    tempPlayer.prepare()
+                                                    durationMs = tempPlayer.duration.toLong()
+                                                    tempPlayer.release()
+                                                } catch (e: Exception) {
+                                                    durationMs = (timerSeconds * 1000).toLong()
+                                                }
+
+                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                onAddAudioBookmark(
+                                                    AudioBookmarkEntity(
+                                                        fileUri = pdfUri,
+                                                        pageNumber = currentPage + 1,
+                                                        audioPath = fileObj.absolutePath,
+                                                        durationMs = durationMs,
+                                                        createdAt = System.currentTimeMillis()
+                                                    )
+                                                )
+                                                showAddDialog = false
+                                            }
+                                        },
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("save_audio_bookmark_button")
+                                    ) {
+                                        Text("حفظ الإشارة الصوتية")
+                                    }
+                                }
+                            }
+                        }
                     }
                 },
                 confirmButton = {
-                    Button(
-                        colors = ButtonDefaults.buttonColors(containerColor = AppPrimary),
-                        onClick = {
-                            if (bookmarkLabelInput.isNotBlank()) {
-                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                onAddBookmark(bookmarkLabelInput)
-                                showAddDialog = false
-                            }
-                        },
-                        modifier = Modifier.testTag("confirm_add_bookmark_btn")
-                    ) {
-                        Text("إضافة")
+                    if (activeTab == 0) {
+                        Button(
+                            colors = ButtonDefaults.buttonColors(containerColor = AppPrimary),
+                            onClick = {
+                                if (bookmarkLabelInput.isNotBlank()) {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    onAddBookmark(bookmarkLabelInput)
+                                    showAddDialog = false
+                                }
+                            },
+                            modifier = Modifier.testTag("confirm_add_bookmark_btn")
+                        ) {
+                            Text("إضافة")
+                        }
                     }
                 },
                 dismissButton = {
@@ -541,7 +883,7 @@ fun BookmarkDrawer(
             )
         }
 
-        // Dialog: Delete confirmation
+        // Dialog: Text Bookmark Delete confirmation
         if (showDeleteDialog && bookmarkToDelete != null) {
             AlertDialog(
                 onDismissRequest = { showDeleteDialog = false },
@@ -577,6 +919,90 @@ fun BookmarkDrawer(
                     }
                 },
                 containerColor = AppSurface
+            )
+        }
+
+        // Dialog: Audio Bookmark Delete confirmation
+        if (showAudioDeleteDialog && audioBookmarkToDelete != null) {
+            AlertDialog(
+                onDismissRequest = { showAudioDeleteDialog = false },
+                title = { Text("حذف إشارة مرجعية صوتية", fontWeight = FontWeight.Bold, color = Color.Red) },
+                text = {
+                    Text(
+                        "هل أنت متأكد من رغبتك في حذف الإشارة المرجعية الصوتية في صفحة ${audioBookmarkToDelete?.pageNumber}؟",
+                        color = AppTextPrimary
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        colors = ButtonDefaults.buttonColors(containerColor = Color.Red),
+                        onClick = {
+                            audioBookmarkToDelete?.let {
+                                try {
+                                    val f = File(it.audioPath)
+                                    if (f.exists()) {
+                                        f.delete()
+                                    }
+                                } catch (e: Exception) {}
+                                onDeleteAudioBookmark(it)
+                            }
+                            showAudioDeleteDialog = false
+                            audioBookmarkToDelete = null
+                        }
+                    ) {
+                        Text("حذف وصوت الإشارة", color = Color.White)
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = {
+                            showAudioDeleteDialog = false
+                            audioBookmarkToDelete = null
+                        }
+                    ) {
+                        Text("إلغاء", color = AppPrimary)
+                    }
+                },
+                containerColor = AppSurface
+            )
+        }
+    }
+}
+
+// Waveform visualizer animates based on active recording state or idle heights
+@Composable
+fun WaveformVisualizer(isRecording: Boolean) {
+    val infiniteTransition = rememberInfiniteTransition(label = "waveform")
+    val heights = (0 until 20).map { index ->
+        val delay = index * 100
+        val anim = infiniteTransition.animateFloat(
+            initialValue = 0.2f,
+            targetValue = 1.0f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 400 + (index % 3) * 100, easing = LinearEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "bar_$index"
+        )
+        if (isRecording) anim.value else 0.15f
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(50.dp)
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        heights.forEach { heightFactor ->
+            val barHeight = 35.dp * heightFactor
+            Box(
+                modifier = Modifier
+                    .padding(horizontal = 2.dp)
+                    .width(4.dp)
+                    .height(barHeight)
+                    .background(AppPrimary, RoundedCornerShape(2.dp))
             )
         }
     }

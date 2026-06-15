@@ -51,3 +51,14 @@ data class OcrResultEntity(
     val language: String,
     val createdAt: Long
 )
+
+@Entity(tableName = "audio_bookmarks")
+data class AudioBookmarkEntity(
+    @PrimaryKey(autoGenerate = true) val id: Int = 0,
+    val fileUri: String,
+    val pageNumber: Int,
+    val audioPath: String,    // path to .aac file
+    val durationMs: Long,
+    val createdAt: Long = System.currentTimeMillis()
+)
+

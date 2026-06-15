@@ -150,6 +150,7 @@ fun ViewerScreen(
     val isSwipeHorizontal by viewModel.isSwipeHorizontal.collectAsState()
     val isPageBookmarked by viewModel.isCurrentPageBookmarked.collectAsState()
     val pageBookmarks by viewModel.activePageBookmarks.collectAsState()
+    val audioBookmarks by viewModel.activeAudioBookmarks.collectAsState()
     val errorState by viewModel.errorState.collectAsState()
     val showLargeFileWarningSnackbar by viewModel.showLargeFileWarningSnackbar.collectAsState()
     val tableOfContents by viewModel.tableOfContents.collectAsState()
@@ -847,11 +848,14 @@ fun ViewerScreen(
                 currentPage = currentPage,
                 totalPages = totalPages,
                 pageBookmarks = pageBookmarks,
+                audioBookmarks = audioBookmarks,
                 pdfViewInst = pdfViewInst,
                 tableOfContents = tableOfContents,
                 onJumpToPage = { index -> viewModel.jumpToPage(index) },
                 onAddBookmark = { label -> viewModel.addPageBookmark(activeUri ?: "", currentPage + 1, label) },
                 onDeleteBookmark = { bookmark -> viewModel.deletePageBookmark(bookmark.fileUri, bookmark.pageNumber) },
+                onAddAudioBookmark = { ab -> viewModel.insertAudioBookmark(ab) },
+                onDeleteAudioBookmark = { ab -> viewModel.deleteAudioBookmark(ab.id) },
                 onCloseDrawer = { coroutineScope.launch { drawerState.close() } },
                 onTocItemClicked = { item ->
                     coroutineScope.launch {
@@ -2208,8 +2212,201 @@ fun ViewerScreen(
                         },
                         onRedactModeClick = {
                             isRedactModeActive = true
+                        },
+                        onTtsPlayClick = {
+                            viewModel.startTtsForCurrentPage()
                         }
                     )
+                }
+            }
+
+            val isTtsActive by viewModel.isTtsActive.collectAsState()
+            val ttsState by viewModel.ttsManager.state.collectAsState()
+
+            LaunchedEffect(currentPage) {
+                if (viewModel.isTtsActive.value) {
+                    viewModel.startTtsForCurrentPage()
+                }
+            }
+
+            AnimatedVisibility(
+                visible = isTtsActive,
+                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
+                var showSpeedMenu by remember { mutableStateOf(false) }
+                var currentSpeed by remember { mutableStateOf("1.0x") }
+                
+                Card(
+                    elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                    colors = CardDefaults.cardColors(containerColor = AppSurface),
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("tts_player_bar")
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            horizontalAlignment = Alignment.Start
+                        ) {
+                            Text(
+                                text = "قراءة الصفحة ${currentPage + 1}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = AppTextPrimary
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            
+                            when (val state = ttsState) {
+                                is com.example.util.TtsManager.TtsState.Speaking -> {
+                                    LinearProgressIndicator(
+                                        progress = { state.progress },
+                                        color = AppPrimary,
+                                        trackColor = AppTextSecondary.copy(alpha = 0.2f),
+                                        modifier = Modifier
+                                            .fillMaxWidth(0.8f)
+                                            .height(4.dp)
+                                            .clip(RoundedCornerShape(2.dp))
+                                    )
+                                }
+                                is com.example.util.TtsManager.TtsState.Loading -> {
+                                    Text("جاري التهيئة والاستخلاص...", style = MaterialTheme.typography.bodySmall, color = AppPrimary)
+                                }
+                                is com.example.util.TtsManager.TtsState.Error -> {
+                                    Text(state.message, style = MaterialTheme.typography.bodySmall, color = Color.Red)
+                                }
+                                else -> {
+                                    Text("جاهز للقراءة", style = MaterialTheme.typography.bodySmall, color = AppTextSecondary)
+                                }
+                            }
+                        }
+                        
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.padding(horizontal = 8.dp)
+                        ) {
+                            IconButton(
+                                onClick = {
+                                    if (currentPage > 0) {
+                                        viewModel.setCurrentPage(currentPage - 1)
+                                        pdfViewInst?.jumpTo(currentPage - 1)
+                                        viewModel.startTtsForCurrentPage()
+                                    }
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.KeyboardArrowRight,
+                                    contentDescription = "Previous page",
+                                    tint = AppPrimary
+                                )
+                            }
+                            
+                            val isSpeaking = ttsState is com.example.util.TtsManager.TtsState.Speaking
+                            IconButton(
+                                onClick = {
+                                    if (isSpeaking) {
+                                        viewModel.ttsManager.pause()
+                                    } else {
+                                        viewModel.startTtsForCurrentPage()
+                                    }
+                                },
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .background(AppPrimary, CircleShape)
+                            ) {
+                                Icon(
+                                    imageVector = if (isSpeaking) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                    contentDescription = "Play or Pause",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                            
+                            IconButton(
+                                onClick = {
+                                    if (currentPage < totalPages - 1) {
+                                        viewModel.setCurrentPage(currentPage + 1)
+                                        pdfViewInst?.jumpTo(currentPage + 1)
+                                        viewModel.startTtsForCurrentPage()
+                                    }
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.KeyboardArrowLeft,
+                                    contentDescription = "Next page",
+                                    tint = AppPrimary
+                                )
+                            }
+                        }
+                        
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Box {
+                                TextButton(
+                                    onClick = { showSpeedMenu = true },
+                                    modifier = Modifier.testTag("tts_speed_selector_button")
+                                ) {
+                                    Text(
+                                        text = currentSpeed,
+                                        color = AppPrimary,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp
+                                    )
+                                }
+                                
+                                DropdownMenu(
+                                    expanded = showSpeedMenu,
+                                    onDismissRequest = { showSpeedMenu = false },
+                                    modifier = Modifier.background(AppSurface)
+                                ) {
+                                    val speeds = listOf(
+                                        "0.5x" to 0.5f,
+                                        "0.75x" to 0.75f,
+                                        "1.0x" to 1.0f,
+                                        "1.25x" to 1.25f,
+                                        "1.5x" to 1.5f,
+                                        "2.0x" to 2.0f
+                                    )
+                                    speeds.forEach { (label, valFloat) ->
+                                        DropdownMenuItem(
+                                            text = { Text(label, color = AppTextPrimary) },
+                                            onClick = {
+                                                viewModel.ttsManager.setSpeed(valFloat)
+                                                currentSpeed = label
+                                                showSpeedMenu = false
+                                            },
+                                            modifier = Modifier.testTag("tts_speed_option_$label")
+                                        )
+                                    }
+                                }
+                            }
+                            
+                            IconButton(
+                                onClick = {
+                                    viewModel.stopTts()
+                                }
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Close TTS Player",
+                                    tint = AppTextSecondary
+                                )
+                            }
+                        }
+                    }
                 }
             }
 

@@ -13,7 +13,8 @@ class PdfRepository @Inject constructor(
     private val bookmarkDao: BookmarkDao,
     private val highlightDao: HighlightDao,
     private val readingSessionDao: ReadingSessionDao,
-    private val ocrResultDao: OcrResultDao
+    private val ocrResultDao: OcrResultDao,
+    private val audioBookmarkDao: AudioBookmarkDao
 ) {
     val allRecentPdfs: Flow<List<RecentFileEntity>> = recentFileDao.getAll()
     
@@ -121,5 +122,22 @@ class PdfRepository @Inject constructor(
 
     suspend fun deleteOcrResult(uri: String) = withContext(Dispatchers.IO) {
         ocrResultDao.deleteByFileUri(uri)
+    }
+
+    // Audio Bookmarks
+    fun getAudioBookmarksForPdf(pdfUri: String): Flow<List<AudioBookmarkEntity>> {
+        return audioBookmarkDao.getByUri(pdfUri)
+    }
+
+    suspend fun insertAudioBookmark(audioBookmark: AudioBookmarkEntity) = withContext(Dispatchers.IO) {
+        audioBookmarkDao.insert(audioBookmark)
+    }
+
+    suspend fun deleteAudioBookmark(id: Int) = withContext(Dispatchers.IO) {
+        audioBookmarkDao.deleteById(id)
+    }
+
+    suspend fun clearAllAudioBookmarks() = withContext(Dispatchers.IO) {
+        audioBookmarkDao.deleteAll()
     }
 }

@@ -123,3 +123,22 @@ interface OcrResultDao {
     suspend fun deleteAll()
 }
 
+@Dao
+interface AudioBookmarkDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(audioBookmark: AudioBookmarkEntity)
+
+    @Delete
+    suspend fun delete(audioBookmark: AudioBookmarkEntity)
+
+    @Query("SELECT * FROM audio_bookmarks WHERE fileUri = :uri ORDER BY pageNumber ASC")
+    fun getByUri(uri: String): Flow<List<AudioBookmarkEntity>>
+
+    @Query("DELETE FROM audio_bookmarks WHERE id = :id")
+    suspend fun deleteById(id: Int)
+
+    @Query("DELETE FROM audio_bookmarks")
+    suspend fun deleteAll()
+}
+
+

@@ -8,6 +8,7 @@ import com.example.data.BookmarkDao
 import com.example.data.HighlightDao
 import com.example.data.ReadingSessionDao
 import com.example.data.OcrResultDao
+import com.example.data.AudioBookmarkDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -45,4 +46,8 @@ object AppModule {
     @Provides
     @Singleton
     fun provideOcrResultDao(db: AppDatabase): OcrResultDao = db.ocrResultDao()
+
+    @Provides
+    @Singleton
+    fun provideAudioBookmarkDao(db: AppDatabase): AudioBookmarkDao = db.audioBookmarkDao()
 }

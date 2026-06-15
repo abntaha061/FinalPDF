@@ -67,6 +67,7 @@ class PdfViewModel(
 ) : ViewModel() {
 
     val timerManager by lazy { ReadingTimerManager(repository) }
+    val ttsManager by lazy { com.example.util.TtsManager(context) }
 
     private val _isReady = MutableStateFlow(false)
     val isReady: StateFlow<Boolean> = _isReady.asStateFlow()
@@ -349,6 +350,26 @@ class PdfViewModel(
             else flowOf(emptyList())
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val activeAudioBookmarks: StateFlow<List<com.example.data.AudioBookmarkEntity>> = _selectedUri
+        .flatMapLatest { uri ->
+            if (uri != null) repository.getAudioBookmarksForPdf(uri)
+            else flowOf(emptyList())
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun insertAudioBookmark(audioBookmark: com.example.data.AudioBookmarkEntity) {
+        viewModelScope.launch {
+            repository.insertAudioBookmark(audioBookmark)
+        }
+    }
+
+    fun deleteAudioBookmark(id: Int) {
+        viewModelScope.launch {
+            repository.deleteAudioBookmark(id)
+        }
+    }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val activeHighlights: StateFlow<List<HighlightEntity>> = _selectedUri
@@ -879,6 +900,77 @@ class PdfViewModel(
                 _currentDocument.value = _currentDocument.value?.copy(currentPage = page)
             }
             checkIfCurrentPageIsBookmarked()
+        }
+    }
+
+    private val _isTtsActive = MutableStateFlow(false)
+    val isTtsActive: StateFlow<Boolean> = _isTtsActive.asStateFlow()
+
+    fun showTtsBar(show: Boolean) {
+        _isTtsActive.value = show
+        if (!show) {
+            ttsManager.stop()
+        }
+    }
+
+    fun startTtsForCurrentPage() {
+        val uriStr = _selectedUri.value ?: return
+        val uri = Uri.parse(uriStr)
+        val page = _currentPage.value
+        
+        viewModelScope.launch {
+            _isTtsActive.value = true
+            val pageTextRaw = getPageTextForTts(context, uri, page)
+            val pageText = if (pageTextRaw.isBlank()) {
+                _ocrResultForActiveFile.value?.extractedText ?: ""
+            } else {
+                pageTextRaw
+            }
+            
+            if (pageText.isNotBlank()) {
+                val locale = if (pageText.take(100).any { it in '\u0600'..'\u06FF' }) {
+                    java.util.Locale("ar")
+                } else {
+                    java.util.Locale.ENGLISH
+                }
+                val pitch = if (locale.language == "ar") 1.1f else 1.0f
+                
+                ttsManager.init {
+                    ttsManager.setPitch(pitch)
+                    ttsManager.speak(pageText, locale)
+                }
+            } else {
+                ttsManager.init {
+                    ttsManager.speak("لا يوجد نص مقروء في هذه الصفحة")
+                }
+            }
+        }
+    }
+
+    fun stopTts() {
+        ttsManager.stop()
+        _isTtsActive.value = false
+    }
+
+    fun getPageTextForTts(context: Context, uri: Uri, pageIndex: Int): String {
+        return try {
+            com.tom_roush.pdfbox.android.PDFBoxResourceLoader.init(context.applicationContext)
+            context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                com.tom_roush.pdfbox.pdmodel.PDDocument.load(inputStream).use { document ->
+                    if (pageIndex < document.numberOfPages) {
+                        val stripper = com.tom_roush.pdfbox.text.PDFTextStripper()
+                        stripper.startPage = pageIndex + 1
+                        stripper.endPage = pageIndex + 1
+                        val text = stripper.getText(document)
+                        text ?: ""
+                    } else {
+                        ""
+                    }
+                }
+            } ?: ""
+        } catch (e: Exception) {
+            Log.e("PdfViewModel", "Error extracting page text for TTS", e)
+            ""
         }
     }
 
