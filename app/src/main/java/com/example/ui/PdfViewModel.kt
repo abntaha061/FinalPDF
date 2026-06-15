@@ -581,6 +581,16 @@ class PdfViewModel(
             }
 
             val metadata = getUriMetadata(context, uri)
+
+            try {
+                context.dataStore.edit { preferences ->
+                    preferences[com.example.util.LAST_FILE_NAME_KEY] = metadata.first
+                    preferences[com.example.util.LAST_FILE_URI_KEY] = uri.toString()
+                }
+            } catch (e: Exception) {
+                // Ignore
+            }
+
             var doc = repository.getPdfByUri(uri.toString())
             
             val key = androidx.datastore.preferences.core.intPreferencesKey("last_page_${uri.toString().hashCode()}")

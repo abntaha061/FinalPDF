@@ -23,6 +23,7 @@ sealed class Screen(val route: String) {
     object GestureSettings: Screen("gesture_settings")
     object Statistics: Screen("statistics")
     object MergePdfs  : Screen("merge_pdfs")
+    object MultiFileSearch : Screen("multi_file_search")
     object About     : Screen("about")
     object Language  : Screen("language")
     object Signature : Screen("signature")
@@ -99,6 +100,16 @@ fun AppNavGraph(
                     navController.navigate(Screen.PdfReader.createRoute(encodedUri)) {
                         popUpTo(Screen.Home.route)
                     }
+                }
+            )
+        }
+
+        // MULTI FILE SEARCH
+        composable(Screen.MultiFileSearch.route) {
+            MultiFileSearchScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToReader = { encodedUri ->
+                    navController.navigate(Screen.PdfReader.createRoute(encodedUri))
                 }
             )
         }

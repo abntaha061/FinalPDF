@@ -436,6 +436,20 @@ class MainActivity : ComponentActivity() {
 
     private fun handleIntent(intent: Intent?) {
         if (intent == null) return
+
+        val openUri = intent.getStringExtra("open_uri")
+        if (!openUri.isNullOrEmpty()) {
+            val uri = Uri.parse(openUri)
+            try {
+                val takeFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+                contentResolver.takePersistableUriPermission(uri, takeFlags)
+            } catch (e: Exception) {
+                // ignore
+            }
+            viewModel.selectDocument(this, uri)
+            viewModel.setPendingDragDropUri(openUri)
+        }
+
         val action = intent.action
         if (action == Intent.ACTION_VIEW || action == Intent.ACTION_SEND) {
             val uri = if (action == Intent.ACTION_SEND) {

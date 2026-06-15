@@ -474,6 +474,9 @@ fun HomeScreen(navController: androidx.navigation.NavController) {
         },
         onNavigateToMerge = {
             navController.navigate("merge_pdfs")
+        },
+        onNavigateToMultiSearch = {
+            navController.navigate("multi_file_search")
         }
     )
 }
@@ -486,7 +489,8 @@ fun HomeScreen(
     modifier: Modifier = Modifier,
     onNavigateToSettings: () -> Unit = {},
     onNavigateToStatistics: () -> Unit = {},
-    onNavigateToMerge: () -> Unit = {}
+    onNavigateToMerge: () -> Unit = {},
+    onNavigateToMultiSearch: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var selectedTab by rememberSaveable { mutableStateOf(0) }
@@ -674,6 +678,45 @@ fun HomeScreen(
                                     Icon(
                                         imageVector = Icons.Default.CallMerge,
                                         contentDescription = "دمج ملفات PDF",
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                            }
+
+                            // Mini FAB 3: "البحث متعدد الملفات"
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Surface(
+                                    color = AppSurface,
+                                    shape = RoundedCornerShape(8.dp),
+                                    shadowElevation = 4.dp
+                                ) {
+                                    Text(
+                                        text = "البحث متعدد الملفات",
+                                        color = AppTextPrimary,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                    )
+                                }
+                                FloatingActionButton(
+                                    onClick = {
+                                        isFabExpanded = false
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        onNavigateToMultiSearch()
+                                    },
+                                    containerColor = AppSurface,
+                                    contentColor = AppPrimary,
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .testTag("multi_search_mini_fab")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Search,
+                                        contentDescription = "البحث متعدد الملفات",
                                         modifier = Modifier.size(22.dp)
                                     )
                                 }
