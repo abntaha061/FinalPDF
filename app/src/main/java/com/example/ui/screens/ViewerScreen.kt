@@ -519,6 +519,11 @@ fun ViewerScreen(
 
     // Side drawer states
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
+    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+    val screenWidth = configuration.screenWidthDp
+    val isMedium = screenWidth in 600..839
+    val isExpanded = screenWidth >= 840
+    val isAdaptive = isMedium || isExpanded
     var selectedDrawerTab by remember { mutableStateOf(0) } // 0 = Bookmarks, 1 = Thumbnails
 
     // Jump dialog & File information dialog states
@@ -842,43 +847,194 @@ fun ViewerScreen(
 
     ModalNavigationDrawer(
         drawerState = drawerState,
+        gesturesEnabled = !isAdaptive,
         drawerContent = {
-            BookmarkDrawer(
-                pdfUri = activeUri ?: "",
-                currentPage = currentPage,
-                totalPages = totalPages,
-                pageBookmarks = pageBookmarks,
-                audioBookmarks = audioBookmarks,
-                pdfViewInst = pdfViewInst,
-                tableOfContents = tableOfContents,
-                onJumpToPage = { index -> viewModel.jumpToPage(index) },
-                onAddBookmark = { label -> viewModel.addPageBookmark(activeUri ?: "", currentPage + 1, label) },
-                onDeleteBookmark = { bookmark -> viewModel.deletePageBookmark(bookmark.fileUri, bookmark.pageNumber) },
-                onAddAudioBookmark = { ab -> viewModel.insertAudioBookmark(ab) },
-                onDeleteAudioBookmark = { ab -> viewModel.deleteAudioBookmark(ab.id) },
-                onCloseDrawer = { coroutineScope.launch { drawerState.close() } },
-                onTocItemClicked = { item ->
-                    coroutineScope.launch {
-                        drawerState.close()
-                        pdfViewInst?.jumpTo(item.pageIdx.toInt())
-                        viewModel.setCurrentPage(item.pageIdx.toInt())
-                        snackbarHostState.showSnackbar("الصفحة ${item.pageIdx + 1} — ${item.title}")
-                    }
-                }
-            )
-        }
-    ) {
-        Box(
-            modifier = modifier
-                .fillMaxSize()
-                .background(
-                    when (readingMode) {
-                        "night" -> Color(0xFF16161A)
-                        "sepia" -> Color(0xFFF5E6C8)
-                        else -> Color(0xFF13131A)
+            if (!isAdaptive) {
+                BookmarkDrawer(
+                    pdfUri = activeUri ?: "",
+                    currentPage = currentPage,
+                    totalPages = totalPages,
+                    pageBookmarks = pageBookmarks,
+                    audioBookmarks = audioBookmarks,
+                    pdfViewInst = pdfViewInst,
+                    tableOfContents = tableOfContents,
+                    onJumpToPage = { index -> viewModel.jumpToPage(index) },
+                    onAddBookmark = { label -> viewModel.addPageBookmark(activeUri ?: "", currentPage + 1, label) },
+                    onDeleteBookmark = { bookmark -> viewModel.deletePageBookmark(bookmark.fileUri, bookmark.pageNumber) },
+                    onAddAudioBookmark = { ab -> viewModel.insertAudioBookmark(ab) },
+                    onDeleteAudioBookmark = { ab -> viewModel.deleteAudioBookmark(ab.id) },
+                    onCloseDrawer = { coroutineScope.launch { drawerState.close() } },
+                    onTocItemClicked = { item ->
+                        coroutineScope.launch {
+                            drawerState.close()
+                            pdfViewInst?.jumpTo(item.pageIdx.toInt())
+                            viewModel.setCurrentPage(item.pageIdx.toInt())
+                            snackbarHostState.showSnackbar("الصفحة ${item.pageIdx + 1} — ${item.title}")
+                        }
                     }
                 )
-        ) {
+            } else {
+                Spacer(modifier = Modifier.size(1.dp))
+            }
+        }
+    ) {
+        val sidebarWidth = if (isExpanded) 320.dp else if (isMedium) 280.dp else 0.dp
+        Box(modifier = modifier.fillMaxSize()) {
+            if (isAdaptive) {
+                Row(
+                    modifier = Modifier
+                        .width(sidebarWidth)
+                        .fillMaxHeight()
+                        .background(Color(0xFF0D0D11))
+                        .align(Alignment.CenterStart)
+                ) {
+                    if (isExpanded) {
+                        Column(
+                            modifier = Modifier
+                                .width(56.dp)
+                                .fillMaxHeight()
+                                .background(Color(0xFF13131A))
+                                .padding(vertical = 12.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            IconButton(onClick = {
+                                isSearching = !isSearching
+                                if (!isSearching) {
+                                    pdfViewInst?.resetSearch()
+                                    searchQuery = ""
+                                    searchMatches = emptyList()
+                                    totalSearchMatches = 0
+                                    currentSearchMatchIndex = 0
+                                }
+                            }) {
+                                Icon(
+                                    imageVector = Icons.Default.Search,
+                                    contentDescription = "Search",
+                                    tint = if (isSearching) MaterialTheme.colorScheme.primary else Color.White
+                                )
+                            }
+                            IconButton(onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                viewModel.toggleCurrentPageBookmark()
+                            }) {
+                                Icon(
+                                    imageVector = if (isPageBookmarked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                                    contentDescription = "Bookmark Page",
+                                    tint = if (isPageBookmarked) MaterialTheme.colorScheme.primary else Color.White
+                                )
+                            }
+                            IconButton(onClick = { showReadingModeBottomSheet = true }) {
+                                Icon(
+                                    imageVector = Icons.Default.Brightness6,
+                                    contentDescription = "Reading Mode",
+                                    tint = Color.White
+                                )
+                            }
+                            IconButton(onClick = { showFileInfoDialog = true }) {
+                                Icon(
+                                    imageVector = Icons.Default.Info,
+                                    contentDescription = "File Info",
+                                    tint = Color.White
+                                )
+                            }
+                            IconButton(onClick = { showCompressionBottomSheet = true }) {
+                                Icon(
+                                    imageVector = Icons.Default.Compress,
+                                    contentDescription = "Compress",
+                                    tint = Color.White
+                                )
+                            }
+                            IconButton(onClick = {
+                                pdfViewInst?.let { pdfView ->
+                                    val proposedZoom = (pdfView.zoom + 0.5f).coerceAtMost(4.0f)
+                                    pdfView.zoomWithAnimation(proposedZoom)
+                                    zoomLevel = proposedZoom
+                                }
+                            }) {
+                                Icon(
+                                    imageVector = Icons.Default.ZoomIn,
+                                    contentDescription = "Zoom In",
+                                    tint = Color.White
+                                )
+                            }
+                            IconButton(onClick = {
+                                pdfViewInst?.let { pdfView ->
+                                    val proposedZoom = (pdfView.zoom - 0.5f).coerceAtLeast(0.5f)
+                                    pdfView.zoomWithAnimation(proposedZoom)
+                                    zoomLevel = proposedZoom
+                                }
+                            }) {
+                                Icon(
+                                    imageVector = Icons.Default.ZoomOut,
+                                    contentDescription = "Zoom Out",
+                                    tint = Color.White
+                                )
+                            }
+                            IconButton(onClick = { showJumpDialog = true }) {
+                                Icon(
+                                    imageVector = Icons.Default.FindInPage,
+                                    contentDescription = "Jump to page",
+                                    tint = Color.White
+                                )
+                            }
+                        }
+
+                        Spacer(
+                            modifier = Modifier
+                                .width(1.dp)
+                                .fillMaxHeight()
+                                .background(Color(0xFF202025))
+                        )
+                    }
+
+                    Box(modifier = Modifier.weight(1f)) {
+                        BookmarkDrawer(
+                            pdfUri = activeUri ?: "",
+                            currentPage = currentPage,
+                            totalPages = totalPages,
+                            pageBookmarks = pageBookmarks,
+                            audioBookmarks = audioBookmarks,
+                            pdfViewInst = pdfViewInst,
+                            tableOfContents = tableOfContents,
+                            onJumpToPage = { index -> viewModel.jumpToPage(index) },
+                            onAddBookmark = { label -> viewModel.addPageBookmark(activeUri ?: "", currentPage + 1, label) },
+                            onDeleteBookmark = { bookmark -> viewModel.deletePageBookmark(bookmark.fileUri, bookmark.pageNumber) },
+                            onAddAudioBookmark = { ab -> viewModel.insertAudioBookmark(ab) },
+                            onDeleteAudioBookmark = { ab -> viewModel.deleteAudioBookmark(ab.id) },
+                            onCloseDrawer = {},
+                            onTocItemClicked = { item ->
+                                coroutineScope.launch {
+                                    pdfViewInst?.jumpTo(item.pageIdx.toInt())
+                                    viewModel.setCurrentPage(item.pageIdx.toInt())
+                                }
+                            }
+                        )
+                    }
+                }
+
+                Spacer(
+                    modifier = Modifier
+                        .width(1.dp)
+                        .fillMaxHeight()
+                        .background(Color(0xFF202025))
+                        .align(Alignment.CenterStart)
+                        .padding(start = sidebarWidth)
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(start = if (isAdaptive) sidebarWidth + 1.dp else 0.dp)
+                    .background(
+                        when (readingMode) {
+                            "night" -> Color(0xFF16161A)
+                            "sepia" -> Color(0xFFF5E6C8)
+                            else -> Color(0xFF13131A)
+                        }
+                    )
+            ) {
             if (activeUri != null) {
                 // Interactive PDF Container
                 Box(
@@ -1965,7 +2121,7 @@ fun ViewerScreen(
 
                 // Overlay BottomReaderBar with Tween slide vertical animations (300ms)
                 AnimatedVisibility(
-                    visible = isToolbarVisible,
+                    visible = isToolbarVisible && !isExpanded,
                     enter = slideInVertically(
                         initialOffsetY = { it },
                         animationSpec = tween(durationMillis = 300)
@@ -4094,6 +4250,7 @@ fun ViewerScreen(
                     }
                 )
             }
+        }
         }
     }
 }

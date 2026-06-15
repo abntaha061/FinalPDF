@@ -34,6 +34,8 @@ import kotlinx.coroutines.launch
 import java.io.File
 import kotlin.math.roundToInt
 
+import androidx.compose.ui.draw.alpha
+
 @Composable
 fun SettingsScreen(navController: androidx.navigation.NavController) {
     val context = LocalContext.current
@@ -78,6 +80,7 @@ fun SettingsScreen(
 
     val defaultReadingMode by viewModel.defaultReadingMode.collectAsState()
     val primaryColorHex by viewModel.primaryColorHex.collectAsState()
+    val dynamicColor by viewModel.dynamicColor.collectAsState()
     val uiFontSize by viewModel.uiFontSize.collectAsState()
     val autoSavePosition by viewModel.autoSavePosition.collectAsState()
     val showPageIndicator by viewModel.showPageIndicator.collectAsState()
@@ -282,6 +285,50 @@ fun SettingsScreen(
                                 .size(24.dp)
                                 .background(parsedColor, CircleShape)
                                 .border(1.dp, Color.White, CircleShape)
+                        )
+                    }
+                }
+
+                // Setting: الألوان الديناميكية (Material You)
+                item {
+                    val isAndroid12Plus = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S
+                    val subtitle = if (isAndroid12Plus) "يستخدم ألوان خلفية شاشتك" else "يتطلب Android 12 أو أحدث"
+                    val itemAlpha = if (isAndroid12Plus) 1.0f else 0.5f
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(64.dp)
+                            .padding(horizontal = 16.dp)
+                            .alpha(itemAlpha)
+                            .clickable(enabled = isAndroid12Plus) {
+                                viewModel.setDynamicColor(!dynamicColor)
+                            },
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Default.Palette,
+                                contentDescription = null,
+                                tint = if (isAndroid12Plus) MaterialTheme.colorScheme.primary else Color.Gray,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Column {
+                                Text("الألوان الديناميكية (Material You)", color = AppTextPrimary, fontSize = 15.sp)
+                                Text(subtitle, color = AppTextSecondary, fontSize = 12.sp)
+                            }
+                        }
+
+                        Switch(
+                            checked = if (isAndroid12Plus) dynamicColor else false,
+                            onCheckedChange = { viewModel.setDynamicColor(it) },
+                            enabled = isAndroid12Plus,
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = MaterialTheme.colorScheme.primary,
+                                checkedTrackColor = MaterialTheme.colorScheme.primary.copy(0.3f),
+                            )
                         )
                     }
                 }

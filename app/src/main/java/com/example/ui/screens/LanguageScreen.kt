@@ -115,22 +115,27 @@ fun LanguageScreen(
                                     // Set app language value in viewModel (DataStore)
                                     viewModel.setAppLanguage(localeCode)
 
-                                    val locale = Locale(localeCode)
-                                    Locale.setDefault(locale)
-                                    val resources = context.resources
-                                    val config = resources.configuration
-                                    config.setLocale(locale)
-                                    resources.updateConfiguration(config, resources.displayMetrics)
+                                    if (android.os.Build.VERSION.SDK_INT >= 33) {
+                                        val localeManager = context.getSystemService(android.app.LocaleManager::class.java)
+                                        localeManager?.applicationLocales = android.os.LocaleList.forLanguageTags(localeCode)
+                                    } else {
+                                        val locale = Locale(localeCode)
+                                        Locale.setDefault(locale)
+                                        val resources = context.resources
+                                        val config = resources.configuration
+                                        config.setLocale(locale)
+                                        resources.updateConfiguration(config, resources.displayMetrics)
 
-                                    // Restart MainActivity
-                                    val intent = Intent(context, MainActivity::class.java).apply {
-                                        addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK or Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        // Restart MainActivity
+                                        val intent = Intent(context, MainActivity::class.java).apply {
+                                            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK or Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        }
+                                        context.startActivity(intent)
+                                        if (context is Activity) {
+                                            context.finish()
+                                        }
+                                        Runtime.getRuntime().exit(0)
                                     }
-                                    context.startActivity(intent)
-                                    if (context is Activity) {
-                                        context.finish()
-                                    }
-                                    Runtime.getRuntime().exit(0)
                                 }
                             }
                     ) {
@@ -165,21 +170,26 @@ fun LanguageScreen(
                                     if (appLanguage != localeCode) {
                                         viewModel.setAppLanguage(localeCode)
 
-                                        val locale = Locale(localeCode)
-                                        Locale.setDefault(locale)
-                                        val resources = context.resources
-                                        val config = resources.configuration
-                                        config.setLocale(locale)
-                                        resources.updateConfiguration(config, resources.displayMetrics)
+                                        if (android.os.Build.VERSION.SDK_INT >= 33) {
+                                            val localeManager = context.getSystemService(android.app.LocaleManager::class.java)
+                                            localeManager?.applicationLocales = android.os.LocaleList.forLanguageTags(localeCode)
+                                        } else {
+                                            val locale = Locale(localeCode)
+                                            Locale.setDefault(locale)
+                                            val resources = context.resources
+                                            val config = resources.configuration
+                                            config.setLocale(locale)
+                                            resources.updateConfiguration(config, resources.displayMetrics)
 
-                                        val intent = Intent(context, MainActivity::class.java).apply {
-                                            addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK or Intent.FLAG_ACTIVITY_NEW_TASK)
+                                            val intent = Intent(context, MainActivity::class.java).apply {
+                                                addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK or Intent.FLAG_ACTIVITY_NEW_TASK)
+                                            }
+                                            context.startActivity(intent)
+                                            if (context is Activity) {
+                                                context.finish()
+                                            }
+                                            Runtime.getRuntime().exit(0)
                                         }
-                                        context.startActivity(intent)
-                                        if (context is Activity) {
-                                            context.finish()
-                                        }
-                                        Runtime.getRuntime().exit(0)
                                     }
                                 },
                                 colors = RadioButtonDefaults.colors(

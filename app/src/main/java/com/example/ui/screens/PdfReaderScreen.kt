@@ -25,6 +25,27 @@ fun PdfReaderScreen(
         androidx.lifecycle.ViewModelProvider(activity)[PdfViewModel::class.java]
     }
 
+    if (android.os.Build.VERSION.SDK_INT >= 34) {
+        val activity = context as? androidx.activity.ComponentActivity
+        if (activity != null) {
+            val dispatcher = activity.onBackInvokedDispatcher
+            val callback = remember {
+                android.window.OnBackInvokedCallback {
+                    navController.popBackStack()
+                }
+            }
+            DisposableEffect(dispatcher, callback) {
+                dispatcher.registerOnBackInvokedCallback(
+                    android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,
+                    callback
+                )
+                onDispose {
+                    dispatcher.unregisterOnBackInvokedCallback(callback)
+                }
+            }
+        }
+    }
+
     LaunchedEffect(uri) {
         val parsedUri = Uri.parse(uri)
         viewModel.selectDocument(context, parsedUri)

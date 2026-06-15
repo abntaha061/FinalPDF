@@ -94,6 +94,32 @@ fun WebViewScreen(
     val viewModel = remember { WebStateHolder(initialUrl) }
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
 
+    if (android.os.Build.VERSION.SDK_INT >= 34) {
+        val activity = context as? androidx.activity.ComponentActivity
+        if (activity != null) {
+            val dispatcher = activity.onBackInvokedDispatcher
+            val callback = remember(webViewInstance) {
+                android.window.OnBackInvokedCallback {
+                    val webView = webViewInstance
+                    if (webView != null && webView.canGoBack()) {
+                        webView.goBack()
+                    } else {
+                        onBack()
+                    }
+                }
+            }
+            DisposableEffect(dispatcher, callback) {
+                dispatcher.registerOnBackInvokedCallback(
+                    android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,
+                    callback
+                )
+                onDispose {
+                    dispatcher.unregisterOnBackInvokedCallback(callback)
+                }
+            }
+        }
+    }
+
     // Handle system back navigation (override default back)
     BackHandler(enabled = true) {
         val webView = webViewInstance

@@ -67,6 +67,22 @@ import androidx.compose.animation.core.tween
 import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.material3.LocalTextStyle
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.border
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material3.Icon
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.unit.dp
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.map
@@ -79,6 +95,7 @@ private val APP_LANGUAGE_KEY = androidx.datastore.preferences.core.stringPrefere
 
 class MainActivity : ComponentActivity() {
 
+    private lateinit var viewModel: PdfViewModel
     private val database by lazy { AppDatabase.getDatabase(this) }
     private val repository by lazy { PdfRepository(database.recentFileDao(), database.bookmarkDao(), database.highlightDao(), database.readingSessionDao(), database.ocrResultDao(), database.audioBookmarkDao()) }
 
@@ -127,7 +144,7 @@ class MainActivity : ComponentActivity() {
             enableEdgeToEdge()
 
             // Core modern ViewModel instantiation passing context
-            val viewModel = ViewModelProvider(
+            viewModel = ViewModelProvider(
                 this,
                 PdfViewModelFactory(repository, this.applicationContext)
             )[PdfViewModel::class.java]
@@ -160,9 +177,11 @@ class MainActivity : ComponentActivity() {
                 val isOnboardingCompleted by viewModel.isOnboardingDone.collectAsState()
                 val primaryColorHex by viewModel.primaryColorHex.collectAsState()
                 val uiFontSize by viewModel.uiFontSize.collectAsState()
+                val dynamicColorState by viewModel.dynamicColor.collectAsState()
                 
                 MyApplicationTheme(
                     darkTheme = isNightModeBySettings,
+                    dynamicColor = dynamicColorState,
                     primaryColorHex = primaryColorHex
                 ) {
                     CompositionLocalProvider(
@@ -342,7 +361,56 @@ class MainActivity : ComponentActivity() {
                             )
                         }
 
-                        com.example.ui.navigation.AppNavGraph(navController = navController)
+                        val isDragging by viewModel.isDragging.collectAsState()
+                        val pendingDragDropUri by viewModel.pendingDragDropUri.collectAsState()
+
+                        LaunchedEffect(pendingDragDropUri) {
+                            pendingDragDropUri?.let { uriStr ->
+                                viewModel.setPendingDragDropUri(null)
+                                val currentRoute = navController.currentBackStackEntry?.destination?.route ?: ""
+                                if (!currentRoute.startsWith("pdf_reader")) {
+                                    val encodedUri = Uri.encode(uriStr)
+                                    navController.navigate(com.example.ui.navigation.Screen.PdfReader.createRoute(encodedUri))
+                                }
+                            }
+                        }
+
+                        Box(modifier = Modifier.fillMaxSize()) {
+                            com.example.ui.navigation.AppNavGraph(navController = navController)
+
+                            if (isDragging) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(Color.Black.copy(alpha = 0.6f))
+                                        .padding(40.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f), RoundedCornerShape(16.dp))
+                                            .border(3.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(16.dp)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Icon(
+                                                imageVector = Icons.Default.PictureAsPdf,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(64.dp)
+                                            )
+                                            Spacer(modifier = Modifier.height(16.dp))
+                                            Text(
+                                                text = "أفلت ملف PDF هنا",
+                                                color = MaterialTheme.colorScheme.primary,
+                                                fontSize = 20.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -351,5 +419,88 @@ class MainActivity : ComponentActivity() {
 } catch (e: Exception) {
     android.util.Log.e("MainActivity", "Error in onCreate body execution", e)
 }
+
+    try {
+        setupDragAndDropListener()
+        handleIntent(intent)
+    } catch (e: Exception) {
+        android.util.Log.e("MainActivity", "Error in onCreate post-setContent execution", e)
+    }
+}
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIntent(intent)
+    }
+
+    private fun handleIntent(intent: Intent?) {
+        if (intent == null) return
+        val action = intent.action
+        if (action == Intent.ACTION_VIEW || action == Intent.ACTION_SEND) {
+            val uri = if (action == Intent.ACTION_SEND) {
+                if (android.os.Build.VERSION.SDK_INT >= 33) {
+                    intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableExtra(Intent.EXTRA_STREAM) as? Uri
+                }
+            } else {
+                intent.data
+            }
+
+            if (uri != null) {
+                try {
+                    val takeFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    contentResolver.takePersistableUriPermission(uri, takeFlags)
+                } catch (e: Exception) {
+                    // ignore
+                }
+                viewModel.selectDocument(this, uri)
+                viewModel.setPendingDragDropUri(uri.toString())
+            }
+        }
+    }
+
+    private fun setupDragAndDropListener() {
+        val rootView = window.decorView.rootView
+        rootView.setOnDragListener { _, event ->
+            when (event.action) {
+                android.view.DragEvent.ACTION_DRAG_STARTED -> {
+                    true
+                }
+                android.view.DragEvent.ACTION_DRAG_ENTERED -> {
+                    viewModel.setIsDragging(true)
+                    true
+                }
+                android.view.DragEvent.ACTION_DRAG_EXITED -> {
+                    viewModel.setIsDragging(false)
+                    true
+                }
+                android.view.DragEvent.ACTION_DRAG_ENDED -> {
+                    viewModel.setIsDragging(false)
+                    true
+                }
+                android.view.DragEvent.ACTION_DROP -> {
+                    viewModel.setIsDragging(false)
+                    val clipData = event.clipData
+                    if (clipData != null && clipData.itemCount > 0) {
+                        val uri = clipData.getItemAt(0).uri
+                        if (uri != null) {
+                            try {
+                                val takeFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                contentResolver.takePersistableUriPermission(uri, takeFlags)
+                            } catch (e: Exception) {
+                                // ignore
+                            }
+                            viewModel.selectDocument(this, uri)
+                            viewModel.setPendingDragDropUri(uri.toString())
+                            true
+                        } else false
+                    } else false
+                }
+                else -> true
+            }
+        }
     }
 }

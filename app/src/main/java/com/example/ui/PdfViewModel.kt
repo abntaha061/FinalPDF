@@ -50,6 +50,7 @@ private val LINK_OPEN_MODE_KEY = androidx.datastore.preferences.core.stringPrefe
 private val AUTO_PLAY_AUDIO_KEY = booleanPreferencesKey("auto_play_audio")
 private val AUDIO_VOLUME_KEY = androidx.datastore.preferences.core.floatPreferencesKey("audio_volume")
 private val APP_LANGUAGE_KEY = androidx.datastore.preferences.core.stringPreferencesKey("app_language")
+private val DYNAMIC_COLOR_KEY = booleanPreferencesKey("dynamic_color")
 
 private val READING_SCROLL_MODE_KEY = androidx.datastore.preferences.core.stringPreferencesKey("reading_scroll_mode")
 private val FIT_MODE_KEY = androidx.datastore.preferences.core.stringPreferencesKey("fit_mode")
@@ -222,6 +223,9 @@ class PdfViewModel(
     private val _primaryColorHex = MutableStateFlow("#6C63FF")
     val primaryColorHex: StateFlow<String> = _primaryColorHex.asStateFlow()
 
+    private val _dynamicColor = MutableStateFlow(true)
+    val dynamicColor: StateFlow<Boolean> = _dynamicColor.asStateFlow()
+
     private val _uiFontSize = MutableStateFlow(15f)
     val uiFontSize: StateFlow<Float> = _uiFontSize.asStateFlow()
 
@@ -248,6 +252,20 @@ class PdfViewModel(
 
     private val _appLanguage = MutableStateFlow("ar")
     val appLanguage: StateFlow<String> = _appLanguage.asStateFlow()
+
+    private val _isDragging = MutableStateFlow(false)
+    val isDragging: StateFlow<Boolean> = _isDragging.asStateFlow()
+
+    private val _pendingDragDropUri = MutableStateFlow<String?>(null)
+    val pendingDragDropUri: StateFlow<String?> = _pendingDragDropUri.asStateFlow()
+
+    fun setIsDragging(dragging: Boolean) {
+        _isDragging.value = dragging
+    }
+
+    fun setPendingDragDropUri(uri: String?) {
+        _pendingDragDropUri.value = uri
+    }
 
     private val _gestureMappings = MutableStateFlow<Map<com.example.data.GestureType, com.example.data.GestureAction>>(com.example.data.defaultGestures)
     val gestureMappings: StateFlow<Map<com.example.data.GestureType, com.example.data.GestureAction>> = _gestureMappings.asStateFlow()
@@ -421,6 +439,7 @@ class PdfViewModel(
                 _filterMaxPages.value = preferences[FILTER_MAX_PAGES_KEY] ?: 500
                 _filterDateRange.value = preferences[FILTER_DATE_RANGE_KEY] ?: "الكل"
                 _appLanguage.value = preferences[APP_LANGUAGE_KEY] ?: "ar"
+                _dynamicColor.value = preferences[DYNAMIC_COLOR_KEY] ?: true
 
                 val gestureJson = preferences[GESTURE_MAPPINGS_KEY]
                 _gestureMappings.value = com.example.data.GestureSerializer.deserialize(gestureJson)
@@ -640,6 +659,14 @@ class PdfViewModel(
         viewModelScope.launch {
             context.dataStore.edit { preferences ->
                 preferences[PRIMARY_COLOR_KEY] = hex
+            }
+        }
+    }
+
+    fun setDynamicColor(enabled: Boolean) {
+        viewModelScope.launch {
+            context.dataStore.edit { preferences ->
+                preferences[DYNAMIC_COLOR_KEY] = enabled
             }
         }
     }

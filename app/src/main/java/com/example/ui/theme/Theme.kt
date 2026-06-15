@@ -38,9 +38,38 @@ private val LightColorScheme = lightColorScheme(
 )
 
 @Composable
+fun AppTheme(
+    darkTheme: Boolean = isSystemInDarkTheme(),
+    dynamicColor: Boolean = true,
+    content: @Composable () -> Unit
+) {
+    val colorScheme = when {
+        // Dynamic color from wallpaper (Android 12+)
+        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+            val context = LocalContext.current
+            if (darkTheme) dynamicDarkColorScheme(context)
+            else dynamicLightColorScheme(context)
+        }
+        // Fallback to custom dark theme
+        darkTheme -> darkColorScheme(
+            primary = Color(0xFF6C63FF),
+            secondary = Color(0xFF4ECDC4),
+            background = Color(0xFF0D0D0F),
+            surface = Color(0xFF1A1A1F)
+        )
+        else -> lightColorScheme(
+            primary = Color(0xFF6C63FF),
+            background = Color(0xFFF5F5F8),
+            surface = Color(0xFFFFFFFF)
+        )
+    }
+    MaterialTheme(colorScheme = colorScheme, content = content)
+}
+
+@Composable
 fun MyApplicationTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = false, // Disable to preserve custom brand styles
+    dynamicColor: Boolean = true, // Enabled by default as requested
     primaryColorHex: String? = null,
     content: @Composable () -> Unit,
 ) {

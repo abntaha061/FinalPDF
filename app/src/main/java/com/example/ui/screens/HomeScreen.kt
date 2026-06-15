@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -209,67 +211,242 @@ fun HomeScreenRealFiles(
     val lastOpenedName = lastOpenedDoc?.name ?: "—"
     val lastOpenedPages = lastOpenedDoc?.totalPages?.let { if (it > 0) "$it" else "—" } ?: "—"
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        // 2. Row of 3 Stat Cards
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            StatCard(
-                title = "الملفات المفتوحة",
-                value = "$totalPdfs",
-                icon = Icons.Default.FolderOpen,
-                iconColor = AppPrimary,
-                modifier = Modifier.weight(1f)
-            )
-            StatCard(
-                title = "آخر فتح",
-                value = lastOpenedName,
-                icon = Icons.Default.RemoveRedEye,
-                iconColor = AppPrimaryVariant,
-                modifier = Modifier.weight(1.2f)
-            )
-            StatCard(
-                title = "الصفحات",
-                value = lastOpenedPages,
-                icon = Icons.Default.MenuBook,
-                iconColor = AppPrimary,
-                modifier = Modifier.weight(1f)
-            )
+    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+    val screenWidth = configuration.screenWidthDp
+    val isMedium = screenWidth in 600..839
+    val isExpanded = screenWidth >= 840
+
+    if (isExpanded) {
+        var selectedPdfUri by rememberSaveable { mutableStateOf<String?>(null) }
+        LaunchedEffect(recentPdfs) {
+            if (selectedPdfUri == null || recentPdfs.none { it.uri == selectedPdfUri }) {
+                selectedPdfUri = recentPdfs.firstOrNull()?.uri
+            }
         }
 
-        Spacer(modifier = Modifier.height(28.dp))
-
-        // Recent files title
-        Text(
-            text = "الملفات الأخيرة",
-            color = AppTextPrimary,
-            fontWeight = FontWeight.Bold,
-            fontSize = 18.sp,
-            modifier = Modifier.padding(bottom = 12.dp)
-        )
-
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(2),
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
+        Row(
+            modifier = Modifier.fillMaxSize(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            items(recentPdfs, key = { it.uri }) { pdf ->
-                PdfGridCard(
-                    pdf = pdf,
-                    onClick = {
-                        val uri = Uri.parse(pdf.uri)
-                        viewModel.selectDocument(context, uri)
-                        onPdfOpened(uri)
-                    },
-                    onLongClick = {
-                        // Optional submenu or delete
-                        viewModel.deleteDocument(pdf.uri)
-                    }
+            // Left list of files
+            Column(
+                modifier = Modifier
+                    .width(360.dp)
+                    .fillMaxHeight()
+            ) {
+                Text(
+                    text = "الملفات الأخيرة",
+                    color = AppTextPrimary,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    modifier = Modifier.padding(bottom = 12.dp)
                 )
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(recentPdfs, key = { it.uri }) { pdf ->
+                        val isSelected = selectedPdfUri == pdf.uri
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.15f) else AppSurface,
+                                    RoundedCornerShape(12.dp)
+                                )
+                                .border(
+                                    1.dp,
+                                    if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent,
+                                    RoundedCornerShape(12.dp)
+                                )
+                                .clickable {
+                                    selectedPdfUri = pdf.uri
+                                }
+                                .padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            PdfThumbnail(
+                                pdfUriString = pdf.uri,
+                                modifier = Modifier
+                                    .size(44.dp, 56.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = pdf.name,
+                                    color = AppTextPrimary,
+                                    fontSize = 14.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = "الصفحات: ${pdf.totalPages}",
+                                    color = AppTextSecondary,
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Right PDF preview
+            val selectedPdf = recentPdfs.find { it.uri == selectedPdfUri } ?: recentPdfs.firstOrNull()
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .background(AppSurface, RoundedCornerShape(16.dp))
+                    .border(1.dp, Color(0xFF202025), RoundedCornerShape(16.dp))
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                if (selectedPdf != null) {
+                    PdfThumbnail(
+                        pdfUriString = selectedPdf.uri,
+                        modifier = Modifier
+                            .width(180.dp)
+                            .height(240.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))
+                    )
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Text(
+                        text = selectedPdf.name,
+                        color = AppTextPrimary,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "الموقع: ${selectedPdf.uri}",
+                        color = AppTextSecondary,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(24.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("الصفحات", color = AppTextSecondary, fontSize = 12.sp)
+                            Text("${selectedPdf.totalPages}", color = AppTextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("تاريخ إضافة", color = AppTextSecondary, fontSize = 12.sp)
+                            Text(
+                                java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date(selectedPdf.lastOpenedAt)),
+                                color = AppTextPrimary,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Button(
+                        onClick = {
+                            val uri = Uri.parse(selectedPdf.uri)
+                            viewModel.selectDocument(context, uri)
+                            onPdfOpened(uri)
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.primary
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth(0.6f)
+                            .height(48.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.MenuBook, contentDescription = null, tint = Color.White)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("قراءة وفتح الملف", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    }
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.PictureAsPdf,
+                        contentDescription = null,
+                        tint = AppTextSecondary.copy(alpha = 0.3f),
+                        modifier = Modifier.size(64.dp)
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("لم يتم تحديد مستند بعد", color = AppTextSecondary, fontSize = 16.sp)
+                }
+            }
+        }
+    } else {
+        Column(modifier = Modifier.fillMaxSize()) {
+            // Row of 3 Stat Cards
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                StatCard(
+                    title = "الملفات المفتوحة",
+                    value = "$totalPdfs",
+                    icon = Icons.Default.FolderOpen,
+                    iconColor = AppPrimary,
+                    modifier = Modifier.weight(1f)
+                )
+                StatCard(
+                    title = "آخر فتح",
+                    value = lastOpenedName,
+                    icon = Icons.Default.RemoveRedEye,
+                    iconColor = AppPrimaryVariant,
+                    modifier = Modifier.weight(1.2f)
+                )
+                StatCard(
+                    title = "الصفحات",
+                    value = lastOpenedPages,
+                    icon = Icons.Default.MenuBook,
+                    iconColor = AppPrimary,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(28.dp))
+
+            // Recent files title
+            Text(
+                text = "الملفات الأخيرة",
+                color = AppTextPrimary,
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp,
+                modifier = Modifier.padding(bottom = 12.dp)
+            )
+
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(if (isMedium) 3 else 2),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+            ) {
+                items(recentPdfs, key = { it.uri }) { pdf ->
+                    PdfGridCard(
+                        pdf = pdf,
+                        onClick = {
+                            val uri = Uri.parse(pdf.uri)
+                            viewModel.selectDocument(context, uri)
+                            onPdfOpened(uri)
+                        },
+                        onLongClick = {
+                            viewModel.deleteDocument(pdf.uri)
+                        }
+                    )
+                }
             }
         }
     }
