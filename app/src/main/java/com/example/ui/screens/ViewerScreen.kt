@@ -26,7 +26,6 @@ import com.tom_roush.pdfbox.pdmodel.graphics.image.LosslessFactory
 import com.tom_roush.pdfbox.pdmodel.graphics.image.JPEGFactory
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
-import com.google.mlkit.vision.text.arabic.ArabicTextRecognizerOptions
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import org.json.JSONArray
@@ -95,6 +94,8 @@ import com.example.ui.components.BookmarkDrawer
 import com.example.ui.theme.*
 import com.example.util.PdfPrintAdapter
 import com.example.util.PdfDocumentAdapter
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -128,7 +129,8 @@ fun ViewerScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     onNavigateToWebView: ((String) -> Unit)? = null,
-    onNavigateToReader: ((String) -> Unit)? = null
+    onNavigateToReader: ((String) -> Unit)? = null,
+    onNavigateToSignature: (() -> Unit)? = null
 ) {
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -202,6 +204,22 @@ fun ViewerScreen(
     var showOcrSearchDialog by remember { mutableStateOf(false) }
     var ocrSearchQuery by remember { mutableStateOf("") }
     var ocrSearchResults by remember { mutableStateOf<List<Pair<Int, String>>>(emptyList()) }
+
+    // Redaction and Signature Overlay States
+    val savedSignaturePath by viewModel.savedSignaturePath.collectAsState()
+    var isSignaturePlacingModeActive by remember { mutableStateOf(false) }
+    var signatureX by remember { mutableStateOf(150f) }
+    var signatureY by remember { mutableStateOf(250f) }
+    var signatureWidth by remember { mutableStateOf(180f) }
+    var signatureHeight by remember { mutableStateOf(90f) }
+    var containerWidth by remember { mutableStateOf(1f) }
+    var containerHeight by remember { mutableStateOf(1f) }
+
+    var isRedactModeActive by remember { mutableStateOf(false) }
+    val redactRects = remember { mutableStateListOf<androidx.compose.ui.geometry.Rect>() }
+    var currentRedactStart by remember { mutableStateOf<Offset?>(null) }
+    var currentRedactEnd by remember { mutableStateOf<Offset?>(null) }
+    var showRedactWarningDialog by remember { mutableStateOf(false) }
 
     // Read OCR database entry on load
     LaunchedEffect(activeUri) {
@@ -287,11 +305,19 @@ fun ViewerScreen(
                     val pageTextsList = mutableListOf<String>()
                     val jsonPageTexts = org.json.JSONArray()
 
-                    val recognizer = if (language == "en") {
-                        TextRecognition.getClient(com.google.mlkit.vision.text.latin.TextRecognizerOptions.DEFAULT_OPTIONS)
+                    val options = if (language == "en") {
+                        com.google.mlkit.vision.text.latin.TextRecognizerOptions.DEFAULT_OPTIONS
                     } else {
-                        TextRecognition.getClient(com.google.mlkit.vision.text.arabic.ArabicTextRecognizerOptions.Builder().build())
+                        try {
+                            val clazz = Class.forName("com.google.mlkit.vision.text.arabic.ArabicTextRecognizerOptions\$Builder")
+                            val builder = clazz.getDeclaredConstructor().newInstance()
+                            val buildMethod = clazz.getMethod("build")
+                            buildMethod.invoke(builder) as com.google.mlkit.vision.text.TextRecognizerOptionsInterface
+                        } catch (e: Exception) {
+                            com.google.mlkit.vision.text.latin.TextRecognizerOptions.DEFAULT_OPTIONS
+                        }
                     }
+                    val recognizer = TextRecognition.getClient(options)
 
                     try {
                         for (i in 0 until totalPages) {
@@ -854,6 +880,10 @@ fun ViewerScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
+                        .onGloballyPositioned { coordinates ->
+                            containerWidth = if (coordinates.size.width > 0) coordinates.size.width.toFloat() else 1f
+                            containerHeight = if (coordinates.size.height > 0) coordinates.size.height.toFloat() else 1f
+                        }
                         .testTag("pdf_viewer_container")
                 ) {
                     if (errorState != null) {
@@ -2168,6 +2198,16 @@ fun ViewerScreen(
                             showOcrSearchDialog = true
                             ocrSearchQuery = ""
                             ocrSearchResults = emptyList()
+                        },
+                        onAddSignatureClick = {
+                            if (savedSignaturePath != null) {
+                                isSignaturePlacingModeActive = true
+                            } else {
+                                onNavigateToSignature?.invoke()
+                            }
+                        },
+                        onRedactModeClick = {
+                            isRedactModeActive = true
                         }
                     )
                 }
@@ -3462,6 +3502,401 @@ fun ViewerScreen(
                     }
                 }
             )
+
+            // Dynamic Digital Signature Placement Overlay
+            if (isSignaturePlacingModeActive) {
+                val sigFile = savedSignaturePath?.let { File(it) }
+                if (sigFile != null && sigFile.exists()) {
+                    val bitmap = remember(savedSignaturePath) { BitmapFactory.decodeFile(savedSignaturePath) }
+                    if (bitmap != null) {
+                        val imageBitmap = remember(bitmap) { bitmap.asImageBitmap() }
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Black.copy(alpha = 0.40f))
+                                .testTag("signature_placement_overlay")
+                        ) {
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = AppPrimary),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier
+                                    .align(Alignment.TopCenter)
+                                    .padding(top = 80.dp, start = 16.dp, end = 16.dp)
+                                    .fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(14.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Info,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Text(
+                                        text = "اضغط على أي مكان في الصفحة لوضع التوقيع، ثم وجهه وتحكم بمساحته.",
+                                        color = Color.White,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Medium
+                                    )
+                                }
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .offset { IntOffset(signatureX.toInt(), signatureY.toInt()) }
+                                    .size(signatureWidth.dp, signatureHeight.dp)
+                                    .border(2.dp, AppPrimary, RoundedCornerShape(4.dp))
+                                    .pointerInput(Unit) {
+                                        detectDragGestures { change, dragAmount ->
+                                            change.consume()
+                                            signatureX += dragAmount.x
+                                            signatureY += dragAmount.y
+                                        }
+                                    }
+                            ) {
+                                androidx.compose.foundation.Image(
+                                    bitmap = imageBitmap,
+                                    contentDescription = "Signature Preview",
+                                    modifier = Modifier.fillMaxSize()
+                                )
+
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.TopStart)
+                                        .offset((-6).dp, (-6).dp)
+                                        .size(14.dp)
+                                        .background(Color.White, CircleShape)
+                                        .border(2.dp, AppPrimary, CircleShape)
+                                        .pointerInput(Unit) {
+                                            detectDragGestures { change, dragAmount ->
+                                                change.consume()
+                                                signatureX += dragAmount.x
+                                                signatureY += dragAmount.y
+                                                signatureWidth = (signatureWidth - dragAmount.x).coerceAtLeast(40f)
+                                                signatureHeight = (signatureHeight - dragAmount.y).coerceAtLeast(20f)
+                                            }
+                                        }
+                                )
+
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.TopEnd)
+                                        .offset(6.dp, (-6).dp)
+                                        .size(14.dp)
+                                        .background(Color.White, CircleShape)
+                                        .border(2.dp, AppPrimary, CircleShape)
+                                        .pointerInput(Unit) {
+                                            detectDragGestures { change, dragAmount ->
+                                                change.consume()
+                                                signatureY += dragAmount.y
+                                                signatureWidth = (signatureWidth + dragAmount.x).coerceAtLeast(40f)
+                                                signatureHeight = (signatureHeight - dragAmount.y).coerceAtLeast(20f)
+                                            }
+                                        }
+                                )
+
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomStart)
+                                        .offset((-6).dp, 6.dp)
+                                        .size(14.dp)
+                                        .background(Color.White, CircleShape)
+                                        .border(2.dp, AppPrimary, CircleShape)
+                                        .pointerInput(Unit) {
+                                            detectDragGestures { change, dragAmount ->
+                                                change.consume()
+                                                signatureX += dragAmount.x
+                                                signatureWidth = (signatureWidth - dragAmount.x).coerceAtLeast(40f)
+                                                signatureHeight = (signatureHeight + dragAmount.y).coerceAtLeast(20f)
+                                            }
+                                        }
+                                )
+
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomEnd)
+                                        .offset(6.dp, 6.dp)
+                                        .size(14.dp)
+                                        .background(Color.White, CircleShape)
+                                        .border(2.dp, AppPrimary, CircleShape)
+                                        .pointerInput(Unit) {
+                                            detectDragGestures { change, dragAmount ->
+                                                change.consume()
+                                                signatureWidth = (signatureWidth + dragAmount.x).coerceAtLeast(40f)
+                                                signatureHeight = (signatureHeight + dragAmount.y).coerceAtLeast(20f)
+                                            }
+                                        }
+                                )
+                            }
+
+                            Row(
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .padding(bottom = 40.dp)
+                                    .fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceEvenly
+                            ) {
+                                Button(
+                                    onClick = { isSignaturePlacingModeActive = false },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF4949))
+                                ) {
+                                    Text("إلغاء", color = Color.White)
+                                }
+
+                                Button(
+                                    onClick = {
+                                        coroutineScope.launch(Dispatchers.IO) {
+                                            try {
+                                                val xPct = signatureX / containerWidth
+                                                val yPct = signatureY / containerHeight
+                                                val wPct = (signatureWidth * context.resources.displayMetrics.density) / containerWidth
+                                                val hPct = (signatureHeight * context.resources.displayMetrics.density) / containerHeight
+
+                                                applySignatureToPdf(
+                                                    context = context,
+                                                    pdfUriString = activeUri!!,
+                                                    pageIndex = currentPage,
+                                                    signaturePath = savedSignaturePath!!,
+                                                    xPercent = xPct.coerceIn(0f, 1f),
+                                                    yPercent = yPct.coerceIn(0f, 1f),
+                                                    wPercent = wPct.coerceIn(0.01f, 1f),
+                                                    hPercent = hPct.coerceIn(0.01f, 1f)
+                                                )
+
+                                                withContext(Dispatchers.Main) {
+                                                    isSignaturePlacingModeActive = false
+                                                    viewModel.selectDocumentForced(context, Uri.parse(activeUri!!))
+                                                    snackbarHostState.showSnackbar("تم تثبيت التوقيع وحفظه في المستند")
+                                                }
+                                            } catch (e: Exception) {
+                                                e.printStackTrace()
+                                                withContext(Dispatchers.Main) {
+                                                    snackbarHostState.showSnackbar("تعذّر حفظ التوقيع في المستند")
+                                                }
+                                            }
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = AppPrimary),
+                                    modifier = Modifier.testTag("apply_signature_button")
+                                ) {
+                                    Text("تثبيت التوقيع", color = Color.White)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Dynamic Redaction Placement Overlay (Opaque black shapes)
+            if (isRedactModeActive) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.35f))
+                        .testTag("redaction_drawing_overlay")
+                        .pointerInput(Unit) {
+                            detectDragGestures(
+                                onDragStart = { offset ->
+                                    currentRedactStart = offset
+                                    currentRedactEnd = offset
+                                },
+                                onDrag = { change, dragAmount ->
+                                    change.consume()
+                                    currentRedactEnd = (currentRedactEnd ?: currentRedactStart)?.plus(dragAmount)
+                                },
+                                onDragEnd = {
+                                    val start = currentRedactStart
+                                    val end = currentRedactEnd
+                                    if (start != null && end != null) {
+                                        val left = Math.min(start.x, end.x)
+                                        val top = Math.min(start.y, end.y)
+                                        val right = Math.max(start.x, end.x)
+                                        val bottom = Math.max(start.y, end.y)
+                                        if (right - left > 10 && bottom - top > 10) {
+                                            redactRects.add(androidx.compose.ui.geometry.Rect(left, top, right, bottom))
+                                        }
+                                    }
+                                    currentRedactStart = null
+                                    currentRedactEnd = null
+                                },
+                                onDragCancel = {
+                                    currentRedactStart = null
+                                    currentRedactEnd = null
+                                }
+                            )
+                        }
+                ) {
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        redactRects.forEach { rect ->
+                            drawRect(
+                                color = Color.Black,
+                                topLeft = rect.topLeft,
+                                size = rect.size
+                            )
+                            drawRect(
+                                color = Color.Red,
+                                topLeft = rect.topLeft,
+                                size = rect.size,
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2f)
+                            )
+                        }
+
+                        val start = currentRedactStart
+                        val end = currentRedactEnd
+                        if (start != null && end != null) {
+                            val left = Math.min(start.x, end.x)
+                            val top = Math.min(start.y, end.y)
+                            val right = Math.max(start.x, end.x)
+                            val bottom = Math.max(start.y, end.y)
+                            drawRect(
+                                color = Color.Black.copy(alpha = 0.60f),
+                                topLeft = Offset(left, top),
+                                size = androidx.compose.ui.geometry.Size(right - left, bottom - top)
+                            )
+                            drawRect(
+                                color = Color.Red,
+                                topLeft = Offset(left, top),
+                                size = androidx.compose.ui.geometry.Size(right - left, bottom - top),
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(width = 3f)
+                            )
+                        }
+                    }
+
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = AppPrimary),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .padding(top = 80.dp, start = 16.dp, end = 16.dp)
+                            .fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PriorityHigh,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text(
+                                text = "اسحب بإصبعك لرسم مستطيل طمس فوق البيانات الحساسة.",
+                                color = Color.White,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 60.dp)
+                            .fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        Button(
+                            onClick = {
+                                redactRects.clear()
+                                isRedactModeActive = false
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF4949))
+                        ) {
+                            Text("إلغاء الإجراء", color = Color.White)
+                        }
+
+                        if (redactRects.isNotEmpty()) {
+                            Button(
+                                onClick = { redactRects.removeLastOrNull() },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color.DarkGray)
+                            ) {
+                                Text("تراجع", color = Color.White)
+                            }
+                        }
+
+                        Button(
+                            onClick = {
+                                if (redactRects.isNotEmpty()) {
+                                    showRedactWarningDialog = true
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = AppPrimary),
+                            modifier = Modifier.testTag("apply_redaction_mode_button")
+                        ) {
+                            Text("تطبيق الطمس (${redactRects.size})", color = Color.White)
+                        }
+                    }
+                }
+            }
+
+            // Redaction Warning Dialog Details
+            if (showRedactWarningDialog) {
+                AlertDialog(
+                    onDismissRequest = { showRedactWarningDialog = false },
+                    title = {
+                        Text(
+                            text = "تحذير أمني هام",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp,
+                            color = AppTextPrimary,
+                            textAlign = TextAlign.Right,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    },
+                    text = {
+                        Text(
+                            text = "سيقوم هذا الإجراء بطمس البيانات نهائياً وحذف النص المكتوب تحتها تماماً لمنع استرجاعه بأي وسيلة. هل أنت متأكد؟",
+                            color = AppTextSecondary,
+                            fontSize = 14.sp,
+                            textAlign = TextAlign.Right,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                showRedactWarningDialog = false
+                                coroutineScope.launch(Dispatchers.IO) {
+                                    try {
+                                        applyRedactionsToPdf(
+                                            context = context,
+                                            pdfUriString = activeUri!!,
+                                            pageIndex = currentPage,
+                                            rectList = redactRects.toList(),
+                                            containerW = containerWidth,
+                                            containerH = containerHeight
+                                        )
+
+                                        withContext(Dispatchers.Main) {
+                                            redactRects.clear()
+                                            isRedactModeActive = false
+                                            viewModel.selectDocumentForced(context, Uri.parse(activeUri!!))
+                                            snackbarHostState.showSnackbar("تم طمس المحتوى بنجاح وحفظه")
+                                        }
+                                    } catch (e: Exception) {
+                                        e.printStackTrace()
+                                        withContext(Dispatchers.Main) {
+                                            snackbarHostState.showSnackbar("تعذّر تطبيق طمس المحتوى الحساس")
+                                        }
+                                    }
+                                }
+                            }
+                        ) {
+                            Text("طمس نهائي", color = Color(0xFFFF4949), fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showRedactWarningDialog = false }) {
+                            Text("إلغاء", color = AppTextSecondary)
+                        }
+                    }
+                )
+            }
         }
     }
 }
@@ -3977,6 +4412,136 @@ fun PdfPageImage(
         },
         modifier = modifier
     )
+}
+
+private fun applySignatureToPdf(
+    context: Context,
+    pdfUriString: String,
+    pageIndex: Int,
+    signaturePath: String,
+    xPercent: Float,
+    yPercent: Float,
+    wPercent: Float,
+    hPercent: Float
+) {
+    try {
+        val fileUri = Uri.parse(pdfUriString)
+        val resolver = context.contentResolver
+        resolver.openInputStream(fileUri).use { inputStream ->
+            val document = com.tom_roush.pdfbox.pdmodel.PDDocument.load(inputStream)
+            val page = document.getPage(pageIndex)
+            val mediaBox = page.mediaBox
+            val pdfWidth = mediaBox.width
+            val pdfHeight = mediaBox.height
+
+            val targetX = xPercent * pdfWidth
+            val targetWidth = wPercent * pdfWidth
+            val targetHeight = hPercent * pdfHeight
+            val targetY = (1.0f - yPercent) * pdfHeight - targetHeight
+
+            val sigFile = File(signaturePath)
+            if (sigFile.exists()) {
+                val image = com.tom_roush.pdfbox.pdmodel.graphics.image.PDImageXObject.createFromFile(signaturePath, document)
+                com.tom_roush.pdfbox.pdmodel.PDPageContentStream(
+                    document,
+                    page,
+                    com.tom_roush.pdfbox.pdmodel.PDPageContentStream.AppendMode.APPEND,
+                    true,
+                    true
+                ).use { contentStream ->
+                    contentStream.drawImage(image, targetX, targetY, targetWidth, targetHeight)
+                }
+
+                val tempFile = File(context.cacheDir, "temp_signature.pdf")
+                FileOutputStream(tempFile).use { out ->
+                    document.save(out)
+                }
+                document.close()
+
+                resolver.openFileDescriptor(fileUri, "rwt").use { pfd ->
+                    if (pfd != null) {
+                        FileOutputStream(pfd.fileDescriptor).use { fos ->
+                            tempFile.inputStream().use { fis ->
+                                fis.copyTo(fos)
+                            }
+                        }
+                    }
+                }
+                tempFile.delete()
+            } else {
+                document.close()
+            }
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+        throw e
+    }
+}
+
+private fun applyRedactionsToPdf(
+    context: Context,
+    pdfUriString: String,
+    pageIndex: Int,
+    rectList: List<androidx.compose.ui.geometry.Rect>,
+    containerW: Float,
+    containerH: Float
+) {
+    try {
+        val fileUri = Uri.parse(pdfUriString)
+        val resolver = context.contentResolver
+        resolver.openInputStream(fileUri).use { inputStream ->
+            val document = com.tom_roush.pdfbox.pdmodel.PDDocument.load(inputStream)
+            val page = document.getPage(pageIndex)
+            val mediaBox = page.mediaBox
+            val pdfWidth = mediaBox.width
+            val pdfHeight = mediaBox.height
+
+            com.tom_roush.pdfbox.pdmodel.PDPageContentStream(
+                document,
+                page,
+                com.tom_roush.pdfbox.pdmodel.PDPageContentStream.AppendMode.APPEND,
+                true,
+                true
+            ).use { contentStream ->
+                contentStream.setNonStrokingColor(0, 0, 0) // opaque black
+
+                rectList.forEach { rect ->
+                    val xPercent = rect.left / containerW
+                    val yPercent = rect.top / containerH
+                    val wPercent = rect.width / containerW
+                    val hPercent = rect.height / containerH
+
+                    val targetX = xPercent * pdfWidth
+                    val targetWidth = wPercent * pdfWidth
+                    val targetHeight = hPercent * pdfHeight
+                    val targetY = (1.0f - yPercent) * pdfHeight - targetHeight
+
+                    contentStream.addRect(targetX, targetY, targetWidth, targetHeight)
+                }
+                contentStream.fill()
+            }
+
+            val tempFile = File(context.cacheDir, "temp_redact.pdf")
+            FileOutputStream(tempFile).use { out ->
+                document.save(out)
+            }
+            document.close()
+
+            resolver.openFileDescriptor(fileUri, "rwt").use { pfd ->
+                if (pfd != null) {
+                    FileOutputStream(pfd.fileDescriptor).use { fos ->
+                        tempFile.inputStream().use { fis ->
+                            fis.copyTo(fos)
+                        }
+                    }
+                }
+            }
+            tempFile.delete()
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+        throw e
+    }
 }
 
 private fun compressBitmap(original: Bitmap, targetDpi: Int, quality: Int): Bitmap {

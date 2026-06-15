@@ -65,6 +65,9 @@ fun PdfReaderScreen(
         onNavigateToReader = { newUri ->
             val encoded = Uri.encode(newUri)
             navController.navigate(Screen.PdfReader.createRoute(encoded))
+        },
+        onNavigateToSignature = {
+            navController.navigate(Screen.Signature.route)
         }
     )
 }

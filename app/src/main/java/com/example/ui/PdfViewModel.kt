@@ -307,6 +307,14 @@ class PdfViewModel(
     private val _selectedUri = MutableStateFlow<String?>(null)
     val selectedUri: StateFlow<String?> = _selectedUri.asStateFlow()
 
+    // Digital Signature States
+    private val _savedSignaturePath = MutableStateFlow<String?>(null)
+    val savedSignaturePath: StateFlow<String?> = _savedSignaturePath.asStateFlow()
+
+    fun setSavedSignaturePath(path: String?) {
+        _savedSignaturePath.value = path
+    }
+
     private val _currentDocument = MutableStateFlow<RecentFileEntity?>(null)
     val currentDocument: StateFlow<RecentFileEntity?> = _currentDocument.asStateFlow()
 
@@ -354,6 +362,10 @@ class PdfViewModel(
     val isCurrentPageBookmarked: StateFlow<Boolean> = _isCurrentPageBookmarked.asStateFlow()
 
     init {
+        // Load saved digital signature from SharedPreferences if existing
+        val prefs = context.getSharedPreferences("PdfPrefs", Context.MODE_PRIVATE)
+        _savedSignaturePath.value = prefs.getString("saved_signature_path", null)
+
         viewModelScope.launch {
             context.dataStore.data.map { preferences ->
                 preferences[READING_MODE_KEY] ?: preferences[DEFAULT_READING_MODE_KEY] ?: if (preferences[NIGHT_MODE_KEY] == true) "night" else "normal"
@@ -1108,7 +1120,14 @@ class PdfViewModel(
                 val options = if (lang == "en") {
                     com.google.mlkit.vision.text.latin.TextRecognizerOptions.DEFAULT_OPTIONS
                 } else {
-                    com.google.mlkit.vision.text.arabic.ArabicTextRecognizerOptions.Builder().build()
+                    try {
+                        val clazz = Class.forName("com.google.mlkit.vision.text.arabic.ArabicTextRecognizerOptions\$Builder")
+                        val builder = clazz.getDeclaredConstructor().newInstance()
+                        val buildMethod = clazz.getMethod("build")
+                        buildMethod.invoke(builder) as com.google.mlkit.vision.text.TextRecognizerOptionsInterface
+                    } catch (e: Exception) {
+                        com.google.mlkit.vision.text.latin.TextRecognizerOptions.DEFAULT_OPTIONS
+                    }
                 }
                 val recognizer = com.google.mlkit.vision.text.TextRecognition.getClient(options)
                 for (i in 0 until totalPages) {
@@ -1196,7 +1215,14 @@ class PdfViewModel(
                 val options = if (lang == "en") {
                     com.google.mlkit.vision.text.latin.TextRecognizerOptions.DEFAULT_OPTIONS
                 } else {
-                    com.google.mlkit.vision.text.arabic.ArabicTextRecognizerOptions.Builder().build()
+                    try {
+                        val clazz = Class.forName("com.google.mlkit.vision.text.arabic.ArabicTextRecognizerOptions\$Builder")
+                        val builder = clazz.getDeclaredConstructor().newInstance()
+                        val buildMethod = clazz.getMethod("build")
+                        buildMethod.invoke(builder) as com.google.mlkit.vision.text.TextRecognizerOptionsInterface
+                    } catch (e: Exception) {
+                        com.google.mlkit.vision.text.latin.TextRecognizerOptions.DEFAULT_OPTIONS
+                    }
                 }
                 val recognizer = com.google.mlkit.vision.text.TextRecognition.getClient(options)
                 for (i in 0 until totalPages) {

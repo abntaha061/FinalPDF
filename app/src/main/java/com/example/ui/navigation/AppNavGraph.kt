@@ -25,6 +25,7 @@ sealed class Screen(val route: String) {
     object MergePdfs  : Screen("merge_pdfs")
     object About     : Screen("about")
     object Language  : Screen("language")
+    object Signature : Screen("signature")
     object WebView   : Screen("webview?url={url}") {
         fun createRoute(encodedUrl: String) = "webview?url=$encodedUrl"
     }
@@ -114,6 +115,15 @@ fun AppNavGraph(
                 androidx.lifecycle.ViewModelProvider(activity)[com.example.ui.PdfViewModel::class.java]
             }
             GestureSettingsScreen(navController, viewModel)
+        }
+
+        // SIGNATURE — slide from bottom
+        composable(
+            route = Screen.Signature.route,
+            enterTransition = { slideInVertically(tween(350)) { it } + fadeIn(tween(350)) },
+            exitTransition  = { slideOutVertically(tween(350)) { it } + fadeOut(tween(350)) }
+        ) {
+            SignatureScreen(navController = navController)
         }
 
         // WEBVIEW — slide from bottom

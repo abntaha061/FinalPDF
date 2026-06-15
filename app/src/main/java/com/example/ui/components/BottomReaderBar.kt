@@ -64,6 +64,8 @@ fun BottomReaderBar(
     onCopyPageTextClick: () -> Unit = {},
     onExportTextAsTxtClick: () -> Unit = {},
     onSearchExtractedTextClick: () -> Unit = {},
+    onAddSignatureClick: () -> Unit = {},
+    onRedactModeClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -313,6 +315,24 @@ fun BottomReaderBar(
                             onCompressPdfClick()
                         },
                         modifier = Modifier.testTag("compress_pdf_option")
+                    )
+                    DropdownMenuItem(
+                        text = { Text("إضافة توقيع", color = AppTextPrimary, fontSize = 14.sp) },
+                        leadingIcon = { Icon(Icons.Default.Gesture, contentDescription = null, tint = AppPrimary) },
+                        onClick = {
+                            showMoreMenu = false
+                            onAddSignatureClick()
+                        },
+                        modifier = Modifier.testTag("add_signature_option")
+                    )
+                    DropdownMenuItem(
+                        text = { Text("طمس محتوى حساس", color = AppTextPrimary, fontSize = 14.sp) },
+                        leadingIcon = { Icon(Icons.Default.LayersClear, contentDescription = null, tint = AppPrimary) },
+                        onClick = {
+                            showMoreMenu = false
+                            onRedactModeClick()
+                        },
+                        modifier = Modifier.testTag("redact_sensitive_content_option")
                     )
                     if (hasOcrResult) {
                         HorizontalDivider(color = AppTextSecondary.copy(alpha = 0.2f), thickness = 1.dp)
