@@ -38,6 +38,12 @@ interface RecentFileDao {
     @Query("UPDATE recent_files SET isBookmarked = :isBookmarked WHERE uri = :uri")
     suspend fun updateBookmarkState(uri: String, isBookmarked: Boolean)
 
+    @Query("SELECT * FROM recent_files WHERE isFavorite = 1 ORDER BY lastOpenedAt DESC")
+    fun getFavorites(): Flow<List<RecentFileEntity>>
+
+    @Query("UPDATE recent_files SET isFavorite = :isFavorite WHERE uri = :uri")
+    suspend fun updateFavoriteState(uri: String, isFavorite: Boolean)
+
     @Query("DELETE FROM recent_files")
     suspend fun deleteAll()
 }

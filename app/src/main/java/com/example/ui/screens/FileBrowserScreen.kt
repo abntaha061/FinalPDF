@@ -214,7 +214,7 @@ fun FileBrowserScreen(
     // Favorites track
     val recentDocs by viewModel.recentDocuments.collectAsState()
     val favoritedUris = remember(recentDocs) {
-        recentDocs.filter { it.isBookmarked }.map { it.uri }.toSet()
+        recentDocs.filter { it.isFavorite }.map { it.uri }.toSet()
     }
 
     // File listing effect
@@ -642,6 +642,11 @@ fun FileBrowserScreen(
                                     },
                                     onMoreClick = {
                                         activeBottomSheetItem = file
+                                    },
+                                    onFavoriteToggle = {
+                                        val isFavStr = Uri.fromFile(file).toString()
+                                        val isFav = favoritedUris.contains(isFavStr)
+                                        viewModel.toggleFavoriteForFile(file, !isFav)
                                     }
                                 )
                             }
@@ -1109,9 +1114,12 @@ fun GridBrowserItem(
     isMultiSelectActive: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
-    onMoreClick: () -> Unit
+    onMoreClick: () -> Unit,
+    onFavoriteToggle: () -> Unit
 ) {
     val isFolder = file.isDirectory
+    val scale = remember { androidx.compose.animation.core.Animatable(1f) }
+    val scope = rememberCoroutineScope()
 
     Card(
         modifier = Modifier
@@ -1189,15 +1197,27 @@ fun GridBrowserItem(
                                 }
                             }
 
-                            if (isFavorited) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopStart)
+                                    .padding(4.dp)
+                                    .scale(scale.value)
+                                    .clickable(
+                                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                                        indication = null
+                                    ) {
+                                        onFavoriteToggle()
+                                        scope.launch {
+                                            scale.animateTo(1.3f, androidx.compose.animation.core.spring(dampingRatio = 0.4f, stiffness = 400f))
+                                            scale.animateTo(1f, androidx.compose.animation.core.spring(dampingRatio = 0.4f, stiffness = 400f))
+                                        }
+                                    }
+                            ) {
                                 Icon(
-                                    imageVector = Icons.Default.Star,
-                                    contentDescription = "Favorited",
-                                    tint = HighlightYellow,
-                                    modifier = Modifier
-                                        .align(Alignment.TopStart)
-                                        .padding(4.dp)
-                                        .size(18.dp)
+                                    imageVector = if (isFavorited) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                    contentDescription = "المفضلة",
+                                    tint = if (isFavorited) Color(0xFFFF6B6B) else AppTextSecondary.copy(alpha = 0.5f),
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
                         } else {

@@ -182,7 +182,7 @@ class PdfViewModel(
             }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    val favoriteDocuments: StateFlow<List<RecentFileEntity>> = repository.bookmarkedPdfs
+    val favoriteDocuments: StateFlow<List<RecentFileEntity>> = repository.favoritePdfs
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     // Settings States
@@ -782,9 +782,9 @@ class PdfViewModel(
 
     fun toggleFavorite(uri: String, isFavorite: Boolean) {
         viewModelScope.launch {
-            repository.updatePdfBookmarkState(uri, isFavorite)
+            repository.updatePdfFavoriteState(uri, isFavorite)
             if (_currentDocument.value?.uri == uri) {
-                _currentDocument.value = _currentDocument.value?.copy(isBookmarked = isFavorite)
+                _currentDocument.value = _currentDocument.value?.copy(isFavorite = isFavorite)
             }
         }
     }
@@ -802,12 +802,12 @@ class PdfViewModel(
                         totalPages = 0,
                         currentPage = 0,
                         lastOpenedAt = System.currentTimeMillis(),
-                        isBookmarked = true
+                        isFavorite = true
                     )
                     repository.insertPdf(doc)
                 }
             } else {
-                repository.updatePdfBookmarkState(uriStr, isFavorite)
+                repository.updatePdfFavoriteState(uriStr, isFavorite)
             }
         }
     }

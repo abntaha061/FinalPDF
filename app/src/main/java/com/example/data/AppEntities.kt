@@ -12,7 +12,8 @@ data class RecentFileEntity(
     val lastOpenedAt: Long = System.currentTimeMillis(),
     val thumbnailPath: String? = null,
     val currentPage: Int = 0,
-    val isBookmarked: Boolean = false
+    val isBookmarked: Boolean = false,
+    val isFavorite: Boolean = false
 )
 
 @Entity(tableName = "bookmarks")

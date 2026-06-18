@@ -87,6 +87,12 @@ class PdfRepository @Inject constructor(
         recentFileDao.updateBookmarkState(uri, isBookmarked)
     }
 
+    val favoritePdfs: Flow<List<RecentFileEntity>> = recentFileDao.getFavorites()
+
+    suspend fun updatePdfFavoriteState(uri: String, isFavorite: Boolean) = withContext(Dispatchers.IO) {
+        recentFileDao.updateFavoriteState(uri, isFavorite)
+    }
+
     suspend fun deletePdf(uri: String) = withContext(Dispatchers.IO) {
         recentFileDao.getByUri(uri)?.let {
             recentFileDao.delete(it)

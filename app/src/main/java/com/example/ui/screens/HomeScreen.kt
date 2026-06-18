@@ -204,7 +204,8 @@ fun HomeScreenEmptyState() {
 fun HomeScreenRealFiles(
     recentPdfs: List<RecentFileEntity>,
     viewModel: PdfViewModel,
-    onPdfOpened: (Uri) -> Unit
+    onPdfOpened: (Uri) -> Unit,
+    onNavigateToFavorites: () -> Unit
 ) {
     val context = LocalContext.current
     val totalPdfs = recentPdfs.size
@@ -416,6 +417,49 @@ fun HomeScreenRealFiles(
                 )
             }
 
+            val favoritePdfs = remember(recentPdfs) { recentPdfs.filter { it.isFavorite } }
+
+            if (favoritePdfs.isNotEmpty()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "⭐ المفضلة",
+                        color = AppTextPrimary,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp
+                    )
+                    if (favoritePdfs.size > 5) {
+                        TextButton(
+                            onClick = onNavigateToFavorites,
+                            contentPadding = PaddingValues(0.dp)
+                        ) {
+                            Text("عرض الكل", color = AppPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+                androidx.compose.foundation.lazy.LazyRow(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)
+                ) {
+                    items(favoritePdfs, key = { it.uri + "_fav" }) { pdf ->
+                        SmallerFavoriteCard(
+                            pdf = pdf,
+                            onClick = {
+                                val uri = Uri.parse(pdf.uri)
+                                viewModel.selectDocument(context, uri)
+                                onPdfOpened(uri)
+                            },
+                            onFavoriteClick = {
+                                viewModel.toggleFavorite(pdf.uri, !pdf.isFavorite)
+                            }
+                        )
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(28.dp))
 
             // Recent files title
@@ -445,6 +489,9 @@ fun HomeScreenRealFiles(
                         },
                         onLongClick = {
                             viewModel.deleteDocument(pdf.uri)
+                        },
+                        onFavoriteClick = {
+                            viewModel.toggleFavorite(pdf.uri, !pdf.isFavorite)
                         }
                     )
                 }
@@ -490,6 +537,9 @@ fun HomeScreen(navController: androidx.navigation.NavController) {
         },
         onNavigateToSignature = {
             navController.navigate(com.example.ui.navigation.Screen.Signature.route)
+        },
+        onNavigateToFavorites = {
+            navController.navigate(com.example.ui.navigation.Screen.Favorites.route)
         }
     )
 }
@@ -507,11 +557,16 @@ fun HomeScreen(
     onNavigateToPdfToImages: () -> Unit = {},
     onNavigateToImagesToPdf: () -> Unit = {},
     onNavigateToPdfToWord: () -> Unit = {},
-    onNavigateToSignature: () -> Unit = {}
+    onNavigateToSignature: () -> Unit = {},
+    onNavigateToFavorites: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var selectedTab by rememberSaveable { mutableStateOf(0) }
+    var showOnlyFavorites by rememberSaveable { mutableStateOf(false) }
     val recentPdfs by viewModel.recentDocuments.collectAsState()
+    val displayedPdfs = remember(recentPdfs, showOnlyFavorites) {
+        if (showOnlyFavorites) recentPdfs.filter { it.isFavorite } else recentPdfs
+    }
     val isReady by viewModel.isReady.collectAsState()
     var isLoading by remember { mutableStateOf(true) }
     val haptic = LocalHapticFeedback.current
@@ -824,6 +879,21 @@ fun HomeScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        // Button 0: Favorites Filter
+                        IconButton(
+                            onClick = { showOnlyFavorites = !showOnlyFavorites },
+                            modifier = Modifier
+                                .size(36.dp)
+                                .testTag("favorites_filter_button")
+                        ) {
+                            Icon(
+                                imageVector = if (showOnlyFavorites) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                contentDescription = "تصفية المفضلة",
+                                tint = if (showOnlyFavorites) Color(0xFFFF6B6B) else AppTextPrimary,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+
                         // Button 1: Filter List with badge
                         IconButton(
                             onClick = { showFilterSheet = true },
@@ -919,10 +989,15 @@ fun HomeScreen(
                     if (loading) {
                         SkeletonGrid()
                     } else {
-                        if (recentPdfs.isEmpty()) {
+                        if (displayedPdfs.isEmpty()) {
                             HomeScreenEmptyState()
                         } else {
-                            HomeScreenRealFiles(recentPdfs = recentPdfs, viewModel = viewModel, onPdfOpened = onPdfOpened)
+                            HomeScreenRealFiles(
+                                recentPdfs = displayedPdfs,
+                                viewModel = viewModel,
+                                onPdfOpened = onPdfOpened,
+                                onNavigateToFavorites = onNavigateToFavorites
+                            )
                         }
                     }
                 }
@@ -1290,8 +1365,12 @@ fun PdfGridCard(
     pdf: RecentFileEntity,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    onFavoriteClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val scale = remember { Animatable(1f) }
+    val scope = rememberCoroutineScope()
+
     Card(
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = AppSurface),
@@ -1312,6 +1391,31 @@ fun PdfGridCard(
                     pdfUriString = pdf.uri,
                     modifier = Modifier.fillMaxSize()
                 )
+
+                // Favorite heart overlay icon top-start corner (top-right under RTL layout)
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(8.dp)
+                        .scale(scale.value)
+                        .clickable(
+                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                            indication = null
+                        ) {
+                            onFavoriteClick()
+                            scope.launch {
+                                scale.animateTo(1.3f, spring(dampingRatio = 0.4f, stiffness = 400f))
+                                scale.animateTo(1f, spring(dampingRatio = 0.4f, stiffness = 400f))
+                            }
+                        }
+                ) {
+                    Icon(
+                        imageVector = if (pdf.isFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                        contentDescription = "المفضلة",
+                        tint = if (pdf.isFavorite) Color(0xFFFF6B6B) else AppTextSecondary.copy(alpha = 0.5f),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
 
                 // Page count purple badge at top-end corner
                 if (pdf.totalPages > 0) {
@@ -1463,5 +1567,71 @@ fun formatArabicFileSize(bytes: Long): String {
         "${df.format(bytes / 1024.0)} ك.ب"
     } else {
         "${df.format(bytes / (1024.0 * 1024.0))} م.ب"
+    }
+}
+
+@Composable
+fun SmallerFavoriteCard(
+    pdf: RecentFileEntity,
+    onClick: () -> Unit,
+    onFavoriteClick: () -> Unit
+) {
+    val scale = remember { Animatable(1f) }
+    val scope = rememberCoroutineScope()
+
+    Card(
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = AppSurface),
+        modifier = Modifier
+            .width(120.dp)
+            .clickable { onClick() }
+    ) {
+        Column {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(90.dp)
+                    .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp))
+            ) {
+                PdfThumbnail(
+                    pdfUriString = pdf.uri,
+                    modifier = Modifier.fillMaxSize()
+                )
+                // Favorite heart overlay button with spring animation
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(4.dp)
+                        .scale(scale.value)
+                        .clickable(
+                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                            indication = null
+                        ) {
+                            onFavoriteClick()
+                            scope.launch {
+                                scale.animateTo(1.3f, spring(dampingRatio = 0.4f, stiffness = 400f))
+                                scale.animateTo(1f, spring(dampingRatio = 0.4f, stiffness = 400f))
+                            }
+                        }
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Favorite,
+                        contentDescription = "إزالة من المفضلة",
+                        tint = Color(0xFFFF6B6B),
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+            Text(
+                text = pdf.name,
+                color = AppTextPrimary,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                textAlign = TextAlign.Start
+            )
+        }
     }
 }

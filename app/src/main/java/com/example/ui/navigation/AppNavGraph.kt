@@ -31,6 +31,7 @@ sealed class Screen(val route: String) {
     object PdfToImages : Screen("pdf_to_images")
     object ImagesToPdf : Screen("images_to_pdf")
     object PdfToWord : Screen("pdf_to_word")
+    object Favorites : Screen("favorites")
     object WebView   : Screen("webview?url={url}") {
         fun createRoute(encodedUrl: String) = "webview?url=$encodedUrl"
     }
@@ -78,6 +79,23 @@ fun AppNavGraph(
 
         // SETTINGS
         composable(Screen.Settings.route) { SettingsScreen(navController) }
+
+        // FAVORITES
+        composable(Screen.Favorites.route) {
+            val context = androidx.compose.ui.platform.LocalContext.current
+            val activity = context as? androidx.activity.ComponentActivity
+                ?: throw IllegalStateException("Context must be ComponentActivity")
+            val viewModel = androidx.compose.runtime.remember(context) {
+                androidx.lifecycle.ViewModelProvider(activity)[com.example.ui.PdfViewModel::class.java]
+            }
+            FavoritesScreen(
+                navController = navController,
+                viewModel = viewModel,
+                onPdfOpened = { uri ->
+                    navController.navigate(Screen.PdfReader.createRoute(Uri.encode(uri.toString())))
+                }
+            )
+        }
 
         // STATISTICS
         composable(Screen.Statistics.route) {
