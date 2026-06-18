@@ -85,6 +85,9 @@ interface HighlightDao {
 
     @Query("DELETE FROM highlights")
     suspend fun deleteAll()
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(highlights: List<HighlightEntity>)
 }
 
 @Dao

@@ -397,6 +397,14 @@ class PdfViewModel(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val activeComments: StateFlow<List<com.example.data.CommentEntity>> = _selectedUri
+        .flatMapLatest { uri ->
+            if (uri != null) repository.getCommentsForPdf(uri)
+            else flowOf(emptyList())
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     private val _isCurrentPageBookmarked = MutableStateFlow(false)
     val isCurrentPageBookmarked: StateFlow<Boolean> = _isCurrentPageBookmarked.asStateFlow()
 
@@ -879,6 +887,46 @@ class PdfViewModel(
     fun deleteHighlight(id: Int) {
         viewModelScope.launch {
             repository.deleteHighlight(id)
+        }
+    }
+
+    fun insertComment(comment: com.example.data.CommentEntity) {
+        viewModelScope.launch {
+            repository.insertComment(comment)
+        }
+    }
+
+    fun deleteComment(id: Int) {
+        viewModelScope.launch {
+            repository.deleteComment(id)
+        }
+    }
+
+    fun importAnnotationsFromOtherPdf(otherFileUri: String, onResult: (Int) -> Unit) {
+        val currentUri = _selectedUri.value ?: return
+        viewModelScope.launch {
+            try {
+                val otherComments = repository.getCommentsForPdf(otherFileUri).first()
+                val otherHighlights = repository.getHighlightsForPdf(otherFileUri).first()
+                
+                val copiedComments = otherComments.map {
+                    it.copy(id = 0, fileUri = currentUri)
+                }
+                val copiedHighlights = otherHighlights.map {
+                    it.copy(id = 0, fileUri = currentUri)
+                }
+
+                if (copiedComments.isNotEmpty()) {
+                    repository.insertComments(copiedComments)
+                }
+                if (copiedHighlights.isNotEmpty()) {
+                    repository.insertHighlights(copiedHighlights)
+                }
+
+                onResult(copiedComments.size + copiedHighlights.size)
+            } catch (e: Exception) {
+                onResult(0)
+            }
         }
     }
 

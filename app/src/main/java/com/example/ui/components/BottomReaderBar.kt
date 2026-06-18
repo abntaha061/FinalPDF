@@ -67,6 +67,8 @@ fun BottomReaderBar(
     onAddSignatureClick: () -> Unit = {},
     onRedactModeClick: () -> Unit = {},
     onTtsPlayClick: () -> Unit = {},
+    onExportAnnotationsSummaryClick: () -> Unit = {},
+    onImportAnnotationsClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -343,6 +345,24 @@ fun BottomReaderBar(
                             onTtsPlayClick()
                         },
                         modifier = Modifier.testTag("tts_play_option")
+                    )
+                    DropdownMenuItem(
+                        text = { Text("تصدير ملخص الملاحظات لـ PDF", color = AppTextPrimary, fontSize = 14.sp) },
+                        leadingIcon = { Icon(Icons.Default.Assignment, contentDescription = null, tint = AppPrimary) },
+                        onClick = {
+                            showMoreMenu = false
+                            onExportAnnotationsSummaryClick()
+                        },
+                        modifier = Modifier.testTag("export_annotations_summary_option")
+                    )
+                    DropdownMenuItem(
+                        text = { Text("استيراد تعليقات من ملف آخر", color = AppTextPrimary, fontSize = 14.sp) },
+                        leadingIcon = { Icon(Icons.Default.ArrowDownward, contentDescription = null, tint = AppPrimary) },
+                        onClick = {
+                            showMoreMenu = false
+                            onImportAnnotationsClick()
+                        },
+                        modifier = Modifier.testTag("import_annotations_option")
                     )
                     if (hasOcrResult) {
                         HorizontalDivider(color = AppTextSecondary.copy(alpha = 0.2f), thickness = 1.dp)

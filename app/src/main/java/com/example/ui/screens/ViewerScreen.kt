@@ -40,6 +40,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -52,6 +53,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -130,6 +132,9 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.unit.IntOffset
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.compose.ui.input.key.*
+import androidx.compose.ui.focus.*
+import androidx.compose.ui.graphics.graphicsLayer
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -184,6 +189,30 @@ fun ViewerScreen(
     val annotationStrokeWidth by annotationViewModel.strokeWidth.collectAsState()
     val annotationsList by annotationViewModel.annotations.collectAsState()
 
+    val annotationCanUndo by annotationViewModel.canUndo.collectAsState()
+    val annotationCanRedo by annotationViewModel.canRedo.collectAsState()
+    val annotationSelectedShapeType by annotationViewModel.selectedShapeType.collectAsState()
+    val annotationShapeFillEnabled by annotationViewModel.shapeFillEnabled.collectAsState()
+
+    var currentShapeStart by remember { mutableStateOf<Offset?>(null) }
+    var currentShapeEnd by remember { mutableStateOf<Offset?>(null) }
+
+    // Stamp States
+    var showStampPicker by remember { mutableStateOf(false) }
+    var showCustomStampDialog by remember { mutableStateOf(false) }
+    var currentStampText by remember { mutableStateOf<String?>(null) }
+    var currentStampColor by remember { mutableStateOf<Color?>(null) }
+    var currentStampFilled by remember { mutableStateOf(false) }
+    var currentStampRotation by remember { mutableStateOf(-15f) }
+
+    // Comments States
+    val activeComments by viewModel.activeComments.collectAsState()
+    var activeCommentPosition by remember { mutableStateOf<Offset?>(null) }
+    var commentInputText by remember { mutableStateOf("") }
+    var showCommentThreadCreatorDialog by remember { mutableStateOf(false) }
+    var activeCommentToViewThread by remember { mutableStateOf<com.example.data.CommentEntity?>(null) }
+    var showCommentThreadSheet by remember { mutableStateOf(false) }
+
     var isAnnotationBarVisible by remember { mutableStateOf(false) }
     val currentDrawPoints = remember { mutableStateListOf<Offset>() }
     var currentHighlightStart by remember { mutableStateOf<Offset?>(null) }
@@ -226,6 +255,17 @@ fun ViewerScreen(
     var containerHeight by remember { mutableStateOf(1f) }
 
     var isRedactModeActive by remember { mutableStateOf(false) }
+
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(isAnnotationBarVisible) {
+        if (isAnnotationBarVisible) {
+            try {
+                focusRequester.requestFocus()
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
     val redactRects = remember { mutableStateListOf<androidx.compose.ui.geometry.Rect>() }
     var currentRedactStart by remember { mutableStateOf<Offset?>(null) }
     var currentRedactEnd by remember { mutableStateOf<Offset?>(null) }
@@ -482,6 +522,26 @@ fun ViewerScreen(
                 e.printStackTrace()
             }
             viewModel.selectDocument(context, uri)
+        }
+    }
+
+    val importPdfPickerLauncher = rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            try {
+                val takeFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+                context.contentResolver.takePersistableUriPermission(uri, takeFlags)
+                viewModel.importAnnotationsFromOtherPdf(uri.toString()) { count ->
+                    coroutineScope.launch {
+                        snackbarHostState.showSnackbar("تم استيراد $count تعليق/تظليل ✓")
+                    }
+                }
+            } catch (e: Exception) {
+                coroutineScope.launch {
+                    snackbarHostState.showSnackbar("فشل استيراد الملاحظات")
+                }
+            }
         }
     }
 
@@ -1059,6 +1119,34 @@ fun ViewerScreen(
                             else -> Color(0xFF13131A)
                         }
                     )
+                    .onKeyEvent { keyEvent ->
+                        if (keyEvent.type == KeyEventType.KeyDown) {
+                            if (keyEvent.isCtrlPressed) {
+                                if (keyEvent.key == Key.Z) {
+                                    if (keyEvent.isShiftPressed) {
+                                        annotationViewModel.redo()
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    } else {
+                                        annotationViewModel.undo()
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    }
+                                    true
+                                } else if (keyEvent.key == Key.Y) {
+                                    annotationViewModel.redo()
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    true
+                                } else {
+                                    false
+                                }
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        }
+                    }
+                    .focusRequester(focusRequester)
+                    .focusable()
             ) {
             if (activeUri != null) {
                 // Interactive PDF Container
@@ -1364,6 +1452,10 @@ fun ViewerScreen(
                                                     currentHighlightStart = offset
                                                     currentHighlightEnd = offset
                                                 }
+                                                com.example.ui.AnnotationTool.Shapes -> {
+                                                    currentShapeStart = offset
+                                                    currentShapeEnd = offset
+                                                }
                                                 com.example.ui.AnnotationTool.Eraser -> {
                                                     annotationViewModel.eraseAt(offset, currentPage)
                                                 }
@@ -1378,6 +1470,9 @@ fun ViewerScreen(
                                                 }
                                                 com.example.ui.AnnotationTool.Highlighter -> {
                                                     currentHighlightEnd = change.position
+                                                }
+                                                com.example.ui.AnnotationTool.Shapes -> {
+                                                    currentShapeEnd = change.position
                                                 }
                                                 com.example.ui.AnnotationTool.Eraser -> {
                                                     annotationViewModel.eraseAt(change.position, currentPage)
@@ -1421,12 +1516,31 @@ fun ViewerScreen(
                                                     currentHighlightStart = null
                                                     currentHighlightEnd = null
                                                 }
+                                                com.example.ui.AnnotationTool.Shapes -> {
+                                                    val start = currentShapeStart
+                                                    val end = currentShapeEnd
+                                                    if (start != null && end != null) {
+                                                        annotationViewModel.addAnnotation(
+                                                            com.example.ui.AnnotationData.ShapeAnnotation(
+                                                                type = annotationSelectedShapeType,
+                                                                start = start,
+                                                                end = end,
+                                                                color = annotationColor,
+                                                                strokeWidth = annotationStrokeWidth,
+                                                                filled = annotationShapeFillEnabled,
+                                                                page = currentPage
+                                                            )
+                                                        )
+                                                    }
+                                                    currentShapeStart = null
+                                                    currentShapeEnd = null
+                                                }
                                                 else -> {}
                                             }
                                         }
                                     )
                                 }
-                                .pointerInput(annotationTool) {
+                                .pointerInput(annotationTool, currentStampText, currentStampColor, currentStampFilled, currentStampRotation) {
                                     if (annotationTool == com.example.ui.AnnotationTool.None) return@pointerInput
                                     detectTapGestures { offset ->
                                         if (annotationTool == com.example.ui.AnnotationTool.TextNote || annotationTool == com.example.ui.AnnotationTool.StickyNote) {
@@ -1435,6 +1549,26 @@ fun ViewerScreen(
                                             annotationDialogText = ""
                                             annotationDialogColor = annotationColor
                                             showAnnotationTextDialog = true
+                                        } else if (annotationTool == com.example.ui.AnnotationTool.Stamp) {
+                                            val text = currentStampText
+                                            if (text != null) {
+                                                annotationViewModel.addAnnotation(
+                                                    com.example.ui.AnnotationData.StampAnnotation(
+                                                        text = text,
+                                                        color = currentStampColor ?: annotationColor,
+                                                        position = offset,
+                                                        rotation = currentStampRotation,
+                                                        filled = currentStampFilled,
+                                                        page = currentPage
+                                                    )
+                                                )
+                                            } else {
+                                                showStampPicker = true
+                                            }
+                                        } else if (annotationTool == com.example.ui.AnnotationTool.Comment) {
+                                            activeCommentPosition = offset
+                                            commentInputText = ""
+                                            showCommentThreadCreatorDialog = true
                                         }
                                     }
                                 }
@@ -1473,6 +1607,83 @@ fun ViewerScreen(
                                             topLeft = annotation.rect.topLeft,
                                             size = annotation.rect.size
                                         )
+                                    }
+                                    is com.example.ui.AnnotationData.ShapeAnnotation -> {
+                                        val start = annotation.start
+                                        val end = annotation.end
+                                        when (annotation.type) {
+                                            com.example.ui.ShapeType.RECTANGLE -> {
+                                                val rect = androidx.compose.ui.geometry.Rect(start, end)
+                                                if (annotation.filled) {
+                                                    drawRect(
+                                                        color = annotation.color.copy(alpha = 0.3f),
+                                                        topLeft = rect.topLeft,
+                                                        size = rect.size
+                                                    )
+                                                }
+                                                drawRect(
+                                                    color = annotation.color,
+                                                    topLeft = rect.topLeft,
+                                                    size = rect.size,
+                                                    style = androidx.compose.ui.graphics.drawscope.Stroke(annotation.strokeWidth)
+                                                )
+                                            }
+                                            com.example.ui.ShapeType.ELLIPSE -> {
+                                                val rect = androidx.compose.ui.geometry.Rect(start, end)
+                                                if (annotation.filled) {
+                                                    drawOval(
+                                                        color = annotation.color.copy(alpha = 0.3f),
+                                                        topLeft = rect.topLeft,
+                                                        size = rect.size
+                                                    )
+                                                }
+                                                drawOval(
+                                                    color = annotation.color,
+                                                    topLeft = rect.topLeft,
+                                                    size = rect.size,
+                                                    style = androidx.compose.ui.graphics.drawscope.Stroke(annotation.strokeWidth)
+                                                )
+                                            }
+                                            com.example.ui.ShapeType.LINE -> {
+                                                drawLine(
+                                                    color = annotation.color,
+                                                    start = start,
+                                                    end = end,
+                                                    strokeWidth = annotation.strokeWidth
+                                                )
+                                            }
+                                            com.example.ui.ShapeType.ARROW -> {
+                                                drawLine(
+                                                    color = annotation.color,
+                                                    start = start,
+                                                    end = end,
+                                                    strokeWidth = annotation.strokeWidth
+                                                )
+                                                val angle = kotlin.math.atan2(end.y - start.y, end.x - start.x)
+                                                val arrowLength = 20f
+                                                val arrowAngle = kotlin.math.PI / 6
+                                                val p1 = Offset(
+                                                    end.x - arrowLength * kotlin.math.cos(angle - arrowAngle).toFloat(),
+                                                    end.y - arrowLength * kotlin.math.sin(angle - arrowAngle).toFloat()
+                                                )
+                                                val p2 = Offset(
+                                                    end.x - arrowLength * kotlin.math.cos(angle + arrowAngle).toFloat(),
+                                                    end.y - arrowLength * kotlin.math.sin(angle + arrowAngle).toFloat()
+                                                )
+                                                drawLine(
+                                                    color = annotation.color,
+                                                    start = end,
+                                                    end = p1,
+                                                    strokeWidth = annotation.strokeWidth
+                                                )
+                                                drawLine(
+                                                    color = annotation.color,
+                                                    start = end,
+                                                    end = p2,
+                                                    strokeWidth = annotation.strokeWidth
+                                                )
+                                            }
+                                        }
                                     }
                                     else -> {} // Sticky / Text Notes drawn as overlay Composables below
                                 }
@@ -1514,6 +1725,87 @@ fun ViewerScreen(
                                         topLeft = rect.topLeft,
                                         size = rect.size
                                     )
+                                }
+                            }
+
+                            // Draw current active Shape line
+                            if (annotationTool == com.example.ui.AnnotationTool.Shapes) {
+                                val start = currentShapeStart
+                                val end = currentShapeEnd
+                                if (start != null && end != null) {
+                                    when (annotationSelectedShapeType) {
+                                        com.example.ui.ShapeType.RECTANGLE -> {
+                                            val rect = androidx.compose.ui.geometry.Rect(start, end)
+                                            if (annotationShapeFillEnabled) {
+                                                drawRect(
+                                                    color = annotationColor.copy(alpha = 0.3f),
+                                                    topLeft = rect.topLeft,
+                                                    size = rect.size
+                                                )
+                                            }
+                                            drawRect(
+                                                color = annotationColor,
+                                                topLeft = rect.topLeft,
+                                                size = rect.size,
+                                                style = androidx.compose.ui.graphics.drawscope.Stroke(annotationStrokeWidth)
+                                            )
+                                        }
+                                        com.example.ui.ShapeType.ELLIPSE -> {
+                                            val rect = androidx.compose.ui.geometry.Rect(start, end)
+                                            if (annotationShapeFillEnabled) {
+                                                drawOval(
+                                                    color = annotationColor.copy(alpha = 0.3f),
+                                                    topLeft = rect.topLeft,
+                                                    size = rect.size
+                                                )
+                                            }
+                                            drawOval(
+                                                color = annotationColor,
+                                                topLeft = rect.topLeft,
+                                                size = rect.size,
+                                                style = androidx.compose.ui.graphics.drawscope.Stroke(annotationStrokeWidth)
+                                            )
+                                        }
+                                        com.example.ui.ShapeType.LINE -> {
+                                            drawLine(
+                                                color = annotationColor,
+                                                start = start,
+                                                end = end,
+                                                strokeWidth = annotationStrokeWidth
+                                            )
+                                        }
+                                        com.example.ui.ShapeType.ARROW -> {
+                                            drawLine(
+                                                color = annotationColor,
+                                                start = start,
+                                                end = end,
+                                                strokeWidth = annotationStrokeWidth
+                                            )
+                                            val angle = kotlin.math.atan2(end.y - start.y, end.x - start.x)
+                                            val arrowLength = 20f
+                                            val arrowAngle = kotlin.math.PI / 6
+                                            val p1 = Offset(
+                                                end.x - arrowLength * kotlin.math.cos(angle - arrowAngle).toFloat(),
+                                                end.y - arrowLength * kotlin.math.sin(angle - arrowAngle).toFloat()
+                                            )
+                                            val p2 = Offset(
+                                                end.x - arrowLength * kotlin.math.cos(angle + arrowAngle).toFloat(),
+                                                end.y - arrowLength * kotlin.math.sin(angle + arrowAngle).toFloat()
+                                            )
+                                            drawLine(
+                                                color = annotationColor,
+                                                start = end,
+                                                end = p1,
+                                                strokeWidth = annotationStrokeWidth
+                                            )
+                                            drawLine(
+                                                color = annotationColor,
+                                                start = end,
+                                                end = p2,
+                                                strokeWidth = annotationStrokeWidth
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1646,7 +1938,123 @@ fun ViewerScreen(
                                             }
                                         }
                                     }
+                                    is com.example.ui.AnnotationData.StampAnnotation -> {
+                                        var stampPos by remember { mutableStateOf(annotation.position) }
+                                        var stampScale by remember { mutableStateOf(1f) }
+                                        var showDeleteConfirm by remember { mutableStateOf(false) }
+
+                                        Box(
+                                            modifier = Modifier
+                                                .offset { IntOffset(stampPos.x.toInt() - 60, stampPos.y.toInt() - 30) }
+                                                .graphicsLayer(
+                                                    scaleX = stampScale,
+                                                    scaleY = stampScale,
+                                                    rotationZ = annotation.rotation
+                                                )
+                                                .pointerInput(annotation) {
+                                                    detectDragGestures(
+                                                        onDrag = { change, dragAmount ->
+                                                            change.consume()
+                                                            stampPos += dragAmount
+                                                        },
+                                                        onDragEnd = {
+                                                            annotationViewModel.removeAnnotation(annotation)
+                                                            annotationViewModel.addAnnotation(annotation.copy(position = stampPos))
+                                                        }
+                                                    )
+                                                }
+                                                .pointerInput(annotation) {
+                                                    detectTapGestures(
+                                                        onLongPress = {
+                                                            showDeleteConfirm = true
+                                                        }
+                                                    )
+                                                }
+                                                .background(
+                                                    color = if (annotation.filled) annotation.color.copy(alpha = 0.15f) else Color.Transparent,
+                                                    shape = RoundedCornerShape(4.dp)
+                                                )
+                                                .border(
+                                                    width = 2.dp,
+                                                    color = annotation.color,
+                                                    shape = RoundedCornerShape(4.dp)
+                                                )
+                                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                                        ) {
+                                            Text(
+                                                text = annotation.text,
+                                                color = annotation.color,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 16.sp
+                                            )
+                                        }
+
+                                        if (showDeleteConfirm) {
+                                            AlertDialog(
+                                                onDismissRequest = { showDeleteConfirm = false },
+                                                title = { Text("حذف الختم", fontWeight = FontWeight.Bold) },
+                                                text = { Text("هل تريد حذف هذا الختم فعلاً؟") },
+                                                confirmButton = {
+                                                    Button(
+                                                        onClick = {
+                                                            annotationViewModel.removeAnnotation(annotation)
+                                                            showDeleteConfirm = false
+                                                        },
+                                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF6B6B))
+                                                    ) {
+                                                        Text("حذف")
+                                                    }
+                                                },
+                                                dismissButton = {
+                                                    TextButton(onClick = { showDeleteConfirm = false }) {
+                                                        Text("إلغاء")
+                                                    }
+                                                }
+                                            )
+                                        }
+                                    }
                                     else -> {}
+                                }
+                            }
+
+                            // Draw comment pins
+                            activeComments.filter { it.pageNumber == currentPage && it.parentId == null }.forEach { rootComment ->
+                                val repliesCount = activeComments.count { it.parentId == rootComment.id }
+                                
+                                Box(
+                                    modifier = Modifier
+                                        .offset { IntOffset(rootComment.positionX.toInt() - 16, rootComment.positionY.toInt() - 16) }
+                                        .clickable {
+                                            activeCommentToViewThread = rootComment
+                                            showCommentThreadSheet = true
+                                        }
+                                        .size(32.dp)
+                                        .background(AppPrimary, shape = CircleShape)
+                                        .border(2.dp, Color.White, CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.ChatBubble,
+                                        contentDescription = "تعليق",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    if (repliesCount > 0) {
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.TopEnd)
+                                                .offset(x = 6.dp, y = (-6).dp)
+                                                .background(Color.Red, shape = CircleShape)
+                                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                                        ) {
+                                            Text(
+                                                text = repliesCount.toString(),
+                                                color = Color.White,
+                                                fontSize = 8.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -2411,7 +2819,16 @@ fun ViewerScreen(
                         },
                         onCloseClick = {
                             showSaveConfirmDialog = true
-                        }
+                        },
+                        canUndo = annotationCanUndo,
+                        onUndo = { annotationViewModel.undo() },
+                        canRedo = annotationCanRedo,
+                        onRedo = { annotationViewModel.redo() },
+                        selectedShapeType = annotationSelectedShapeType,
+                        onShapeTypeChange = { annotationViewModel.setShapeType(it) },
+                        shapeFillEnabled = annotationShapeFillEnabled,
+                        onShapeFillToggle = { annotationViewModel.setShapeFillEnabled(it) },
+                        onStampClick = { showStampPicker = true }
                     )
                 }
 
@@ -2667,6 +3084,26 @@ fun ViewerScreen(
                         },
                         onTtsPlayClick = {
                             viewModel.startTtsForCurrentPage()
+                        },
+                        onExportAnnotationsSummaryClick = {
+                            coroutineScope.launch(Dispatchers.IO) {
+                                val file = annotationViewModel.exportSummaryPdf(
+                                    context = context,
+                                    fileName = documentName,
+                                    allAnnotations = annotationsList,
+                                    allComments = activeComments
+                                )
+                                coroutineScope.launch {
+                                    if (file != null && file.exists()) {
+                                        snackbarHostState.showSnackbar("تم تصدير ملخص الملاحظات لـ PDF بنجاح")
+                                    } else {
+                                        snackbarHostState.showSnackbar("فشل تصدير ملخص الملاحظات")
+                                    }
+                                }
+                            }
+                        },
+                        onImportAnnotationsClick = {
+                            importPdfPickerLauncher.launch(arrayOf("application/pdf"))
                         }
                     )
                 }
@@ -4545,6 +4982,335 @@ fun ViewerScreen(
                         }
                     }
                 )
+            }
+
+            if (showStampPicker) {
+                ModalBottomSheet(
+                    onDismissRequest = { showStampPicker = false },
+                    sheetState = rememberModalBottomSheetState(),
+                    containerColor = AppSurface
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp)
+                            .navigationBarsPadding(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Text(
+                            text = "اختر ختماً لإضافته",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = AppTextPrimary
+                        )
+
+                        // 4 preset stamp designs: "هام جداً", "مرفوض", "تمت المراجعة", "سري جداً"
+                        val presets = listOf(
+                            Triple("هام جداً", Color(0xFFFF4D4D), true),
+                            Triple("مرفوض", Color(0xFFFF3F3F), false),
+                            Triple("تمت المراجعة", Color(0xFF2ECC71), true),
+                            Triple("سري للغابة", Color(0xFFE74C3C), false)
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            presets.forEach { (text, color, filled) ->
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable {
+                                            currentStampText = text
+                                            currentStampColor = color
+                                            currentStampFilled = filled
+                                            currentStampRotation = -15f
+                                            showStampPicker = false
+                                            annotationViewModel.setTool(com.example.ui.AnnotationTool.Stamp)
+                                        }
+                                        .background(
+                                            color = if (filled) color.copy(alpha = 0.15f) else Color.Transparent,
+                                            shape = RoundedCornerShape(4.dp)
+                                        )
+                                        .border(2.dp, color, RoundedCornerShape(4.dp))
+                                        .padding(8.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = text,
+                                        color = color,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        fontWeight = FontWeight.Bold,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
+
+                        Button(
+                            onClick = {
+                                showStampPicker = false
+                                showCustomStampDialog = true
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = AppPrimary),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("ختم مخصص")
+                        }
+                    }
+                }
+            }
+
+            if (showCustomStampDialog) {
+                var textInput by remember { mutableStateOf("") }
+                var selectedColor by remember { mutableStateOf(Color(0xFFFF3F3F)) }
+                var isFilled by remember { mutableStateOf(false) }
+                var rotationValue by remember { mutableStateOf(-15f) }
+
+                AlertDialog(
+                    onDismissRequest = { showCustomStampDialog = false },
+                    title = { Text("إنشاء ختم مخصص", fontWeight = FontWeight.Bold) },
+                    text = {
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = textInput,
+                                onValueChange = { textInput = it },
+                                label = { Text("نص الختم") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            Text("اللون:")
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                val colors = listOf(Color(0xFFFF3F3F), Color(0xFF2ECC71), Color(0xFF3498DB), Color(0xFFF1C40F))
+                                colors.forEach { color ->
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .background(color, CircleShape)
+                                            .border(
+                                                width = if (selectedColor == color) 3.dp else 1.dp,
+                                                color = if (selectedColor == color) Color.White else Color.Transparent,
+                                                shape = CircleShape
+                                            )
+                                            .clickable { selectedColor = color }
+                                    )
+                                }
+                            }
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Checkbox(checked = isFilled, onCheckedChange = { isFilled = it })
+                                Text("خلفية ممتلئة بنصف شفافية")
+                            }
+
+                            Text("زاوية الدوران:")
+                            Slider(
+                                value = rotationValue,
+                                onValueChange = { rotationValue = it },
+                                valueRange = -45f..45f,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                if (textInput.isNotEmpty()) {
+                                    currentStampText = textInput
+                                    currentStampColor = selectedColor
+                                    currentStampFilled = isFilled
+                                    currentStampRotation = rotationValue
+                                    showCustomStampDialog = false
+                                    annotationViewModel.setTool(com.example.ui.AnnotationTool.Stamp)
+                                }
+                            }
+                        ) {
+                            Text("تأكيد")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showCustomStampDialog = false }) {
+                            Text("إلغاء")
+                        }
+                    }
+                )
+            }
+
+            if (showCommentThreadCreatorDialog) {
+                AlertDialog(
+                    onDismissRequest = { showCommentThreadCreatorDialog = false },
+                    title = { Text("إضافة تعليق جديد", fontWeight = FontWeight.Bold) },
+                    text = {
+                        OutlinedTextField(
+                            value = commentInputText,
+                            onValueChange = { commentInputText = it },
+                            label = { Text("أكتب تعليقك هنا...") },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    },
+                    confirmButton = {
+                        Button(
+                            onClick = {
+                                val text = commentInputText
+                                val pos = activeCommentPosition
+                                val docUri = activeUri
+                                if (text.isNotEmpty() && pos != null && docUri != null) {
+                                    viewModel.insertComment(
+                                        com.example.data.CommentEntity(
+                                            fileUri = docUri,
+                                            pageNumber = currentPage,
+                                            positionX = pos.x,
+                                            positionY = pos.y,
+                                            text = text,
+                                            authorName = "أنا"
+                                        )
+                                    )
+                                    showCommentThreadCreatorDialog = false
+                                    commentInputText = ""
+                                    annotationViewModel.setTool(com.example.ui.AnnotationTool.None)
+                                }
+                            }
+                        ) {
+                            Text("إرسال")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showCommentThreadCreatorDialog = false }) {
+                            Text("إلغاء")
+                        }
+                    }
+                )
+            }
+
+            if (showCommentThreadSheet && activeCommentToViewThread != null) {
+                val rootComment = activeCommentToViewThread!!
+                val threadReplies = activeComments.filter { it.parentId == rootComment.id }
+                var replyInput by remember { mutableStateOf("") }
+
+                ModalBottomSheet(
+                    onDismissRequest = { showCommentThreadSheet = false },
+                    sheetState = rememberModalBottomSheetState(),
+                    containerColor = AppSurface
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp)
+                            .navigationBarsPadding(),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "محادثة التعليق",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = AppPrimary
+                            )
+                            IconButton(onClick = {
+                                viewModel.deleteComment(rootComment.id)
+                                showCommentThreadSheet = false
+                            }) {
+                                Icon(Icons.Default.Delete, contentDescription = "حذف المحادثة بالكامل", tint = Color(0xFFFF6B6B))
+                            }
+                        }
+
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = AppBottomBarBg),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(text = rootComment.authorName, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = AppPrimary)
+                                Spacer(Modifier.height(4.dp))
+                                Text(text = rootComment.text, fontSize = 13.sp, color = AppTextPrimary)
+                            }
+                        }
+
+                        LazyColumn(
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(max = 250.dp)
+                        ) {
+                            items(threadReplies) { reply ->
+                                Card(
+                                    colors = CardDefaults.cardColors(containerColor = AppBottomBarBg.copy(alpha = 0.5f)),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(start = 24.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(10.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(text = reply.authorName, fontWeight = FontWeight.Bold, fontSize = 12.sp, color = Color.Gray)
+                                            Spacer(Modifier.height(4.dp))
+                                            Text(text = reply.text, fontSize = 13.sp, color = AppTextPrimary)
+                                        }
+                                        IconButton(
+                                            onClick = { viewModel.deleteComment(reply.id) },
+                                            modifier = Modifier.size(24.dp)
+                                        ) {
+                                            Icon(Icons.Default.Clear, contentDescription = "حذف الرد", tint = Color.Gray, modifier = Modifier.size(16.dp))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = replyInput,
+                                onValueChange = { replyInput = it },
+                                placeholder = { Text("أكتب رداً...") },
+                                modifier = Modifier.weight(1f),
+                                singleLine = true
+                            )
+                            IconButton(
+                                onClick = {
+                                    val docUri = activeUri
+                                    if (replyInput.isNotEmpty() && docUri != null) {
+                                        viewModel.insertComment(
+                                            com.example.data.CommentEntity(
+                                                fileUri = docUri,
+                                                pageNumber = currentPage,
+                                                positionX = rootComment.positionX,
+                                                positionY = rootComment.positionY,
+                                                parentId = rootComment.id,
+                                                text = replyInput,
+                                                authorName = "أنا"
+                                            )
+                                        )
+                                        replyInput = ""
+                                    }
+                                }
+                            ) {
+                                Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "إرسال الرد", tint = AppPrimary)
+                            }
+                        }
+                    }
+                }
             }
         }
         }

@@ -119,6 +119,10 @@ class PdfRepository @Inject constructor(
         highlightDao.insert(highlight)
     }
 
+    suspend fun insertHighlights(highlights: List<HighlightEntity>) = withContext(Dispatchers.IO) {
+        highlightDao.insertAll(highlights)
+    }
+
     suspend fun deleteHighlight(id: Int) = withContext(Dispatchers.IO) {
         highlightDao.deleteById(id)
     }

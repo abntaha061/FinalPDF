@@ -97,7 +97,7 @@ class MainActivity : ComponentActivity() {
 
     private lateinit var viewModel: PdfViewModel
     private val database by lazy { AppDatabase.getDatabase(this) }
-    private val repository by lazy { PdfRepository(database.recentFileDao(), database.bookmarkDao(), database.highlightDao(), database.readingSessionDao(), database.ocrResultDao(), database.audioBookmarkDao()) }
+    private val repository by lazy { PdfRepository(database.recentFileDao(), database.bookmarkDao(), database.highlightDao(), database.readingSessionDao(), database.ocrResultDao(), database.audioBookmarkDao(), database.commentDao()) }
 
     private fun hasRequiredPermission(context: Context): Boolean {
         return when {
