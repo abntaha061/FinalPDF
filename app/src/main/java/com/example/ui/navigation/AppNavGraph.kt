@@ -16,6 +16,8 @@ sealed class Screen(val route: String) {
     object Splash    : Screen("splash")
     object Onboarding: Screen("onboarding")
     object Home      : Screen("home")
+    object FileBrowser : Screen("files")
+    object CloudBrowser : Screen("cloud")
     object PdfReader : Screen("pdf_reader?uri={uri}") {
         fun createRoute(encodedUri: String) = "pdf_reader?uri=$encodedUri"
     }
@@ -64,6 +66,29 @@ fun AppNavGraph(
 
         // HOME
         composable(Screen.Home.route) { HomeScreen(navController) }
+
+        // FILES (FILE BROWSER)
+        composable(Screen.FileBrowser.route) {
+            val context = androidx.compose.ui.platform.LocalContext.current
+            val activity = context as? androidx.activity.ComponentActivity
+                ?: throw IllegalStateException("Context must be ComponentActivity")
+            val viewModel = androidx.compose.runtime.remember(context) {
+                androidx.lifecycle.ViewModelProvider(activity)[com.example.ui.PdfViewModel::class.java]
+            }
+            FileBrowserScreen(
+                viewModel = viewModel,
+                onPdfOpened = { uri ->
+                    navController.navigate(Screen.PdfReader.createRoute(Uri.encode(uri.toString())))
+                }
+            )
+        }
+
+        // CLOUD (CLOUD BROWSER)
+        composable(Screen.CloudBrowser.route) {
+            CloudBrowserScreen(
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
 
         // PDF READER — slide from bottom (sheet feel)
         composable(

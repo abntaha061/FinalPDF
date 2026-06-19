@@ -62,6 +62,9 @@ private val FILTER_MIN_PAGES_KEY = androidx.datastore.preferences.core.intPrefer
 private val FILTER_MAX_PAGES_KEY = androidx.datastore.preferences.core.intPreferencesKey("filter_max_pages")
 private val FILTER_DATE_RANGE_KEY = androidx.datastore.preferences.core.stringPreferencesKey("filter_date_range")
 
+private val LAST_FILES_CHECK_KEY = androidx.datastore.preferences.core.longPreferencesKey("last_files_check")
+private val LAST_CLOUD_CHECK_KEY = androidx.datastore.preferences.core.longPreferencesKey("last_cloud_check")
+
 class PdfViewModel(
     private val repository: PdfRepository,
     private val context: Context
@@ -72,6 +75,64 @@ class PdfViewModel(
 
     private val _isReady = MutableStateFlow(false)
     val isReady: StateFlow<Boolean> = _isReady.asStateFlow()
+
+    // Events for Tab Click Logic
+    private val _scrollToTopEvent = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val scrollToTopEvent = _scrollToTopEvent.asSharedFlow()
+
+    private val _navigateToRootEvent = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val navigateToRootEvent = _navigateToRootEvent.asSharedFlow()
+
+    fun triggerScrollToTop() {
+        _scrollToTopEvent.tryEmit(Unit)
+    }
+
+    fun triggerNavigateToRoot() {
+        _navigateToRootEvent.tryEmit(Unit)
+    }
+
+    private val _hasUnreadFiles = MutableStateFlow(false)
+    val hasUnreadFiles: StateFlow<Boolean> = _hasUnreadFiles.asStateFlow()
+
+    private val _hasUnreadCloud = MutableStateFlow(false)
+    val hasUnreadCloud: StateFlow<Boolean> = _hasUnreadCloud.asStateFlow()
+
+    fun markFilesAsRead() {
+        _hasUnreadFiles.value = false
+        viewModelScope.launch {
+            try {
+                context.pdfReaderDataStore.edit { preferences ->
+                    preferences[LAST_FILES_CHECK_KEY] = System.currentTimeMillis()
+                }
+            } catch (e: Exception) {
+                // ignore
+            }
+        }
+    }
+
+    fun markCloudAsRead() {
+        _hasUnreadCloud.value = false
+        viewModelScope.launch {
+            try {
+                context.pdfReaderDataStore.edit { preferences ->
+                    preferences[LAST_CLOUD_CHECK_KEY] = System.currentTimeMillis()
+                }
+            } catch (e: Exception) {
+                // ignore
+            }
+        }
+    }
+
+    fun setUnreadCloud(value: Boolean) {
+        _hasUnreadCloud.value = value
+    }
+
+    private val _isBottomBarVisible = MutableStateFlow(true)
+    val isBottomBarVisible: StateFlow<Boolean> = _isBottomBarVisible.asStateFlow()
+
+    fun setBottomBarVisible(visible: Boolean) {
+        _isBottomBarVisible.value = visible
+    }
 
     private val _isPdfSearchable = MutableStateFlow<Boolean?>(null)
     val isPdfSearchable: StateFlow<Boolean?> = _isPdfSearchable.asStateFlow()
@@ -412,6 +473,38 @@ class PdfViewModel(
         // Load saved digital signature from SharedPreferences if existing
         val prefs = context.getSharedPreferences("PdfPrefs", Context.MODE_PRIVATE)
         _savedSignaturePath.value = prefs.getString("saved_signature_path", null)
+
+        // Observe recent documents to check if any file in the last 24 hours is after last_files_check
+        viewModelScope.launch {
+            try {
+                combine(
+                    recentDocuments,
+                    context.pdfReaderDataStore.data.map { it[LAST_FILES_CHECK_KEY] ?: 0L }
+                ) { documents, lastCheck ->
+                    val now = System.currentTimeMillis()
+                    val oneDayAgo = now - 24 * 60 * 60 * 1000L
+                    documents.any { doc ->
+                        doc.lastOpenedAt > oneDayAgo && doc.lastOpenedAt > lastCheck
+                    }
+                }.collect { hasUnread ->
+                    _hasUnreadFiles.value = hasUnread
+                }
+            } catch (e: Exception) {
+                // ignore
+            }
+        }
+
+        // Check cloud syncer unread badge
+        viewModelScope.launch {
+            try {
+                context.pdfReaderDataStore.data.map { it[LAST_CLOUD_CHECK_KEY] ?: 0L }.collect { lastCheck ->
+                    // Set to true if never checked before (inviting onboarding sync style)
+                    _hasUnreadCloud.value = lastCheck == 0L
+                }
+            } catch (e: Exception) {
+                // ignore
+            }
+        }
 
         viewModelScope.launch {
             context.dataStore.data.map { preferences ->

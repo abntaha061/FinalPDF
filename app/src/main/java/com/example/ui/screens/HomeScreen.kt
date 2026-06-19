@@ -208,6 +208,29 @@ fun HomeScreenRealFiles(
     onNavigateToFavorites: () -> Unit
 ) {
     val context = LocalContext.current
+    
+    val scrollState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
+    var previousOffset by remember { mutableStateOf(0) }
+
+    LaunchedEffect(scrollState) {
+        snapshotFlow { scrollState.firstVisibleItemScrollOffset }
+            .collect { offset ->
+                val isBottomBarVisible = offset <= previousOffset || offset < 50
+                viewModel.setBottomBarVisible(isBottomBarVisible)
+                previousOffset = offset
+            }
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.scrollToTopEvent.collect {
+            try {
+                scrollState.animateScrollToItem(0)
+            } catch (e: Exception) {
+                // ignore
+            }
+        }
+    }
+
     val totalPdfs = recentPdfs.size
     val lastOpenedDoc = recentPdfs.firstOrNull()
     val lastOpenedName = lastOpenedDoc?.name ?: "—"
@@ -472,6 +495,7 @@ fun HomeScreenRealFiles(
             )
 
             LazyVerticalGrid(
+                state = scrollState,
                 columns = GridCells.Fixed(if (isMedium) 3 else 2),
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -632,57 +656,18 @@ fun HomeScreen(
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
         Scaffold(
             containerColor = AppBackground,
-            bottomBar = {
-                NavigationBar(
-                    containerColor = Color(0xFF0D0D0F),
-                    tonalElevation = 8.dp
-                ) {
-                    NavigationBarItem(
-                        selected = selectedTab == 0,
-                        onClick = { selectedTab = 0 },
-                        icon = { Icon(imageVector = Icons.Default.Home, contentDescription = "الرئيسية") },
-                        label = { Text("الرئيسية") },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = Color.White,
-                            selectedTextColor = AppPrimary,
-                            unselectedIconColor = AppTextSecondary,
-                            unselectedTextColor = AppTextSecondary,
-                            indicatorColor = AppPrimary
-                        ),
-                        modifier = Modifier.testTag("home_tab")
-                    )
-                    NavigationBarItem(
-                        selected = selectedTab == 1,
-                        onClick = { selectedTab = 1 },
-                        icon = { Icon(imageVector = Icons.Default.FolderOpen, contentDescription = "الملفات") },
-                        label = { Text("الملفات") },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = Color.White,
-                            selectedTextColor = AppPrimary,
-                            unselectedIconColor = AppTextSecondary,
-                            unselectedTextColor = AppTextSecondary,
-                            indicatorColor = AppPrimary
-                        ),
-                        modifier = Modifier.testTag("files_tab")
-                    )
-                    NavigationBarItem(
-                        selected = selectedTab == 2,
-                        onClick = { selectedTab = 2 },
-                        icon = { Icon(imageVector = Icons.Default.Category, contentDescription = "الأدوات") },
-                        label = { Text("الأدوات") },
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = Color.White,
-                            selectedTextColor = AppPrimary,
-                            unselectedIconColor = AppTextSecondary,
-                            unselectedTextColor = AppTextSecondary,
-                            indicatorColor = AppPrimary
-                        ),
-                        modifier = Modifier.testTag("tools_tab")
-                    )
-                }
-            },
+            bottomBar = {},
             floatingActionButton = {
-                if (selectedTab == 0) {
+                val isBottomBarVisible by viewModel.isBottomBarVisible.collectAsState()
+                AnimatedVisibility(
+                    visible = isBottomBarVisible,
+                    enter = slideInVertically(
+                        animationSpec = tween(250, delayMillis = 50)
+                    ) { it },
+                    exit = slideOutVertically(
+                        animationSpec = tween(250)
+                    ) { it }
+                ) {
                     var isFabExpanded by remember { mutableStateOf(false) }
                     
                     Column(
@@ -839,29 +824,12 @@ fun HomeScreen(
             },
             modifier = modifier
         ) { innerPadding ->
-            if (selectedTab == 1) {
-                FileBrowserScreen(
-                    viewModel = viewModel,
-                    onPdfOpened = onPdfOpened,
-                    modifier = Modifier.padding(innerPadding)
-                )
-            } else if (selectedTab == 2) {
-                PdfToolsScreen(
-                    onNavigateToMerge = onNavigateToMerge,
-                    onNavigateToMultiSearch = onNavigateToMultiSearch,
-                    onNavigateToPdfToImages = onNavigateToPdfToImages,
-                    onNavigateToImagesToPdf = onNavigateToImagesToPdf,
-                    onNavigateToPdfToWord = onNavigateToPdfToWord,
-                    onNavigateToSignature = onNavigateToSignature,
-                    modifier = Modifier.padding(innerPadding)
-                )
-            } else {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(innerPadding)
-                        .padding(horizontal = 20.dp, vertical = 16.dp)
-                ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .padding(horizontal = 20.dp, vertical = 16.dp)
+            ) {
                 // 1. App Title and Settings Icon Row
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1003,7 +971,6 @@ fun HomeScreen(
                 }
             }
         }
-    }
 
         if (showSortSheet) {
             ModalBottomSheet(

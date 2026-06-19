@@ -187,6 +187,13 @@ fun FileBrowserScreen(
 
     // Dynamic states
     var currentDirectory by remember { mutableStateOf<File?>(if (roots.size == 1) roots.first() else null) }
+    
+    LaunchedEffect(Unit) {
+        viewModel.navigateToRootEvent.collect {
+            currentDirectory = if (roots.size == 1) roots.first() else null
+        }
+    }
+
     var fileItems by remember { mutableStateOf<List<File>>(emptyList()) }
     var isLoadingFiles by remember { mutableStateOf(false) }
 

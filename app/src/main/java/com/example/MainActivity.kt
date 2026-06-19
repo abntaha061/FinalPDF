@@ -38,6 +38,10 @@ import androidx.compose.material3.TextButton
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.compose.currentBackStackEntryAsState
+import androidx.compose.material3.Scaffold
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import android.animation.ObjectAnimator
 import android.animation.AnimatorSet
@@ -375,37 +379,62 @@ class MainActivity : ComponentActivity() {
                             }
                         }
 
-                        Box(modifier = Modifier.fillMaxSize()) {
-                            com.example.ui.navigation.AppNavGraph(navController = navController)
+                        val currentBackStackEntry by navController.currentBackStackEntryAsState()
+                        val currentRoute = currentBackStackEntry?.destination?.route
 
-                            if (isDragging) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .background(Color.Black.copy(alpha = 0.6f))
-                                        .padding(40.dp)
-                                ) {
+                        val showBottomBar = currentRoute in listOf("home", "files", "cloud", "pdf_tools")
+                        val isBottomBarVisible by viewModel.isBottomBarVisible.collectAsState()
+
+                        Scaffold(
+                            bottomBar = {
+                                if (showBottomBar) {
+                                    AnimatedVisibility(
+                                        visible = isBottomBarVisible,
+                                        enter = slideInVertically(tween(250)) { it },
+                                        exit = slideOutVertically(tween(250)) { it }
+                                    ) {
+                                        com.example.ui.navigation.MainBottomNav(
+                                            navController = navController,
+                                            currentRoute = currentRoute,
+                                            viewModel = viewModel
+                                        )
+                                    }
+                                }
+                            },
+                            containerColor = MaterialTheme.colorScheme.background
+                        ) { innerPadding ->
+                            Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
+                                com.example.ui.navigation.AppNavGraph(navController = navController)
+
+                                if (isDragging) {
                                     Box(
                                         modifier = Modifier
                                             .fillMaxSize()
-                                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f), RoundedCornerShape(16.dp))
-                                            .border(3.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(16.dp)),
-                                        contentAlignment = Alignment.Center
+                                            .background(Color.Black.copy(alpha = 0.6f))
+                                            .padding(40.dp)
                                     ) {
-                                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                            Icon(
-                                                imageVector = Icons.Default.PictureAsPdf,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.primary,
-                                                modifier = Modifier.size(64.dp)
-                                            )
-                                            Spacer(modifier = Modifier.height(16.dp))
-                                            Text(
-                                                text = "أفلت ملف PDF هنا",
-                                                color = MaterialTheme.colorScheme.primary,
-                                                fontSize = 20.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f), RoundedCornerShape(16.dp))
+                                                .border(3.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(16.dp)),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                                Icon(
+                                                    imageVector = Icons.Default.PictureAsPdf,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(64.dp)
+                                                )
+                                                Spacer(modifier = Modifier.height(16.dp))
+                                                Text(
+                                                    text = "أفلت ملف PDF هنا",
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    fontSize = 20.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
                                         }
                                     }
                                 }
