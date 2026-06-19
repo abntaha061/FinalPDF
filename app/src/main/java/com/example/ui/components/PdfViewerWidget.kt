@@ -345,7 +345,7 @@ fun PdfViewerWidget(
                                 .enableSwipe(true)
                                 .swipeHorizontal(if (isPaged) true else false)
                                 .pageSnap(if (isPaged) true else false)
-                                .autoSpacing(true)                        // Always spacing enabled for beautiful clean page separation
+                                .autoSpacing(false)                       // Disable autoSpacing so that custom pageSpacing setting is precisely and cleanly respected (like WPS Office)
                                 .pageFling(isPaged)                       // Enable pageFling only in paged mode for smooth momentum scrolling
                                 .enableDoubletap(true)                    // native double tap zoom enabled
                                 .defaultPage(currentPage)                 // start from current page
