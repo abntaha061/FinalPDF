@@ -2884,35 +2884,95 @@ fun ViewerScreen(
                         },
                         onShareClick = {
                             if (activeUri != null) {
-                                try {
-                                    val uri = Uri.parse(activeUri!!)
-                                    val shareUri = if (uri.scheme == "file") {
-                                        val file = File(uri.path ?: "")
-                                        androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-                                    } else if (uri.scheme == "content") {
-                                        uri
-                                    } else {
-                                        val file = File(activeUri!!)
-                                        if (file.exists()) {
-                                            androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
-                                        } else {
-                                            uri
-                                        }
-                                    }
+                                coroutineScope.launch {
+                                    try {
+                                        android.widget.Toast.makeText(
+                                            context,
+                                            "جاري تحضير مستند PDF للمشاركة...",
+                                            android.widget.Toast.LENGTH_SHORT
+                                        ).show()
 
-                                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                        type = "application/pdf"
-                                        putExtra(Intent.EXTRA_STREAM, shareUri)
-                                        putExtra(Intent.EXTRA_SUBJECT, documentName)
-                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                        val preparedFile = withContext(Dispatchers.IO) {
+                                            try {
+                                                val uri = Uri.parse(activeUri!!)
+                                                val cacheDir = File(context.cacheDir, "shared_pdfs").apply { mkdirs() }
+                                                val cleanName = if (!documentName.isNullOrBlank()) {
+                                                    if (documentName.endsWith(".pdf", ignoreCase = true)) documentName else "$documentName.pdf"
+                                                } else {
+                                                    "document.pdf"
+                                                }
+                                                val destinationFile = File(cacheDir, cleanName)
+
+                                                if (uri.scheme == "content") {
+                                                    context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                                                        FileOutputStream(destinationFile).use { outputStream ->
+                                                            inputStream.copyTo(outputStream)
+                                                        }
+                                                    }
+                                                    if (destinationFile.exists() && destinationFile.length() > 0) {
+                                                        destinationFile
+                                                    } else null
+                                                } else {
+                                                    val pathStr = uri.path ?: activeUri!!
+                                                    val sourceFile = File(pathStr)
+                                                    if (sourceFile.exists()) {
+                                                        sourceFile.inputStream().use { inputStream ->
+                                                            FileOutputStream(destinationFile).use { outputStream ->
+                                                                inputStream.copyTo(outputStream)
+                                                            }
+                                                        }
+                                                        if (destinationFile.exists() && destinationFile.length() > 0) {
+                                                            destinationFile
+                                                        } else null
+                                                    } else {
+                                                        null
+                                                    }
+                                                }
+                                            } catch (e: Exception) {
+                                                Log.e("ViewerScreen", "Error preparing PDF in IO", e)
+                                                null
+                                            }
+                                        }
+
+                                        if (preparedFile != null && preparedFile.exists()) {
+                                            val shareUri = androidx.core.content.FileProvider.getUriForFile(
+                                                context,
+                                                "${context.packageName}.fileprovider",
+                                                preparedFile
+                                            )
+
+                                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                                type = "application/pdf"
+                                                putExtra(Intent.EXTRA_STREAM, shareUri)
+                                                putExtra(Intent.EXTRA_SUBJECT, documentName)
+                                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                            }
+                                            val chooserIntent = Intent.createChooser(shareIntent, "مشاركة مستند PDF").apply {
+                                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                            }
+                                            context.startActivity(chooserIntent)
+                                        } else {
+                                            android.widget.Toast.makeText(
+                                                context,
+                                                "خطأ: الملف غير موجود أو تالف ولا يمكن مشاركته.",
+                                                android.widget.Toast.LENGTH_LONG
+                                            ).show()
+                                        }
+                                    } catch (e: Exception) {
+                                        Log.e("ViewerScreen", "Error during sharing flow", e)
+                                        android.widget.Toast.makeText(
+                                            context,
+                                            "حدث خطأ أثناء محاولة مشاركة الملف.",
+                                            android.widget.Toast.LENGTH_LONG
+                                        ).show()
                                     }
-                                    val chooserIntent = Intent.createChooser(shareIntent, "مشاركة مستند PDF").apply {
-                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                    }
-                                    context.startActivity(chooserIntent)
-                                } catch (e: Exception) {
-                                    Log.e("ViewerScreen", "Error sharing document", e)
                                 }
+                            } else {
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "لا يوجد ملف مفتوح حالياً للمشاركة.",
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
                             }
                         },
                         onGoToPageClick = {
