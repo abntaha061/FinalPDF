@@ -17,8 +17,8 @@ interface RecentFileDao {
     @Query("""
       SELECT * FROM recent_files 
       WHERE sizeBytes BETWEEN :minSize AND :maxSize
-      AND totalPages BETWEEN :minPages AND :maxPages
-      AND lastOpenedAt >= :minDate
+      AND (totalPages = 0 OR totalPages BETWEEN :minPages AND :maxPages)
+      AND (lastOpenedAt >= :minDate OR lastOpenedAt = 0)
       ORDER BY lastOpenedAt DESC
     """)
     fun getFiltered(

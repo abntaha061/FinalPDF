@@ -77,6 +77,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -104,20 +108,13 @@ class MainActivity : ComponentActivity() {
     private val repository by lazy { PdfRepository(database.recentFileDao(), database.bookmarkDao(), database.highlightDao(), database.readingSessionDao(), database.ocrResultDao(), database.audioBookmarkDao(), database.commentDao()) }
 
     private fun hasRequiredPermission(context: Context): Boolean {
-        return when {
-            Build.VERSION.SDK_INT >= 33 -> {
-                // On Android 13+, standard storage permission is deprecated. Since we use Storage Access Framework
-                // dynamically, we can return true directly to avoid requesting unnecessary media permissions here.
-                true
-            }
-            else -> {
-                // For API <= 32 (including Android 11 & 12 / API 30-32), standard READ_EXTERNAL_STORAGE is sufficient
-                // and avoids launching the highly restrictive MANAGE_EXTERNAL_STORAGE settings page.
-                ContextCompat.checkSelfPermission(
-                    context,
-                    Manifest.permission.READ_EXTERNAL_STORAGE
-                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-            }
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            android.os.Environment.isExternalStorageManager()
+        } else {
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.READ_EXTERNAL_STORAGE
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
         }
     }
 
@@ -192,9 +189,9 @@ class MainActivity : ComponentActivity() {
                         LocalTextStyle provides LocalTextStyle.current.copy(fontSize = uiFontSize.sp)
                     ) {
                         val context = LocalContext.current
+                        val navController = rememberNavController()
+                        val largeFileUriPending by viewModel.largeFileUriPending.collectAsState()
                         var hasPermission by remember { mutableStateOf(hasRequiredPermission(context)) }
-                        var showRationaleDialog by remember { mutableStateOf(false) }
-                        var showDeniedDialog by remember { mutableStateOf(false) }
 
                         val standardPermissionLauncher = rememberLauncherForActivityResult(
                             contract = ActivityResultContracts.RequestPermission()
@@ -221,146 +218,124 @@ class MainActivity : ComponentActivity() {
                             }
                         }
 
-                if (showRationaleDialog) {
-                    AlertDialog(
-                        onDismissRequest = { showRationaleDialog = false },
-                        title = { Text("طلب صلاحية الوصول", fontWeight = FontWeight.Bold) },
-                        text = { Text("يحتاج التطبيق إلى صلاحية الوصول إلى الملفات لقراءة كتب ومستندات الـ PDF المخزنة على جهازك وعرضها لك.") },
-                        confirmButton = {
-                            Button(
-                                onClick = {
-                                    showRationaleDialog = false
-                                    if (Build.VERSION.SDK_INT >= 33) {
-                                        standardPermissionLauncher.launch(Manifest.permission.READ_MEDIA_IMAGES)
-                                    } else {
-                                        standardPermissionLauncher.launch(Manifest.permission.READ_EXTERNAL_STORAGE)
-                                    }
-                                }
-                            ) {
-                                Text("موافق")
-                            }
-                        },
-                        dismissButton = {
-                            TextButton(
-                                onClick = { showRationaleDialog = false }
-                            ) {
-                                Text("إلغاء")
+                        LaunchedEffect(hasPermission) {
+                            if (hasPermission) {
+                                viewModel.scanDeviceForPdfs(context)
                             }
                         }
-                    )
-                }
 
-                if (showDeniedDialog) {
-                    AlertDialog(
-                        onDismissRequest = { showDeniedDialog = false },
-                        title = { Text("الصلاحية مطلوبة", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error) },
-                        text = { Text("تم رفض تفعيل صلاحية الوصول إلى الملفات. يمكنك تفعيلها يدوياً من إعدادات النظام، أو مواصلة استخدام التطبيق بميزات جزئية.") },
-                        confirmButton = {
-                            Button(
-                                onClick = {
-                                    try {
-                                        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                                            data = Uri.parse("package:${context.packageName}")
-                                        }
-                                        context.startActivity(intent)
-                                    } catch (e: Exception) {
-                                        // Ignore
-                                    }
-                                }
+                        if (!hasPermission) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Color(0xFF13131A))
+                                    .padding(24.dp),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Text("فتح الإعدادات")
-                            }
-                        },
-                        dismissButton = {
-                            TextButton(
-                                onClick = { showDeniedDialog = false }
-                            ) {
-                                Text("إلغاء")
-                            }
-                        }
-                    )
-                }
-
-                if (isOnboardingCompleted != null) {
-                    Surface(
-                        modifier = Modifier.fillMaxSize(),
-                        color = MaterialTheme.colorScheme.background
-                    ) {
-                        val navController = rememberNavController()
-
-                        val securityExceptionUri by viewModel.securityExceptionUri.collectAsState()
-                        val largeFileUriPending by viewModel.largeFileUriPending.collectAsState()
-
-                        if (securityExceptionUri != null) {
-                            AlertDialog(
-                                onDismissRequest = { viewModel.clearSecurityException() },
-                                title = { Text("لا يوجد إذن للوصول", fontWeight = FontWeight.Bold) },
-                                text = { Text("لا يملك التطبيق صلاحية قراءة هذا الملف. اذهب إلى الإعدادات وامنح الإذن يدوياً.") },
-                                confirmButton = {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Folder,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(96.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(24.dp))
+                                    Text(
+                                        text = "قارئ الكتب والمستندات",
+                                        color = Color.White,
+                                        fontSize = 24.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    Text(
+                                        text = "يرجى منح صلاحية الوصول للملفات من أجل العثور على كتب ومستندات الـ PDF وقراءتها مباشرة.",
+                                        color = Color.Gray,
+                                        fontSize = 16.sp,
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                        modifier = Modifier.padding(horizontal = 16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.height(32.dp))
                                     Button(
                                         onClick = {
-                                            viewModel.clearSecurityException()
-                                            try {
-                                                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                                                    data = Uri.fromParts("package", packageName, null)
+                                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                                                try {
+                                                    val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                                                        data = Uri.parse("package:${context.packageName}")
+                                                    }
+                                                    manageStorageLauncher.launch(intent)
+                                                } catch (e: Exception) {
+                                                    try {
+                                                        val intent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                                                        manageStorageLauncher.launch(intent)
+                                                    } catch (ex: Exception) {
+                                                        // ignore
+                                                    }
                                                 }
-                                                startActivity(intent)
-                                            } catch (e: Exception) {
-                                                // ignore
+                                            } else {
+                                                standardPermissionLauncher.launch(Manifest.permission.READ_EXTERNAL_STORAGE)
                                             }
-                                        }
+                                        },
+                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                                        shape = RoundedCornerShape(12.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(56.dp)
                                     ) {
-                                        Text("فتح الإعدادات")
+                                        Text(
+                                            text = "منح الصلاحية",
+                                            color = Color.White,
+                                            fontSize = 18.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
                                     }
-                                },
-                                dismissButton = {
-                                    TextButton(
-                                        onClick = { viewModel.clearSecurityException() }
-                                    ) {
-                                        Text("إلغاء")
-                                    }
-                                },
-                                modifier = Modifier.testTag("permission_denied_dialog")
-                            )
-                        }
-
-                        if (largeFileUriPending != null) {
-                            val pendingUri = largeFileUriPending!!.first
-                            val sizeMB = largeFileUriPending!!.second
-                            AlertDialog(
-                                onDismissRequest = { viewModel.clearLargeFilePending() },
-                                title = { Text("الملف كبير جداً", fontWeight = FontWeight.Bold) },
-                                text = { Text("حجم الملف $sizeMB MB. قد يستغرق التحميل وقتاً أطول أو يسبب بطءاً. هل تريد المتابعة؟") },
-                                confirmButton = {
-                                    Button(
-                                        onClick = {
-                                            viewModel.selectDocumentForced(context, Uri.parse(pendingUri))
-                                            val currentRoute = navController.currentBackStackEntry?.destination?.route ?: ""
-                                            if (!currentRoute.startsWith("pdf_reader")) {
-                                                val encodedUri = Uri.encode(pendingUri)
-                                                navController.navigate(com.example.ui.navigation.Screen.PdfReader.createRoute(encodedUri))
+                                }
+                            }
+                        } else if (isOnboardingCompleted != null) {
+                            Surface(
+                                modifier = Modifier.fillMaxSize(),
+                                color = MaterialTheme.colorScheme.background
+                            ) {
+                                if (largeFileUriPending != null) {
+                                    val pendingUri = largeFileUriPending!!.first
+                                    val sizeMB = largeFileUriPending!!.second
+                                    AlertDialog(
+                                        onDismissRequest = { viewModel.clearLargeFilePending() },
+                                        title = { Text("الملف كبير جداً", fontWeight = FontWeight.Bold) },
+                                        text = { Text("حجم الملف $sizeMB MB. قد يستغرق التحميل وقتاً أطول أو يسبب بطءاً. هل تريد المتابعة؟") },
+                                        confirmButton = {
+                                            Button(
+                                                onClick = {
+                                                    viewModel.selectDocumentForced(context, Uri.parse(pendingUri))
+                                                    val currentRoute = navController.currentBackStackEntry?.destination?.route ?: ""
+                                                    if (!currentRoute.startsWith("pdf_reader")) {
+                                                        val encodedUri = Uri.encode(pendingUri)
+                                                        navController.navigate(com.example.ui.navigation.Screen.PdfReader.createRoute(encodedUri))
+                                                    }
+                                                }
+                                            ) {
+                                                Text("متابعة")
                                             }
-                                        }
-                                    ) {
-                                        Text("متابعة")
-                                    }
-                                },
-                                dismissButton = {
-                                    TextButton(
-                                        onClick = {
-                                            viewModel.clearLargeFilePending()
-                                            val currentRoute = navController.currentBackStackEntry?.destination?.route ?: ""
-                                            if (currentRoute.startsWith("pdf_reader")) {
-                                                navController.popBackStack(com.example.ui.navigation.Screen.Home.route, inclusive = false)
+                                        },
+                                        dismissButton = {
+                                            TextButton(
+                                                onClick = {
+                                                    viewModel.clearLargeFilePending()
+                                                    val currentRoute = navController.currentBackStackEntry?.destination?.route ?: ""
+                                                    if (currentRoute.startsWith("pdf_reader")) {
+                                                        navController.popBackStack(com.example.ui.navigation.Screen.Home.route, inclusive = false)
+                                                    }
+                                                }
+                                            ) {
+                                                Text("إلغاء")
                                             }
-                                        }
-                                    ) {
-                                        Text("إلغاء")
-                                    }
-                                },
-                                modifier = Modifier.testTag("file_too_large_dialog")
-                            )
-                        }
+                                        },
+                                        modifier = Modifier.testTag("file_too_large_dialog")
+                                    )
+                                }
 
                         val isDragging by viewModel.isDragging.collectAsState()
                         val pendingDragDropUri by viewModel.pendingDragDropUri.collectAsState()

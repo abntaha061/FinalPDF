@@ -610,19 +610,33 @@ class PdfViewModel(
         _largeFileUriPending.value = null
 
         // Try to take persistable permission FIRST, before anything else!
-        try {
-            val flags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
-            context.contentResolver.takePersistableUriPermission(uri, flags)
-        } catch (e: Exception) {
-            // Ignore if it's not a persistent URI or already granted
+        if (uri.scheme != "file") {
+            try {
+                val flags = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                context.contentResolver.takePersistableUriPermission(uri, flags)
+            } catch (e: Exception) {
+                // Ignore if it's not a persistent URI or already granted
+            }
         }
 
         // 1. Get file size from metadata safely first (which does not throw SecurityException)
         val metadata = getUriMetadata(context, uri)
         var sizeBytes = metadata.second
 
-        // If metadata size is zero or not found, try to open file descriptor safely
-        if (sizeBytes <= 0) {
+        // If scheme is file, read direct file length
+        if (uri.scheme == "file") {
+            try {
+                val file = java.io.File(uri.path ?: "")
+                if (file.exists()) {
+                    sizeBytes = file.length()
+                }
+            } catch (e: Exception) {
+                // Ignore
+            }
+        }
+
+        // If metadata size is zero or not found, try to open file descriptor safely (only for non-file URIs)
+        if (sizeBytes <= 0 && uri.scheme != "file") {
             try {
                 val pfd = context.contentResolver.openFileDescriptor(uri, "r")
                 sizeBytes = pfd?.statSize ?: 0L
@@ -653,7 +667,11 @@ class PdfViewModel(
 
         // Validate it's actually a PDF (check magic bytes):
         try {
-            val stream = context.contentResolver.openInputStream(uri)
+            val stream = if (uri.scheme == "file") {
+                java.io.FileInputStream(java.io.File(uri.path ?: ""))
+            } else {
+                context.contentResolver.openInputStream(uri)
+            }
             val header = ByteArray(4)
             stream?.read(header)
             stream?.close()
@@ -751,6 +769,88 @@ class PdfViewModel(
                 _currentDocument.value = _currentDocument.value?.copy(currentPage = page, totalPages = total)
             }
             checkIfCurrentPageIsBookmarked()
+        }
+    }
+
+    fun scanDeviceForPdfs(context: Context) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val list = mutableListOf<java.io.File>()
+            
+            // Fast MediaStore query
+            try {
+                val uri = android.provider.MediaStore.Files.getContentUri("external")
+                val projection = arrayOf(
+                    android.provider.MediaStore.Files.FileColumns.DATA,
+                    android.provider.MediaStore.Files.FileColumns.DISPLAY_NAME,
+                    android.provider.MediaStore.Files.FileColumns.SIZE
+                )
+                val selection = "${android.provider.MediaStore.Files.FileColumns.MIME_TYPE} = ? OR ${android.provider.MediaStore.Files.FileColumns.DISPLAY_NAME} LIKE ?"
+                val selectionArgs = arrayOf("application/pdf", "%.pdf")
+                
+                context.contentResolver.query(uri, projection, selection, selectionArgs, null)?.use { cursor ->
+                    val dataIndex = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Files.FileColumns.DATA)
+                    while (cursor.moveToNext()) {
+                        val path = cursor.getString(dataIndex)
+                        if (!path.isNullOrEmpty()) {
+                            val file = java.io.File(path)
+                            if (file.exists() && file.isFile && file.name.endsWith(".pdf", ignoreCase = true)) {
+                                list.add(file)
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("PdfViewModel", "MediaStore query failed, falling back to path scanning", e)
+            }
+            
+            // Fallback / complement: Scan standard directories
+            val publicDirs = listOf(
+                android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
+                android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOCUMENTS),
+                android.os.Environment.getExternalStorageDirectory()
+            )
+            
+            for (dir in publicDirs) {
+                if (dir != null && dir.exists() && dir.isDirectory) {
+                    scanDir(dir, list)
+                }
+            }
+            
+            val uniqueFiles = list.distinctBy { it.absolutePath }
+            for (file in uniqueFiles) {
+                val fileUriStr = Uri.fromFile(file).toString()
+                val existing = repository.getPdfByUri(fileUriStr)
+                if (existing == null) {
+                    val entity = RecentFileEntity(
+                        uri = fileUriStr,
+                        name = file.name,
+                        lastOpenedAt = 0L,
+                        sizeBytes = file.length(),
+                        isFavorite = false,
+                        currentPage = 0,
+                        totalPages = 0
+                    )
+                    repository.insertPdf(entity)
+                }
+            }
+        }
+    }
+
+    private fun scanDir(dir: java.io.File, list: MutableList<java.io.File>, maxDepth: Int = 4) {
+        if (maxDepth <= 0 || list.size > 200) return
+        try {
+            val files = dir.listFiles() ?: return
+            for (f in files) {
+                if (f.isDirectory) {
+                    if (!f.name.startsWith(".") && f.name != "Android" && f.name != "self") {
+                        scanDir(f, list, maxDepth - 1)
+                    }
+                } else if (f.isFile && f.name.endsWith(".pdf", ignoreCase = true)) {
+                    list.add(f)
+                }
+            }
+        } catch (e: Exception) {
+            // ignore
         }
     }
 
@@ -1176,6 +1276,21 @@ class PdfViewModel(
     private fun getUriMetadata(context: Context, uri: Uri): Pair<String, Long> {
         var name = "Document.pdf"
         var size = 0L
+        if (uri.scheme == "file") {
+            try {
+                val file = java.io.File(uri.path ?: "")
+                if (file.exists()) {
+                    name = file.name
+                    size = file.length()
+                    if (!name.lowercase().endsWith(".pdf")) {
+                        name += ".pdf"
+                    }
+                    return Pair(name, size)
+                }
+            } catch (e: Exception) {
+                // Ignore
+            }
+        }
         try {
             context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
                 val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)

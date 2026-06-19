@@ -57,6 +57,7 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.outlined.BookmarkBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.Alignment
@@ -589,10 +590,16 @@ fun ViewerScreen(
     // Side drawer states
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+    val currentOrientation = configuration.orientation
+    val isLandscape = rememberSaveable(currentOrientation) {
+        currentOrientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+    }
     val screenWidth = configuration.screenWidthDp
     val isMedium = screenWidth in 600..839
     val isExpanded = screenWidth >= 840
-    val isAdaptive = isMedium || isExpanded
+    val isAdaptive = rememberSaveable(isLandscape, isMedium, isExpanded) {
+        isLandscape
+    }
     var selectedDrawerTab by remember { mutableStateOf(0) } // 0 = Bookmarks, 1 = Thumbnails
 
     // Jump dialog & File information dialog states
@@ -963,7 +970,7 @@ fun ViewerScreen(
             }
         }
     ) {
-        val sidebarWidth = if (isExpanded) 320.dp else if (isMedium) 280.dp else 0.dp
+        val sidebarWidth = if (isExpanded) 320.dp else 280.dp
         Box(modifier = modifier.fillMaxSize()) {
             if (isAdaptive) {
                 Row(
