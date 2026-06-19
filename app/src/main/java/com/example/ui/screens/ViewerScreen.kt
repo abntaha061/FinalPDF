@@ -932,7 +932,7 @@ fun ViewerScreen(
 
     ModalNavigationDrawer(
         drawerState = drawerState,
-        gesturesEnabled = !isAdaptive,
+        gesturesEnabled = false,
         drawerContent = {
             if (!isAdaptive) {
                 BookmarkDrawer(

@@ -81,7 +81,7 @@ fun MainBottomNav(
             hasBadge = hasUnreadFiles
         ),
         BottomTabItem(
-            route = "tools",
+            route = "pdf_tools",
             label = "الأدوات",
             filledIcon = Icons.Filled.Build,
             outlinedIcon = Icons.Outlined.Build,

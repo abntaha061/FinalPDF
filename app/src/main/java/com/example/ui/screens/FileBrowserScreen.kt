@@ -233,7 +233,12 @@ fun FileBrowserScreen(
         }
         isLoadingFiles = true
         withContext(Dispatchers.IO) {
-            val files = dir.listFiles()?.toList() ?: emptyList()
+            val files = try {
+                dir.listFiles()?.toList() ?: emptyList()
+            } catch (e: Exception) {
+                android.util.Log.e("FileBrowser", "Error reading directory: ${dir.absolutePath}", e)
+                emptyList()
+            }
             val filtered = files.filter { file ->
                 // Filter pdf only
                 val matchesType = !browserPdfOnly || file.isDirectory || file.name.lowercase(Locale.ROOT).endsWith(".pdf")
@@ -1166,7 +1171,11 @@ fun GridBrowserItem(
                     Spacer(modifier = Modifier.height(2.dp))
                     // count total children
                     val contentsCount = remember(file.absolutePath) {
-                        file.listFiles()?.size ?: 0
+                        try {
+                            file.listFiles()?.size ?: 0
+                        } catch (e: Exception) {
+                            0
+                        }
                     }
                     Text(
                         text = "$contentsCount عنصر",
@@ -1371,7 +1380,11 @@ fun ListBrowserItem(
                 SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(file.lastModified()))
             }
             val details = if (isFolder) {
-                val contents = file.listFiles()?.size ?: 0
+                val contents = try {
+                    file.listFiles()?.size ?: 0
+                } catch (e: Exception) {
+                    0
+                }
                 "$contents عنصر  •  $date"
             } else {
                 "${formatBrowserFileSize(file.length())}  •  $date"
@@ -1400,7 +1413,11 @@ fun FolderPickerDialog(
         val current = activeFolder
         if (current != null) {
             listFolders = withContext(Dispatchers.IO) {
-                current.listFiles()?.filter { it.isDirectory }?.toList() ?: emptyList()
+                try {
+                    current.listFiles()?.filter { it.isDirectory }?.toList() ?: emptyList()
+                } catch (e: Exception) {
+                    emptyList()
+                }
             }
         }
     }

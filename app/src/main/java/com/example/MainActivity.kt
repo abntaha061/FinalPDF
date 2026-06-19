@@ -192,30 +192,27 @@ class MainActivity : ComponentActivity() {
                         LocalTextStyle provides LocalTextStyle.current.copy(fontSize = uiFontSize.sp)
                     ) {
                         val context = LocalContext.current
-                        var hasPermission by remember { mutableStateOf(true) }
+                        var hasPermission by remember { mutableStateOf(hasRequiredPermission(context)) }
                         var showRationaleDialog by remember { mutableStateOf(false) }
                         var showDeniedDialog by remember { mutableStateOf(false) }
 
                         val standardPermissionLauncher = rememberLauncherForActivityResult(
                             contract = ActivityResultContracts.RequestPermission()
                         ) { isGranted ->
-                            // Bypassed: always proceed as true via SAF persistable permissions
-                            hasPermission = true
+                            hasPermission = isGranted
                         }
 
                         val manageStorageLauncher = rememberLauncherForActivityResult(
                             contract = ActivityResultContracts.StartActivityForResult()
                         ) { _ ->
-                            hasPermission = true
+                            hasPermission = hasRequiredPermission(context)
                         }
 
                         val lifecycleOwner = LocalLifecycleOwner.current
                         DisposableEffect(lifecycleOwner) {
                             val observer = LifecycleEventObserver { _, event ->
                                 if (event == Lifecycle.Event.ON_RESUME) {
-                                    hasPermission = true
-                                    showDeniedDialog = false
-                                    showRationaleDialog = false
+                                    hasPermission = hasRequiredPermission(context)
                                 }
                             }
                             lifecycleOwner.lifecycle.addObserver(observer)
