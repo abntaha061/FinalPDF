@@ -597,9 +597,7 @@ fun ViewerScreen(
     val screenWidth = configuration.screenWidthDp
     val isMedium = screenWidth in 600..839
     val isExpanded = screenWidth >= 840
-    val isAdaptive = rememberSaveable(isLandscape, isMedium, isExpanded) {
-        isLandscape
-    }
+    val isAdaptive = false
     var selectedDrawerTab by remember { mutableStateOf(0) } // 0 = Bookmarks, 1 = Thumbnails
 
     // Jump dialog & File information dialog states

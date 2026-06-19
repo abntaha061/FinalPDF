@@ -20,6 +20,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.ui.PdfViewModel
@@ -87,6 +88,60 @@ fun PdfViewerWidget(
         }
     }
 
+    var containerWidth by remember { mutableStateOf(0f) }
+    var containerHeight by remember { mutableStateOf(0f) }
+
+    val pageSizes = remember(pdfUriString) {
+        val sizes = mutableMapOf<Int, Pair<Float, Float>>()
+        try {
+            val fileUri = Uri.parse(pdfUriString)
+            context.contentResolver.openFileDescriptor(fileUri, "r")?.use { pfd ->
+                android.graphics.pdf.PdfRenderer(pfd).use { renderer ->
+                    for (i in 0 until renderer.pageCount) {
+                        renderer.openPage(i).use { page ->
+                            sizes[i] = Pair(page.width.toFloat(), page.height.toFloat())
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("PdfViewerWidget", "Failed reading page sizes via PdfRenderer", e)
+        }
+        sizes
+    }
+
+    val updateMinZoomForPage: (PDFView, Int) -> Unit = { pdfView, pageIndex ->
+        if (containerWidth > 0f && containerHeight > 0f) {
+            val size = pageSizes[pageIndex]
+            if (size != null && size.first > 0f && size.second > 0f) {
+                val pageW = size.first
+                val pageH = size.second
+                val containerRatio = containerWidth / containerHeight
+                val pageRatio = pageW / pageH
+
+                val fitScale: Float = if (fitMode == "height") {
+                    if (pageRatio > containerRatio) {
+                        containerRatio / pageRatio
+                    } else {
+                        1.0f
+                    }
+                } else { // default or "width"
+                    if (pageRatio < containerRatio) {
+                        pageRatio / containerRatio
+                    } else {
+                        1.0f
+                    }
+                }
+
+                pdfView.setMinZoom(fitScale)
+                if (pdfView.zoom < fitScale) {
+                    pdfView.zoomTo(fitScale)
+                    onZoomChanged?.invoke(fitScale)
+                }
+            }
+        }
+    }
+
     var localPdfViewRef by remember { mutableStateOf<PDFView?>(null) }
     var showFastScrollBadge by remember { mutableStateOf(false) }
 
@@ -109,6 +164,10 @@ fun PdfViewerWidget(
     Box(
         modifier = modifier
             .fillMaxSize()
+            .onSizeChanged { size ->
+                containerWidth = size.width.toFloat()
+                containerHeight = size.height.toFloat()
+            }
             .pointerInput(onGestureTriggered) {
                 if (onGestureTriggered == null) return@pointerInput
                 awaitPointerEventScope {
@@ -293,8 +352,25 @@ fun PdfViewerWidget(
                                 .onLoad { totalPages ->
                                     isLoaded = true
                                     viewModel.setTotalPages(totalPages)
+                                    updateMinZoomForPage(this@apply, currentPage)
                                     if (fitMode == "actual") {
                                         this@apply.zoomTo(1.0f)
+                                    } else {
+                                        // Set initial zoom to the dynamic contain-fit scale
+                                        val size = pageSizes[currentPage]
+                                        if (size != null && size.first > 0f && size.second > 0f) {
+                                            val pageW = size.first
+                                            val pageH = size.second
+                                            val containerRatio = containerWidth / containerHeight
+                                            val pageRatio = pageW / pageH
+                                            val fitScale = if (fitMode == "height") {
+                                                if (pageRatio > containerRatio) containerRatio / pageRatio else 1.0f
+                                            } else {
+                                                if (pageRatio < containerRatio) pageRatio / containerRatio else 1.0f
+                                            }
+                                            this@apply.zoomTo(fitScale)
+                                            onZoomChanged?.invoke(fitScale)
+                                        }
                                     }
                                     try {
                                         val toc = tableOfContents
@@ -318,6 +394,10 @@ fun PdfViewerWidget(
                                     val rot = viewModel.pageRotations[page] ?: 0
                                     val normRot = ((rot % 360) + 360) % 360
                                     this@apply.rotation = normRot.toFloat()
+                                    updateMinZoomForPage(this@apply, page)
+                                }
+                                .onPageScroll { page, positionOffset ->
+                                    onZoomChanged?.invoke(this@apply.zoom)
                                 }
                                 .onError { error ->
                                     loadError = error.message ?: "Unknown error"
@@ -367,6 +447,7 @@ fun PdfViewerWidget(
                             if (pdfView.currentPage != currentPage) {
                                 pdfView.jumpTo(currentPage)
                             }
+                            updateMinZoomForPage(pdfView, currentPage)
                         } catch (e: Exception) {
                             // ignore
                         }
