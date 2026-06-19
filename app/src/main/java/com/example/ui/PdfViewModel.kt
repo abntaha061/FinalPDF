@@ -599,6 +599,12 @@ class PdfViewModel(
     }
 
     fun selectDocument(context: Context, uri: Uri) {
+        // Skip redundant checks and permission popups if the exact same document is already selected and active.
+        // This prevents transient SecurityExceptions from showing during normal reading, scrolling, or lifecycle ON_RESUME.
+        if (_selectedUri.value == uri.toString()) {
+            return
+        }
+
         _errorState.value = null
         _securityExceptionUri.value = null
         _largeFileUriPending.value = null

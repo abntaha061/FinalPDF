@@ -116,6 +116,13 @@ fun PdfViewerWidget(
                         val event = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
                         val changes = event.changes
                         
+                        // If it's a single finger event, do NOT intercept it in the Initial pass!
+                        // This ensures that native single-finger scrolling and double-tap zoom 
+                        // in PDFView work with 100% native responsiveness and smoothness.
+                        if (changes.size < 2 && !isMultiTap) {
+                            continue
+                        }
+                        
                         when (event.type) {
                             androidx.compose.ui.input.pointer.PointerEventType.Press -> {
                                 touchTime = System.currentTimeMillis()
@@ -157,20 +164,9 @@ fun PdfViewerWidget(
                                     }
                                     isMultiTap = false
                                 } else {
-                                    // Single-finger gestures
-                                    if (kotlin.math.abs(dx) > 120f && kotlin.math.abs(dx) > kotlin.math.abs(dy)) {
-                                        if (dx < 0) {
-                                            onGestureTriggered(com.example.data.GestureType.SWIPE_LEFT, null)
-                                        } else {
-                                            onGestureTriggered(com.example.data.GestureType.SWIPE_RIGHT, null)
-                                        }
-                                    } else if (kotlin.math.abs(dy) > 120f && kotlin.math.abs(dy) > kotlin.math.abs(dx)) {
-                                        if (dy < 0) {
-                                            onGestureTriggered(com.example.data.GestureType.SWIPE_UP, null)
-                                        } else {
-                                            onGestureTriggered(com.example.data.GestureType.SWIPE_DOWN, null)
-                                        }
-                                    } else if (kotlin.math.abs(dx) < 20f && kotlin.math.abs(dy) < 20f) {
+                                    // No custom single-finger swipe actions here to avoid breaking native PDF scroll physics.
+                                    // Standard single tap, long press, and zoom are natively handled by PDFView configurator callbacks.
+                                    if (kotlin.math.abs(dx) < 20f && kotlin.math.abs(dy) < 20f) {
                                         if (duration > 500) {
                                             onGestureTriggered(com.example.data.GestureType.LONG_PRESS, androidx.compose.ui.geometry.Offset(endX, endY))
                                         } else {
@@ -343,7 +339,8 @@ fun PdfViewerWidget(
                                     onLongPress?.invoke(androidx.compose.ui.geometry.Offset(e.x, e.y))
                                 }
                                 .enableAnnotationRendering(true)          // renders PDF annotations
-                                .enableAntialiasing(false)                 // Optimized for maximum scrolling performance
+                                .enableAntialiasing(true)                  // Sharp and smooth text rendering
+                                
                                 .spacing(pageSpacing.toInt())                               // custom space between pages
                                 .pageFitPolicy(if (fitMode == "height") FitPolicy.HEIGHT else FitPolicy.WIDTH)
                                 .nightMode(readingMode == "night")
