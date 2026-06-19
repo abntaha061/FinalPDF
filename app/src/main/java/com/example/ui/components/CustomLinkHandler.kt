@@ -111,9 +111,13 @@ class CustomLinkHandler(
                 Triple(true, 1.0f, "المتصفح الافتراضي")
             }
 
-            // If the link contains audio file URL (mp3, wav, ogg, m4a, aac)
-            if (lowerUri.endsWith(".mp3") || lowerUri.endsWith(".wav") || lowerUri.endsWith(".ogg") ||
-                lowerUri.endsWith(".m4a") || lowerUri.endsWith(".aac")) {
+            // Check if the link is an audio URL or points to an audio stream
+            val isAudioUrl = lowerUri.endsWith(".mp3") || lowerUri.endsWith(".wav") || lowerUri.endsWith(".ogg") ||
+                    lowerUri.endsWith(".m4a") || lowerUri.endsWith(".aac") ||
+                    lowerUri.contains("dictvoice") || lowerUri.contains("pronunciation") ||
+                    lowerUri.contains("voice") || lowerUri.contains("/audio/") || lowerUri.contains("/sound/")
+
+            if (isAudioUrl) {
                 Log.d("CustomLinkHandler", "Tapped audio URL, sending to AudioPlayerManager: $uriString with autoPlay: $autoPlayAudio, vol: $audioVolume")
                 val extractedWord = getWordAtLink(link?.bounds, event, page)
                 if (autoPlayAudio) {
@@ -129,96 +133,8 @@ class CustomLinkHandler(
                         .show()
                 }
             } else if (uriString.startsWith("http://") || uriString.startsWith("https://")) {
-                Log.d("CustomLinkHandler", "Tapped http/https URI: $uriString with mode: $linkOpenMode")
-                
-                // Automatically speech-pronounce the word from the dictionary URL
-                try {
-                    val parsedUri = Uri.parse(uriString)
-                    var wordToSpeak = ""
-                    
-                    // First try to extract word directly from PDF text at that position
-                    val extractedWord = getWordAtLink(link?.bounds, event, page)
-                    if (extractedWord.isNotBlank()) {
-                         wordToSpeak = extractedWord
-                         Log.d("CustomLinkHandler", "Extracted word from PDF text bounds: $wordToSpeak")
-                    }
-                    
-                    if (wordToSpeak.isBlank()) {
-                        // 1. Try to extract from common dictionary query parameters
-                        val queryParams = listOf("q", "s", "search", "query", "word", "text")
-                        for (param in queryParams) {
-                            val value = parsedUri.getQueryParameter(param)
-                            if (!value.isNullOrBlank()) {
-                                wordToSpeak = value
-                                break
-                            }
-                        }
-                    }
-                    
-                    if (wordToSpeak.isBlank()) {
-                        // 2. If no query param, look for common path patterns
-                        val path = parsedUri.path ?: ""
-                        if (path.contains("deutsch-arabisch/", ignoreCase = true)) {
-                            val idx = path.indexOf("deutsch-arabisch/", ignoreCase = true)
-                            val sub = path.substring(idx + "deutsch-arabisch/".length)
-                            wordToSpeak = sub.split("/").firstOrNull { it.isNotEmpty() } ?: ""
-                        } else if (path.contains("de-ar/", ignoreCase = true)) {
-                            val idx = path.indexOf("de-ar/", ignoreCase = true)
-                            val sub = path.substring(idx + "de-ar/".length)
-                            wordToSpeak = sub.split("/").firstOrNull { it.isNotEmpty() } ?: ""
-                        } else {
-                            wordToSpeak = parsedUri.lastPathSegment ?: ""
-                        }
-                    }
-                    
-                    if (wordToSpeak.isNotEmpty()) {
-                        val decodedWord = Uri.decode(wordToSpeak).trim()
-                        if (decodedWord.isNotEmpty()) {
-                            tts?.let { textToSpeech ->
-                                val isArabic = decodedWord.any { it in '\u0600'..'\u06FF' }
-                                if (isArabic) {
-                                    textToSpeech.language = java.util.Locale("ar")
-                                } else {
-                                    textToSpeech.language = java.util.Locale.GERMAN
-                                }
-                                AudioPlayerManager.setSpeechState(decodedWord, finalRect, true)
-                                textToSpeech.speak(decodedWord, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "LINK_TTS_ID")
-                            }
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.e("CustomLinkHandler", "Error pronouncing word in web link", e)
-                }
-
-                when (linkOpenMode) {
-                    "داخل التطبيق (WebView)" -> {
-                        if (onNavigateToWebView != null) {
-                            onNavigateToWebView.invoke(uriString)
-                        } else {
-                            openWebViewInDialog(context, uriString)
-                        }
-                    }
-                    "اسأل في كل مرة" -> {
-                        android.app.AlertDialog.Builder(context)
-                            .setTitle("فتح الرابط")
-                            .setMessage("اختر طريقة فتح الرابط:\n$uriString")
-                            .setPositiveButton("داخل التطبيق") { _, _ ->
-                                if (onNavigateToWebView != null) {
-                                    onNavigateToWebView.invoke(uriString)
-                                } else {
-                                    openWebViewInDialog(context, uriString)
-                                }
-                            }
-                            .setNegativeButton("المتصفح الخارجي") { _, _ ->
-                                launchExternalBrowser(context, uriString)
-                            }
-                            .setNeutralButton("إلغاء", null)
-                            .show()
-                    }
-                    else -> { // "المتصفح الافتراضي"
-                        launchExternalBrowser(context, uriString)
-                    }
-                }
+                Log.d("CustomLinkHandler", "Tapped http/https URI: $uriString, launching external browser")
+                launchExternalBrowser(context, uriString)
             }
         } else if (destPageIdx != null) {
             Log.d("CustomLinkHandler", "Tapped internal destination page index: $destPageIdx, jumping PDFView")

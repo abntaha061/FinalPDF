@@ -210,14 +210,27 @@ fun HomeScreenRealFiles(
     val context = LocalContext.current
     
     val scrollState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
-    var previousOffset by remember { mutableStateOf(0) }
 
     LaunchedEffect(scrollState) {
-        snapshotFlow { scrollState.firstVisibleItemScrollOffset }
-            .collect { offset ->
-                val isBottomBarVisible = offset <= previousOffset || offset < 50
-                viewModel.setBottomBarVisible(isBottomBarVisible)
-                previousOffset = offset
+        var previousIndex = 0
+        var previousScrollOffset = 0
+        snapshotFlow { scrollState.firstVisibleItemIndex to scrollState.firstVisibleItemScrollOffset }
+            .collect { (currentIndex, currentOffset) ->
+                val isScrollingDown = when {
+                    currentIndex > previousIndex -> true
+                    currentIndex < previousIndex -> false
+                    else -> currentOffset > previousScrollOffset
+                }
+                
+                val atTop = currentIndex == 0 && currentOffset < 50
+                if (atTop) {
+                    viewModel.setBottomBarVisible(true)
+                } else if (currentIndex != previousIndex || java.lang.Math.abs(currentOffset - previousScrollOffset) > 15) {
+                    viewModel.setBottomBarVisible(!isScrollingDown)
+                }
+                
+                previousIndex = currentIndex
+                previousScrollOffset = currentOffset
             }
     }
 
@@ -412,32 +425,42 @@ fun HomeScreenRealFiles(
         }
     } else {
         Column(modifier = Modifier.fillMaxSize()) {
+            val isHeaderVisible by viewModel.isBottomBarVisible.collectAsState()
+
             // Row of 3 Stat Cards
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            AnimatedVisibility(
+                visible = isHeaderVisible,
+                enter = expandVertically(animationSpec = tween(300)) + fadeIn(),
+                exit = shrinkVertically(animationSpec = tween(300)) + fadeOut()
             ) {
-                StatCard(
-                    title = "الملفات المفتوحة",
-                    value = "$totalPdfs",
-                    icon = Icons.Default.FolderOpen,
-                    iconColor = AppPrimary,
-                    modifier = Modifier.weight(1f)
-                )
-                StatCard(
-                    title = "آخر فتح",
-                    value = lastOpenedName,
-                    icon = Icons.Default.RemoveRedEye,
-                    iconColor = AppPrimaryVariant,
-                    modifier = Modifier.weight(1.2f)
-                )
-                StatCard(
-                    title = "الصفحات",
-                    value = lastOpenedPages,
-                    icon = Icons.Default.MenuBook,
-                    iconColor = AppPrimary,
-                    modifier = Modifier.weight(1f)
-                )
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        StatCard(
+                            title = "الملفات المفتوحة",
+                            value = "$totalPdfs",
+                            icon = Icons.Default.FolderOpen,
+                            iconColor = AppPrimary,
+                            modifier = Modifier.weight(1f)
+                        )
+                        StatCard(
+                            title = "آخر فتح",
+                            value = lastOpenedName,
+                            icon = Icons.Default.RemoveRedEye,
+                            iconColor = AppPrimaryVariant,
+                            modifier = Modifier.weight(1.2f)
+                        )
+                        StatCard(
+                            title = "الصفحات",
+                            value = lastOpenedPages,
+                            icon = Icons.Default.MenuBook,
+                            iconColor = AppPrimary,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
             }
 
             val favoritePdfs = remember(recentPdfs) { recentPdfs.filter { it.isFavorite } }
@@ -830,121 +853,131 @@ fun HomeScreen(
                     .padding(innerPadding)
                     .padding(horizontal = 20.dp, vertical = 16.dp)
             ) {
-                // 1. App Title and Settings Icon Row
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "قارئ PDF",
-                        color = AppTextPrimary,
-                        fontWeight = FontWeight.ExtraBold,
-                        fontSize = 28.sp,
-                        textAlign = TextAlign.Start
-                    )
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Button 0: Favorites Filter
-                        IconButton(
-                            onClick = { showOnlyFavorites = !showOnlyFavorites },
-                            modifier = Modifier
-                                .size(36.dp)
-                                .testTag("favorites_filter_button")
-                        ) {
-                            Icon(
-                                imageVector = if (showOnlyFavorites) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
-                                contentDescription = "تصفية المفضلة",
-                                tint = if (showOnlyFavorites) Color(0xFFFF6B6B) else AppTextPrimary,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
+                val isHeaderVisible by viewModel.isBottomBarVisible.collectAsState()
 
-                        // Button 1: Filter List with badge
-                        IconButton(
-                            onClick = { showFilterSheet = true },
-                            modifier = Modifier
-                                .size(36.dp)
-                                .testTag("filter_button")
+                AnimatedVisibility(
+                    visible = isHeaderVisible,
+                    enter = expandVertically(animationSpec = tween(300)) + fadeIn(),
+                    exit = shrinkVertically(animationSpec = tween(300)) + fadeOut()
+                ) {
+                    Column {
+                        // 1. App Title and Settings Icon Row
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            BadgedBox(
-                                badge = {
-                                    if (activeFilterCount > 0) {
-                                        Badge(
-                                            containerColor = Color.Red,
-                                            contentColor = Color.White
-                                        ) {
-                                            Text(text = "$activeFilterCount")
+                            Text(
+                                text = "قارئ PDF",
+                                color = AppTextPrimary,
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 28.sp,
+                                textAlign = TextAlign.Start
+                            )
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // Button 0: Favorites Filter
+                                IconButton(
+                                    onClick = { showOnlyFavorites = !showOnlyFavorites },
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .testTag("favorites_filter_button")
+                                ) {
+                                    Icon(
+                                        imageVector = if (showOnlyFavorites) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                                        contentDescription = "تصفية المفضلة",
+                                        tint = if (showOnlyFavorites) Color(0xFFFF6B6B) else AppTextPrimary,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+
+                                // Button 1: Filter List with badge
+                                IconButton(
+                                    onClick = { showFilterSheet = true },
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .testTag("filter_button")
+                                ) {
+                                    BadgedBox(
+                                        badge = {
+                                            if (activeFilterCount > 0) {
+                                                Badge(
+                                                    containerColor = Color.Red,
+                                                    contentColor = Color.White
+                                                ) {
+                                                    Text(text = "$activeFilterCount")
+                                                }
+                                            }
                                         }
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.FilterList,
+                                            contentDescription = "تصفية",
+                                            tint = AppTextPrimary,
+                                            modifier = Modifier.size(24.dp)
+                                        )
                                     }
                                 }
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.FilterList,
-                                    contentDescription = "تصفية",
-                                    tint = AppTextPrimary,
-                                    modifier = Modifier.size(24.dp)
-                                )
+
+                                // Button 2: Sort
+                                IconButton(
+                                    onClick = { showSortSheet = true },
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .testTag("sort_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Sort,
+                                        contentDescription = "ترتيب",
+                                        tint = AppTextPrimary,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+
+                                // Button 3: Statistics
+                                IconButton(
+                                    onClick = onNavigateToStatistics,
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .testTag("statistics_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.BarChart,
+                                        contentDescription = "إحصائيات",
+                                        tint = AppTextPrimary,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+
+                                IconButton(
+                                    onClick = onNavigateToSettings,
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .testTag("settings_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Settings,
+                                        contentDescription = "Settings",
+                                        tint = AppTextPrimary,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
                             }
                         }
-
-                        // Button 2: Sort
-                        IconButton(
-                            onClick = { showSortSheet = true },
-                            modifier = Modifier
-                                .size(36.dp)
-                                .testTag("sort_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Sort,
-                                contentDescription = "ترتيب",
-                                tint = AppTextPrimary,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-
-                        // Button 3: Statistics
-                        IconButton(
-                            onClick = onNavigateToStatistics,
-                            modifier = Modifier
-                                .size(36.dp)
-                                .testTag("statistics_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.BarChart,
-                                contentDescription = "إحصائيات",
-                                tint = AppTextPrimary,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-
-                        IconButton(
-                            onClick = onNavigateToSettings,
-                            modifier = Modifier
-                                .size(36.dp)
-                                .testTag("settings_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Settings,
-                                contentDescription = "Settings",
-                                tint = AppTextPrimary,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "افتح ملفاتك بجودة عالية",
+                            color = AppTextSecondary,
+                            fontSize = 14.sp,
+                            modifier = Modifier.fillMaxWidth(),
+                            textAlign = TextAlign.Start
+                        )
                     }
                 }
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "افتح ملفاتك بجودة عالية",
-                    color = AppTextSecondary,
-                    fontSize = 14.sp,
-                    modifier = Modifier.fillMaxWidth(),
-                    textAlign = TextAlign.Start
-                )
 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(if (isHeaderVisible) 24.dp else 4.dp))
 
                 AnimatedContent(
                     targetState = isLoading,

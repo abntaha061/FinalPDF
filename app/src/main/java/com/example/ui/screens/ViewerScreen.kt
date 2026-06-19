@@ -2885,13 +2885,31 @@ fun ViewerScreen(
                         onShareClick = {
                             if (activeUri != null) {
                                 try {
+                                    val uri = Uri.parse(activeUri!!)
+                                    val shareUri = if (uri.scheme == "file") {
+                                        val file = File(uri.path ?: "")
+                                        androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+                                    } else if (uri.scheme == "content") {
+                                        uri
+                                    } else {
+                                        val file = File(activeUri!!)
+                                        if (file.exists()) {
+                                            androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+                                        } else {
+                                            uri
+                                        }
+                                    }
+
                                     val shareIntent = Intent(Intent.ACTION_SEND).apply {
                                         type = "application/pdf"
-                                        putExtra(Intent.EXTRA_STREAM, Uri.parse(activeUri!!))
+                                        putExtra(Intent.EXTRA_STREAM, shareUri)
                                         putExtra(Intent.EXTRA_SUBJECT, documentName)
                                         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                                     }
-                                    context.startActivity(Intent.createChooser(shareIntent, "مشاركة مستند PDF"))
+                                    val chooserIntent = Intent.createChooser(shareIntent, "مشاركة مستند PDF").apply {
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                    context.startActivity(chooserIntent)
                                 } catch (e: Exception) {
                                     Log.e("ViewerScreen", "Error sharing document", e)
                                 }
