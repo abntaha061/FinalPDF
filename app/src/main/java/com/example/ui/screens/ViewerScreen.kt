@@ -682,6 +682,19 @@ fun ViewerScreen(
     var compressionResultText by remember { mutableStateOf("") }
     var compressedFileUriString by remember { mutableStateOf("") }
 
+    var isPdfJsMode by remember { mutableStateOf(false) }
+    var showPdfJsBanner by remember { mutableStateOf(false) }
+
+    LaunchedEffect(isPdfJsMode) {
+        if (isPdfJsMode) {
+            showPdfJsBanner = true
+            delay(3000)
+            showPdfJsBanner = false
+        } else {
+            pdfViewInst?.jumpTo(currentPage)
+        }
+    }
+
     var zoomLevel by remember { mutableStateOf(1.0f) }
     var showZoomBadge by remember { mutableStateOf(false) }
 
@@ -1455,7 +1468,18 @@ fun ViewerScreen(
                                 }
                             }
                         } else {
-                            PdfViewerWidget(
+                            if (isPdfJsMode) {
+                                PdfJsWebViewWidget(
+                                    pdfUriString = activeUri!!,
+                                    currentPage = currentPage,
+                                    isNightMode = isNightMode,
+                                    onPageChanged = { page ->
+                                        viewModel.setCurrentPage(page)
+                                        viewModel.updateProgress(activeUri!!, page, totalPages)
+                                    }
+                                )
+                            } else {
+                                PdfViewerWidget(
                                 pdfUriString = activeUri!!,
                                 currentPage = currentPage,
                                 readingMode = readingMode,
@@ -1553,6 +1577,7 @@ fun ViewerScreen(
                                     executeGestureAction(act, pdfViewInst, offset)
                                 }
                             )
+                            }
                         }
                     }
 
@@ -2547,6 +2572,50 @@ fun ViewerScreen(
                 }
             }
 
+            // PDF.js Selection Mode Prompt Banner (non-intrusive banner below TopAppBar space)
+            AnimatedVisibility(
+                visible = showPdfJsBanner,
+                enter = slideInVertically(initialOffsetY = { -it }),
+                exit = slideOutVertically(targetOffsetY = { -it }),
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .testTag("pdf_js_banner")
+            ) {
+                Surface(
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Text(
+                            text = "وضع التحديد - اضغط مطولاً لتحديد النص",
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Icon(
+                            imageVector = Icons.Default.SwapHoriz,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.secondary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+            }
+
             // Overlay Search Bar sliding DOWN from the top of the screen (AnimatedVisibility, slide-in-top, 250ms)
             AnimatedVisibility(
                 visible = isSearching,
@@ -3046,6 +3115,42 @@ fun ViewerScreen(
                         onShapeFillToggle = { annotationViewModel.setShapeFillEnabled(it) },
                         onStampClick = { showStampPicker = true }
                     )
+                }
+
+                // Engine toggle button on top of BottomReaderBar
+                AnimatedVisibility(
+                    visible = isToolbarVisible && !isExpanded,
+                    enter = slideInVertically(
+                        initialOffsetY = { it },
+                        animationSpec = tween(durationMillis = 300)
+                    ),
+                    exit = slideOutVertically(
+                        targetOffsetY = { it },
+                        animationSpec = tween(durationMillis = 300)
+                    )
+                ) {
+                    FilledTonalButton(
+                        onClick = { isPdfJsMode = !isPdfJsMode },
+                        modifier = Modifier
+                            .padding(bottom = 8.dp)
+                            .testTag("pdf_engine_toggle"),
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.SwapHoriz,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (isPdfJsMode) "وضع الأداء" else "وضع التحديد",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
 
                 // Overlay BottomReaderBar with Tween slide vertical animations (300ms)
@@ -6644,209 +6749,436 @@ fun findClosestCharIndex(characters: List<CharInfo>, pagePoint: android.graphics
 
 fun mapScreenToPage(pdfView: Any, screenX: Float, screenY: Float): android.graphics.PointF? {
     return try {
-        val cls = pdfView.javaClass
-        val pdfFileField = try {
-            cls.getDeclaredField("pdfFile")
-        } catch (e: Exception) {
-            cls.getField("pdfFile")
+        val view = pdfView as com.github.barteksc.pdfviewer.PDFView
+        val zoom = view.zoom
+        val xOffset = view.currentXOffset  // قيمة سالبة
+        val yOffset = view.currentYOffset  // قيمة سالبة
+        val density = view.resources.displayMetrics.density
+        val spacingPx = 8f * density       // المسافة بين الصفحات (8dp)
+
+        // تحويل إحداثيات الشاشة → إحداثيات المستند الكلي
+        val docX = screenX - xOffset
+        val docY = screenY - yOffset
+
+        // إيجاد الصفحة الصحيحة بتراكم الارتفاعات
+        var cumulativeY = 0f
+        var targetPage = view.currentPage
+        val pageCount = view.pageCount
+
+        for (i in 0 until pageCount) {
+            val pageSize = view.getPageSize(i)
+            val pageHeightScaled = pageSize.height * zoom
+            if (docY < cumulativeY + pageHeightScaled) {
+                targetPage = i
+                break
+            }
+            cumulativeY += pageHeightScaled + spacingPx
+            if (i == pageCount - 1) targetPage = i
         }
-        pdfFileField.isAccessible = true
-        val pdfFile = pdfFileField.get(pdfView)
-        if (pdfFile == null) {
-            android.util.Log.e("PDF_REFLECTION", "[Reflection-Check] mapScreenToPage: pdfFile field is NULL")
-            return null
-        } else {
-            android.util.Log.e("PDF_REFLECTION", "[Reflection-Check] mapScreenToPage: pdfFile field is FOUND/NON-NULL ($pdfFile)")
-        }
 
-        val getZoomMethod = cls.getMethod("getZoom")
-        val zoom = getZoomMethod.invoke(pdfView) as Float
+        // حساب الـ Padding الأفقي (التوسيط)
+        val pageSize = view.getPageSize(targetPage)
+        val pageWidthScaled = pageSize.width * zoom
+        val horizontalPadding = if (pageWidthScaled < view.width) {
+            (view.width - pageWidthScaled) / 2f
+        } else 0f
 
-        val getXOffsetMethod = cls.getMethod("getCurrentXOffset")
-        val xOffset = getXOffsetMethod.invoke(pdfView) as Float
+        // تحويل إلى إحداثيات محلية داخل الصفحة
+        val pageLocalX = (docX - horizontalPadding) / zoom
+        val pageLocalY = (docY - cumulativeY) / zoom
 
-        val getYOffsetMethod = cls.getMethod("getCurrentYOffset")
-        val yOffset = getYOffsetMethod.invoke(pdfView) as Float
-
-        val documentX = -xOffset + screenX
-        val documentY = -yOffset + screenY
-
-        val pdfFileCls = pdfFile.javaClass
-        val method = pdfFileCls.getMethod(
-            "mappedScreenToPage",
-            Float::class.javaPrimitiveType,
-            Float::class.javaPrimitiveType,
-            Float::class.javaPrimitiveType
-        )
-        if (method != null) {
-            android.util.Log.e("PDF_REFLECTION", "[Reflection-Check] mapScreenToPage: mappedScreenToPage method is FOUND")
-        } else {
-            android.util.Log.e("PDF_REFLECTION", "[Reflection-Check] mapScreenToPage: mappedScreenToPage method is NULL")
-        }
-        method.isAccessible = true
-        val pagePoint = method.invoke(pdfFile, documentX, documentY, zoom) as? android.graphics.PointF
-        android.util.Log.e("PDF_REFLECTION", "[Reflection-Check] mapScreenToPage successfully mapped to: x=${pagePoint?.x}, y=${pagePoint?.y}")
-        pagePoint
+        android.graphics.PointF(pageLocalX, pageLocalY)
     } catch (e: Exception) {
-        android.util.Log.e("PDF_REFLECTION", "[Reflection-Check] mapScreenToPage Reflection Exception: ${e.message}", e)
-        try {
-            val cls = pdfView.javaClass
-            val method = cls.methods.firstOrNull { 
-                it.name.contains("mappedScreenToPage", ignoreCase = true) && it.parameterTypes.size == 2
-            } ?: cls.getDeclaredMethods().firstOrNull {
-                it.name.contains("mappedScreenToPage", ignoreCase = true) && it.parameterTypes.size == 2
-            }
-            if (method != null) {
-                method.isAccessible = true
-                method.invoke(pdfView, screenX, screenY) as? android.graphics.PointF
-            } else {
-                null
-            }
-        } catch (e2: Exception) {
-            null
-        }
+        android.util.Log.e("PDF_MAP", "mapScreenToPage error: ${e.message}")
+        null
     }
 }
 
-fun mapScreenToPageWithPageIndex(pdfView: Any, pageIndex: Int, screenX: Float, screenY: Float): android.graphics.PointF? {
+// ============================================================
+// الدالة 2: تحويل الشاشة → الصفحة مع تحديد رقم الصفحة
+// ============================================================
+fun mapScreenToPageWithPageIndex(
+    pdfView: Any,
+    pageIndex: Int,
+    screenX: Float,
+    screenY: Float
+): android.graphics.PointF? {
     return try {
-        val cls = pdfView.javaClass
-        val pdfFileField = try {
-            cls.getDeclaredField("pdfFile")
-        } catch (e: Exception) {
-            cls.getField("pdfFile")
-        }
-        pdfFileField.isAccessible = true
-        val pdfFile = pdfFileField.get(pdfView)
-        if (pdfFile == null) {
-            android.util.Log.e("PDF_REFLECTION", "[Reflection-Check] mapScreenToPageWithPageIndex: pdfFile field is NULL")
-            return null
-        } else {
-            android.util.Log.e("PDF_REFLECTION", "[Reflection-Check] mapScreenToPageWithPageIndex: pdfFile field is FOUND/NON-NULL ($pdfFile)")
-        }
+        val view = pdfView as com.github.barteksc.pdfviewer.PDFView
+        val zoom = view.zoom
+        val xOffset = view.currentXOffset
+        val yOffset = view.currentYOffset
+        val density = view.resources.displayMetrics.density
+        val spacingPx = 8f * density
 
-        val getZoomMethod = cls.getMethod("getZoom")
-        val zoom = getZoomMethod.invoke(pdfView) as Float
+        val docX = screenX - xOffset
+        val docY = screenY - yOffset
 
-        val getXOffsetMethod = cls.getMethod("getCurrentXOffset")
-        val xOffset = getXOffsetMethod.invoke(pdfView) as Float
-
-        val getYOffsetMethod = cls.getMethod("getCurrentYOffset")
-        val yOffset = getYOffsetMethod.invoke(pdfView) as Float
-
-        val isSwipeHorizontalMethod = cls.getMethod("isSwipeHorizontal")
-        val isSwipeHorizontal = isSwipeHorizontalMethod.invoke(pdfView) as Boolean
-
-        val pdfFileCls = pdfFile.javaClass
-        val getPageOffsetMethod = pdfFileCls.getMethod(
-            "getPageOffset",
-            Int::class.javaPrimitiveType,
-            Float::class.javaPrimitiveType
-        )
-        getPageOffsetMethod.isAccessible = true
-        val startOffset = getPageOffsetMethod.invoke(pdfFile, pageIndex, zoom) as Float
-
-        val documentCountMethod = pdfFileCls.getMethod("getPagesCount")
-        val pagesCount = documentCountMethod.invoke(pdfFile) as Int
-
-        val pageSizeAtZoom = if (pageIndex < pagesCount - 1) {
-            val nextStartOffset = getPageOffsetMethod.invoke(pdfFile, pageIndex + 1, zoom) as Float
-            (nextStartOffset - startOffset - 1f).coerceAtLeast(0f)
-        } else {
-            4000f * zoom
-        }
-        val endOffset = startOffset + pageSizeAtZoom
-
-        var documentX = -xOffset + screenX
-        var documentY = -yOffset + screenY
-
-        if (isSwipeHorizontal) {
-            documentX = documentX.coerceIn(startOffset + 0.1f, endOffset - 0.1f)
-        } else {
-            documentY = documentY.coerceIn(startOffset + 0.1f, endOffset - 0.1f)
+        // حساب بداية الصفحة المطلوبة تراكمياً
+        var cumulativeY = 0f
+        for (i in 0 until pageIndex) {
+            val pageSize = view.getPageSize(i)
+            cumulativeY += pageSize.height * zoom + spacingPx
         }
 
-        val mappedScreenToPageMethod = pdfFileCls.getMethod(
-            "mappedScreenToPage",
-            Float::class.javaPrimitiveType,
-            Float::class.javaPrimitiveType,
-            Float::class.javaPrimitiveType
-        )
-        if (mappedScreenToPageMethod != null) {
-            android.util.Log.e("PDF_REFLECTION", "[Reflection-Check] mapScreenToPageWithPageIndex: mappedScreenToPage method is FOUND")
-        } else {
-            android.util.Log.e("PDF_REFLECTION", "[Reflection-Check] mapScreenToPageWithPageIndex: mappedScreenToPage method is NULL")
-        }
-        mappedScreenToPageMethod.isAccessible = true
-        val pagePoint = mappedScreenToPageMethod.invoke(pdfFile, documentX, documentY, zoom) as? android.graphics.PointF
-        android.util.Log.e("PDF_REFLECTION", "[Reflection-Check] mapScreenToPageWithPageIndex successfully mapped page=$pageIndex to x=${pagePoint?.x}, y=${pagePoint?.y}")
-        pagePoint
+        val pageSize = view.getPageSize(pageIndex)
+        val pageWidthScaled = pageSize.width * zoom
+        val horizontalPadding = if (pageWidthScaled < view.width) {
+            (view.width - pageWidthScaled) / 2f
+        } else 0f
+
+        val pageLocalX = (docX - horizontalPadding) / zoom
+        val pageLocalY = (docY - cumulativeY) / zoom
+
+        android.graphics.PointF(pageLocalX, pageLocalY)
     } catch (e: Exception) {
-        android.util.Log.e("PDF_REFLECTION", "[Reflection-Check] mapScreenToPageWithPageIndex Reflection Exception: ${e.message}", e)
-        mapScreenToPage(pdfView, screenX, screenY)
+        android.util.Log.e("PDF_MAP", "mapScreenToPageWithPageIndex error: ${e.message}")
+        null
     }
 }
 
-fun mapPageToScreen(pdfView: Any, pageIndex: Int, pageX: Float, pageY: Float): android.graphics.PointF? {
+// ============================================================
+// الدالة 3: تحويل إحداثيات الصفحة → إحداثيات الشاشة (عكسي)
+// ============================================================
+fun mapPageToScreen(
+    pdfView: Any,
+    pageIndex: Int,
+    pageX: Float,
+    pageY: Float
+): android.graphics.PointF? {
     return try {
-        val cls = pdfView.javaClass
-        val pdfFileField = try {
-            cls.getDeclaredField("pdfFile")
-        } catch (e: Exception) {
-            cls.getField("pdfFile")
+        val view = pdfView as com.github.barteksc.pdfviewer.PDFView
+        val zoom = view.zoom
+        val xOffset = view.currentXOffset
+        val yOffset = view.currentYOffset
+        val density = view.resources.displayMetrics.density
+        val spacingPx = 8f * density
+
+        // حساب موضع بداية الصفحة تراكمياً
+        var cumulativeY = 0f
+        for (i in 0 until pageIndex) {
+            val pageSize = view.getPageSize(i)
+            cumulativeY += pageSize.height * zoom + spacingPx
         }
-        pdfFileField.isAccessible = true
-        val pdfFile = pdfFileField.get(pdfView)
-        if (pdfFile == null) {
-            android.util.Log.e("PDF_REFLECTION", "[Reflection-Check] mapPageToScreen: pdfFile field is NULL")
-            return null
-        } else {
-            android.util.Log.e("PDF_REFLECTION", "[Reflection-Check] mapPageToScreen: pdfFile field is FOUND/NON-NULL ($pdfFile)")
-        }
 
-        val getZoomMethod = cls.getMethod("getZoom")
-        val zoom = getZoomMethod.invoke(pdfView) as Float
+        // حساب الـ Padding الأفقي
+        val pageSize = view.getPageSize(pageIndex)
+        val pageWidthScaled = pageSize.width * zoom
+        val horizontalPadding = if (pageWidthScaled < view.width) {
+            (view.width - pageWidthScaled) / 2f
+        } else 0f
 
-        val getXOffsetMethod = cls.getMethod("getCurrentXOffset")
-        val xOffset = getXOffsetMethod.invoke(pdfView) as Float
+        // تحويل عكسي: إحداثيات الصفحة → الشاشة
+        val screenX = (pageX * zoom) + horizontalPadding + xOffset
+        val screenY = (pageY * zoom) + cumulativeY + yOffset
 
-        val getYOffsetMethod = cls.getMethod("getCurrentYOffset")
-        val yOffset = getYOffsetMethod.invoke(pdfView) as Float
-
-        val pdfFileCls = pdfFile.javaClass
-        val method = pdfFileCls.getMethod(
-            "mappedPageToScreen",
-            Int::class.javaPrimitiveType,
-            Float::class.javaPrimitiveType,
-            Float::class.javaPrimitiveType,
-            Float::class.javaPrimitiveType
-        )
-        if (method != null) {
-            android.util.Log.e("PDF_REFLECTION", "[Reflection-Check] mapPageToScreen: 4-parameter mappedPageToScreen method is FOUND")
-        } else {
-            android.util.Log.e("PDF_REFLECTION", "[Reflection-Check] mapPageToScreen: 4-parameter mappedPageToScreen method is NULL")
-        }
-        method.isAccessible = true
-        val localPoint = method.invoke(pdfFile, pageIndex, pageX, pageY, zoom) as android.graphics.PointF
-        android.util.Log.e("PDF_REFLECTION", "[Reflection-Check] mapPageToScreen successfully mapped page=$pageIndex point x=$pageX, y=$pageY to screen point x=${localPoint.x + xOffset}, y=${localPoint.y + yOffset}")
-        android.graphics.PointF(localPoint.x + xOffset, localPoint.y + yOffset)
+        android.graphics.PointF(screenX, screenY)
     } catch (e: Exception) {
-        android.util.Log.e("PDF_REFLECTION", "[Reflection-Check] mapPageToScreen Reflection Exception: ${e.message}", e)
-        try {
-            val cls = pdfView.javaClass
-            val method = cls.methods.firstOrNull { 
-                it.name.contains("mappedPageToScreen", ignoreCase = true) && it.parameterTypes.size == 2
-            } ?: cls.getDeclaredMethods().firstOrNull {
-                it.name.contains("mappedPageToScreen", ignoreCase = true) && it.parameterTypes.size == 2
+        android.util.Log.e("PDF_MAP", "mapPageToScreen error: ${e.message}")
+        null
+    }
+}
+
+@Composable
+fun PdfJsWebViewWidget(
+    pdfUriString: String,
+    currentPage: Int,
+    isNightMode: Boolean,
+    onPageChanged: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    var pdfBase64 by remember { mutableStateOf<String?>(null) }
+    var isLoadingBase64 by remember { mutableStateOf(true) }
+
+    LaunchedEffect(pdfUriString) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val uri = Uri.parse(pdfUriString)
+                val inputStream = context.contentResolver.openInputStream(uri)
+                val bytes = inputStream?.readBytes()
+                inputStream?.close()
+                if (bytes != null) {
+                    pdfBase64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("PdfJsWebView", "Error converting PDF to base64", e)
+            } finally {
+                isLoadingBase64 = false
             }
-            if (method != null) {
-                method.isAccessible = true
-                method.invoke(pdfView, pageX, pageY) as? android.graphics.PointF
-            } else {
-                null
-            }
-        } catch (e2: Exception) {
-            null
         }
+    }
+
+    if (isLoadingBase64) {
+        Box(
+            modifier = modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            CircularProgressIndicator()
+        }
+    } else if (pdfBase64 == null) {
+        Box(
+            modifier = modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "تعذر تحميل مستند PDF في وضع التحديد",
+                color = MaterialTheme.colorScheme.error,
+                fontSize = 14.sp
+            )
+        }
+    } else {
+        val hClass = if (isNightMode) "dark" else ""
+        val htmlContent = """
+            <!DOCTYPE html>
+            <html lang="ar">
+            <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
+            <style>
+              body {
+                margin: 0;
+                padding: 16px 0;
+                background-color: #ECEFF1;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                -webkit-user-select: text;
+                user-select: text;
+              }
+              body.dark {
+                background-color: #0D0D0F;
+              }
+              #container {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                width: 100%;
+              }
+              .page-container {
+                position: relative;
+                margin: 12px 0;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                background-color: white;
+                max-width: 95%;
+              }
+              body.dark .page-container {
+                box-shadow: 0 4px 12px rgba(255,255,255,0.05);
+                background-color: #1E1E24;
+              }
+              canvas {
+                display: block;
+                width: 100% !important;
+                height: auto !important;
+              }
+              .textLayer {
+                position: absolute;
+                left: 0;
+                top: 0;
+                right: 0;
+                bottom: 0;
+                overflow: hidden;
+                opacity: 1;
+                line-height: 1.0;
+                -webkit-user-select: text;
+                user-select: text;
+              }
+              .textLayer span {
+                color: transparent;
+                position: absolute;
+                white-space: pre;
+                cursor: text;
+                transform-origin: 0% 0%;
+              }
+            </style>
+            </head>
+            <body class="${hClass}">
+            <div id="container"></div>
+
+            <script type="module">
+              import * as pdfjsLib from 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.mjs';
+              pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs';
+
+              const base64Data = "${pdfBase64!!.replace("\n", "").replace("\r", "")}";
+              const raw = window.atob(base64Data);
+              const rawLength = raw.length;
+              const array = new Uint8Array(new ArrayBuffer(rawLength));
+              for(let i = 0; i < rawLength; i++) {
+                array[i] = raw.charCodeAt(i);
+              }
+
+              const loadingTask = pdfjsLib.getDocument({data: array});
+              loadingTask.promise.then(async function(pdf) {
+                const container = document.getElementById('container');
+                const totalPages = pdf.numPages;
+                
+                if (window.Android) {
+                  window.Android.onPdfLoaded(totalPages);
+                }
+                
+                for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+                  const page = await pdf.getPage(pageNum);
+                  const scale = window.devicePixelRatio || 1.5;
+                  const viewport = page.getViewport({scale: scale});
+                  
+                  const pageContainer = document.createElement('div');
+                  pageContainer.className = 'page-container';
+                  pageContainer.style.width = (viewport.width / scale) + 'px';
+                  pageContainer.style.height = (viewport.height / scale) + 'px';
+                  pageContainer.id = 'page-' + pageNum;
+                  
+                  const canvas = document.createElement('canvas');
+                  canvas.width = viewport.width;
+                  canvas.height = viewport.height;
+                  const context = canvas.getContext('2d');
+                  
+                  pageContainer.appendChild(canvas);
+                  container.appendChild(pageContainer);
+                  
+                  const renderContext = {
+                    canvasContext: context,
+                    viewport: viewport
+                  };
+                  
+                  await page.render(renderContext).promise;
+                  
+                  const textContent = await page.getTextContent();
+                  const textLayerDiv = document.createElement('div');
+                  textLayerDiv.className = 'textLayer';
+                  textLayerDiv.style.width = '100%';
+                  textLayerDiv.style.height = '100%';
+                  
+                  textContent.items.forEach(function (textItem) {
+                    const tx = pdfjsLib.Util.transform(
+                      viewport.transform,
+                      textItem.transform
+                    );
+                    const span = document.createElement('span');
+                    span.textContent = textItem.str;
+                    span.style.fontFamily = textItem.fontName;
+                    
+                    const fontSize = Math.sqrt(tx[0]*tx[0] + tx[1]*tx[1]);
+                    const fontSizeScaled = fontSize / scale;
+                    span.style.fontSize = fontSizeScaled + 'px';
+                    
+                    span.style.left = (tx[4] / scale) + 'px';
+                    span.style.top = (((viewport.height - tx[5]) - fontSize) / scale) + 'px';
+                    
+                    const itemWidth = textItem.width / scale;
+                    if (itemWidth > 0) {
+                      span.style.width = itemWidth + 'px';
+                    }
+                    
+                    textLayerDiv.appendChild(span);
+                  });
+                  
+                  pageContainer.appendChild(textLayerDiv);
+                }
+                
+                document.addEventListener('selectionchange', () => {
+                  const selection = window.getSelection().toString();
+                  if (window.Android) {
+                    window.Android.onTextSelected(selection);
+                  }
+                });
+
+                window.addEventListener('scroll', () => {
+                  const pageContainers = document.querySelectorAll('.page-container');
+                  let currentVisiblePage = 1;
+                  const threshold = window.innerHeight / 2;
+                  
+                  pageContainers.forEach((el, idx) => {
+                    const rect = el.getBoundingClientRect();
+                    if (rect.top < threshold && rect.bottom > threshold) {
+                      currentVisiblePage = idx + 1;
+                    }
+                  });
+                  
+                  if (window.Android) {
+                    window.Android.onPageScrolled(currentVisiblePage);
+                  }
+                });
+                
+                const initialPage = ${currentPage + 1};
+                if (initialPage > 1) {
+                  setTimeout(() => {
+                    const targetEl = document.getElementById('page-' + initialPage);
+                    if (targetEl) {
+                      targetEl.scrollIntoView({behavior: 'smooth'});
+                    }
+                  }, 600);
+                }
+                
+              }, function(error) {
+                if (window.Android) {
+                  window.Android.onError(error.toString());
+                }
+              });
+            </script>
+            </body>
+            </html>
+        """.trimIndent()
+
+        AndroidView(
+            modifier = modifier.fillMaxSize(),
+            factory = { ctx ->
+                android.webkit.WebView(ctx).apply {
+                    settings.apply {
+                        javaScriptEnabled = true
+                        domStorageEnabled = true
+                        allowContentAccess = true
+                        allowFileAccess = true
+                        textZoom = 100
+                        useWideViewPort = true
+                        loadWithOverviewMode = true
+                        setSupportZoom(true)
+                        builtInZoomControls = true
+                        displayZoomControls = false
+                    }
+                    
+                    isLongClickable = true
+                    
+                    webChromeClient = android.webkit.WebChromeClient()
+                    webViewClient = object : android.webkit.WebViewClient() {
+                        override fun shouldOverrideUrlLoading(
+                            view: android.webkit.WebView?,
+                            request: android.webkit.WebResourceRequest?
+                        ): Boolean {
+                            return false
+                        }
+                    }
+
+                    addJavascriptInterface(object {
+                        @android.webkit.JavascriptInterface
+                        fun onPdfLoaded(totalPages: Int) {
+                            android.util.Log.d("PdfJsWebView", "Loaded PDF with " + totalPages + " pages")
+                        }
+
+                        @android.webkit.JavascriptInterface
+                        fun onTextSelected(text: String) {
+                            android.util.Log.d("PdfJsWebView", "Selected text: " + text)
+                        }
+
+                        @android.webkit.JavascriptInterface
+                        fun onPageScrolled(pageIndex: Int) {
+                            onPageChanged(pageIndex - 1)
+                        }
+
+                        @android.webkit.JavascriptInterface
+                        fun onError(error: String) {
+                            android.util.Log.e("PdfJsWebView", "Error: " + error)
+                        }
+                    }, "Android")
+
+                    loadDataWithBaseURL(
+                        "https://cdnjs.cloudflare.com/",
+                        htmlContent,
+                        "text/html",
+                        "UTF-8",
+                        null
+                    )
+                }
+            }
+        )
     }
 }
