@@ -848,9 +848,20 @@ fun ViewerScreen(
         return mapScreenToPage(pdfView, touchX, touchY)
     }
 
+    fun screenPointToPageCoordinate(pageIndex: Int, touchX: Float, touchY: Float): android.graphics.PointF? {
+        val pdfView = pdfViewInst ?: return null
+        return mapScreenToPageWithPageIndex(pdfView, pageIndex, touchX, touchY)
+    }
+
     fun pageCoordinateToScreenPoint(pageX: Float, pageY: Float): android.graphics.PointF? {
         val pdfView = pdfViewInst ?: return null
-        return mapPageToScreen(pdfView, pageX, pageY)
+        val cp = pdfView.currentPage
+        return mapPageToScreen(pdfView, cp, pageX, pageY)
+    }
+
+    fun pageCoordinateToScreenPoint(pageIndex: Int, pageX: Float, pageY: Float): android.graphics.PointF? {
+        val pdfView = pdfViewInst ?: return null
+        return mapPageToScreen(pdfView, pageIndex, pageX, pageY)
     }
 
     val selectionPos = remember(selectionStartCharIndex, selectionEndCharIndex, pageGeometryState) {
@@ -860,7 +871,7 @@ fun ViewerScreen(
         val minIdx = minOf(startIdx, endIdx).coerceIn(geo.characters.indices)
         val maxIdx = (maxOf(startIdx, endIdx) - 1).coerceIn(geo.characters.indices)
         val endChar = geo.characters[maxIdx]
-        val screenPoint = pageCoordinateToScreenPoint(endChar.rect.right, endChar.rect.top)
+        val screenPoint = pageCoordinateToScreenPoint(geo.pageIndex, endChar.rect.right, endChar.rect.top)
         if (screenPoint != null) {
             Offset(screenPoint.x, screenPoint.y)
         } else {
@@ -2228,8 +2239,8 @@ fun ViewerScreen(
                                         if (charInfo.char.isWhitespace()) continue
                                         
                                         val r = charInfo.rect
-                                        val tl = pageCoordinateToScreenPoint(r.left, r.top)
-                                        val br = pageCoordinateToScreenPoint(r.right, r.bottom)
+                                        val tl = pageCoordinateToScreenPoint(geo.pageIndex, r.left, r.top)
+                                        val br = pageCoordinateToScreenPoint(geo.pageIndex, r.right, r.bottom)
                                         if (tl != null && br != null) {
                                             drawRect(
                                                 color = Color(0x332196F3), // 20% opacity blue
@@ -2243,8 +2254,8 @@ fun ViewerScreen(
                                 val startChar = geo.characters[minIdx]
                                 val endChar = geo.characters[maxIdx]
                                 
-                                val startBr = pageCoordinateToScreenPoint(startChar.rect.left, startChar.rect.bottom)
-                                val endBr = pageCoordinateToScreenPoint(endChar.rect.right, endChar.rect.bottom)
+                                val startBr = pageCoordinateToScreenPoint(geo.pageIndex, startChar.rect.left, startChar.rect.bottom)
+                                val endBr = pageCoordinateToScreenPoint(geo.pageIndex, endChar.rect.right, endChar.rect.bottom)
                                 
                                 if (startBr != null && endBr != null) {
                                     val touchTargetSize = 48.dp
@@ -2271,7 +2282,7 @@ fun ViewerScreen(
                                                         val currentScreenPos = Offset(topLeftX + change.position.x, topLeftY + change.position.y)
                                                         magnifierPosition = currentScreenPos
                                                         
-                                                        val pagePoint = screenPointToPageCoordinate(currentScreenPos.x, currentScreenPos.y)
+                                                        val pagePoint = screenPointToPageCoordinate(geo.pageIndex, currentScreenPos.x, currentScreenPos.y)
                                                         if (pagePoint != null) {
                                                             val closestIndex = findClosestCharIndex(geo.characters, pagePoint)
                                                             if (closestIndex != -1) {
@@ -2324,7 +2335,7 @@ fun ViewerScreen(
                                                         val currentScreenPos = Offset(topLeftX + change.position.x, topLeftY + change.position.y)
                                                         magnifierPosition = currentScreenPos
                                                         
-                                                        val pagePoint = screenPointToPageCoordinate(currentScreenPos.x, currentScreenPos.y)
+                                                        val pagePoint = screenPointToPageCoordinate(geo.pageIndex, currentScreenPos.x, currentScreenPos.y)
                                                         if (pagePoint != null) {
                                                             val closestIndex = findClosestCharIndex(geo.characters, pagePoint)
                                                             if (closestIndex != -1) {
@@ -6634,37 +6645,208 @@ fun findClosestCharIndex(characters: List<CharInfo>, pagePoint: android.graphics
 fun mapScreenToPage(pdfView: Any, screenX: Float, screenY: Float): android.graphics.PointF? {
     return try {
         val cls = pdfView.javaClass
-        val method = cls.methods.firstOrNull { 
-            it.name.contains("mappedScreenToPage", ignoreCase = true) && it.parameterTypes.size == 2
-        } ?: cls.declaredMethods.firstOrNull {
-            it.name.contains("mappedScreenToPage", ignoreCase = true) && it.parameterTypes.size == 2
+        val pdfFileField = try {
+            cls.getDeclaredField("pdfFile")
+        } catch (e: Exception) {
+            cls.getField("pdfFile")
         }
-        if (method != null) {
-            method.isAccessible = true
-            method.invoke(pdfView, screenX, screenY) as? android.graphics.PointF
+        pdfFileField.isAccessible = true
+        val pdfFile = pdfFileField.get(pdfView)
+        if (pdfFile == null) {
+            android.util.Log.e("PDF_REFLECTION", "[Reflection-Check] mapScreenToPage: pdfFile field is NULL")
+            return null
         } else {
+            android.util.Log.e("PDF_REFLECTION", "[Reflection-Check] mapScreenToPage: pdfFile field is FOUND/NON-NULL ($pdfFile)")
+        }
+
+        val getZoomMethod = cls.getMethod("getZoom")
+        val zoom = getZoomMethod.invoke(pdfView) as Float
+
+        val getXOffsetMethod = cls.getMethod("getCurrentXOffset")
+        val xOffset = getXOffsetMethod.invoke(pdfView) as Float
+
+        val getYOffsetMethod = cls.getMethod("getCurrentYOffset")
+        val yOffset = getYOffsetMethod.invoke(pdfView) as Float
+
+        val documentX = -xOffset + screenX
+        val documentY = -yOffset + screenY
+
+        val pdfFileCls = pdfFile.javaClass
+        val method = pdfFileCls.getMethod(
+            "mappedScreenToPage",
+            Float::class.javaPrimitiveType,
+            Float::class.javaPrimitiveType,
+            Float::class.javaPrimitiveType
+        )
+        if (method != null) {
+            android.util.Log.e("PDF_REFLECTION", "[Reflection-Check] mapScreenToPage: mappedScreenToPage method is FOUND")
+        } else {
+            android.util.Log.e("PDF_REFLECTION", "[Reflection-Check] mapScreenToPage: mappedScreenToPage method is NULL")
+        }
+        method.isAccessible = true
+        val pagePoint = method.invoke(pdfFile, documentX, documentY, zoom) as? android.graphics.PointF
+        android.util.Log.e("PDF_REFLECTION", "[Reflection-Check] mapScreenToPage successfully mapped to: x=${pagePoint?.x}, y=${pagePoint?.y}")
+        pagePoint
+    } catch (e: Exception) {
+        android.util.Log.e("PDF_REFLECTION", "[Reflection-Check] mapScreenToPage Reflection Exception: ${e.message}", e)
+        try {
+            val cls = pdfView.javaClass
+            val method = cls.methods.firstOrNull { 
+                it.name.contains("mappedScreenToPage", ignoreCase = true) && it.parameterTypes.size == 2
+            } ?: cls.getDeclaredMethods().firstOrNull {
+                it.name.contains("mappedScreenToPage", ignoreCase = true) && it.parameterTypes.size == 2
+            }
+            if (method != null) {
+                method.isAccessible = true
+                method.invoke(pdfView, screenX, screenY) as? android.graphics.PointF
+            } else {
+                null
+            }
+        } catch (e2: Exception) {
             null
         }
-    } catch (e: Exception) {
-        null
     }
 }
 
-fun mapPageToScreen(pdfView: Any, pageX: Float, pageY: Float): android.graphics.PointF? {
+fun mapScreenToPageWithPageIndex(pdfView: Any, pageIndex: Int, screenX: Float, screenY: Float): android.graphics.PointF? {
     return try {
         val cls = pdfView.javaClass
-        val method = cls.methods.firstOrNull { 
-            it.name.contains("mappedPageToScreen", ignoreCase = true) && it.parameterTypes.size == 2
-        } ?: cls.declaredMethods.firstOrNull {
-            it.name.contains("mappedPageToScreen", ignoreCase = true) && it.parameterTypes.size == 2
+        val pdfFileField = try {
+            cls.getDeclaredField("pdfFile")
+        } catch (e: Exception) {
+            cls.getField("pdfFile")
         }
-        if (method != null) {
-            method.isAccessible = true
-            method.invoke(pdfView, pageX, pageY) as? android.graphics.PointF
+        pdfFileField.isAccessible = true
+        val pdfFile = pdfFileField.get(pdfView)
+        if (pdfFile == null) {
+            android.util.Log.e("PDF_REFLECTION", "[Reflection-Check] mapScreenToPageWithPageIndex: pdfFile field is NULL")
+            return null
         } else {
+            android.util.Log.e("PDF_REFLECTION", "[Reflection-Check] mapScreenToPageWithPageIndex: pdfFile field is FOUND/NON-NULL ($pdfFile)")
+        }
+
+        val getZoomMethod = cls.getMethod("getZoom")
+        val zoom = getZoomMethod.invoke(pdfView) as Float
+
+        val getXOffsetMethod = cls.getMethod("getCurrentXOffset")
+        val xOffset = getXOffsetMethod.invoke(pdfView) as Float
+
+        val getYOffsetMethod = cls.getMethod("getCurrentYOffset")
+        val yOffset = getYOffsetMethod.invoke(pdfView) as Float
+
+        val isSwipeHorizontalMethod = cls.getMethod("isSwipeHorizontal")
+        val isSwipeHorizontal = isSwipeHorizontalMethod.invoke(pdfView) as Boolean
+
+        val pdfFileCls = pdfFile.javaClass
+        val getPageOffsetMethod = pdfFileCls.getMethod(
+            "getPageOffset",
+            Int::class.javaPrimitiveType,
+            Float::class.javaPrimitiveType
+        )
+        getPageOffsetMethod.isAccessible = true
+        val startOffset = getPageOffsetMethod.invoke(pdfFile, pageIndex, zoom) as Float
+
+        val documentCountMethod = pdfFileCls.getMethod("getPagesCount")
+        val pagesCount = documentCountMethod.invoke(pdfFile) as Int
+
+        val pageSizeAtZoom = if (pageIndex < pagesCount - 1) {
+            val nextStartOffset = getPageOffsetMethod.invoke(pdfFile, pageIndex + 1, zoom) as Float
+            (nextStartOffset - startOffset - 1f).coerceAtLeast(0f)
+        } else {
+            4000f * zoom
+        }
+        val endOffset = startOffset + pageSizeAtZoom
+
+        var documentX = -xOffset + screenX
+        var documentY = -yOffset + screenY
+
+        if (isSwipeHorizontal) {
+            documentX = documentX.coerceIn(startOffset + 0.1f, endOffset - 0.1f)
+        } else {
+            documentY = documentY.coerceIn(startOffset + 0.1f, endOffset - 0.1f)
+        }
+
+        val mappedScreenToPageMethod = pdfFileCls.getMethod(
+            "mappedScreenToPage",
+            Float::class.javaPrimitiveType,
+            Float::class.javaPrimitiveType,
+            Float::class.javaPrimitiveType
+        )
+        if (mappedScreenToPageMethod != null) {
+            android.util.Log.e("PDF_REFLECTION", "[Reflection-Check] mapScreenToPageWithPageIndex: mappedScreenToPage method is FOUND")
+        } else {
+            android.util.Log.e("PDF_REFLECTION", "[Reflection-Check] mapScreenToPageWithPageIndex: mappedScreenToPage method is NULL")
+        }
+        mappedScreenToPageMethod.isAccessible = true
+        val pagePoint = mappedScreenToPageMethod.invoke(pdfFile, documentX, documentY, zoom) as? android.graphics.PointF
+        android.util.Log.e("PDF_REFLECTION", "[Reflection-Check] mapScreenToPageWithPageIndex successfully mapped page=$pageIndex to x=${pagePoint?.x}, y=${pagePoint?.y}")
+        pagePoint
+    } catch (e: Exception) {
+        android.util.Log.e("PDF_REFLECTION", "[Reflection-Check] mapScreenToPageWithPageIndex Reflection Exception: ${e.message}", e)
+        mapScreenToPage(pdfView, screenX, screenY)
+    }
+}
+
+fun mapPageToScreen(pdfView: Any, pageIndex: Int, pageX: Float, pageY: Float): android.graphics.PointF? {
+    return try {
+        val cls = pdfView.javaClass
+        val pdfFileField = try {
+            cls.getDeclaredField("pdfFile")
+        } catch (e: Exception) {
+            cls.getField("pdfFile")
+        }
+        pdfFileField.isAccessible = true
+        val pdfFile = pdfFileField.get(pdfView)
+        if (pdfFile == null) {
+            android.util.Log.e("PDF_REFLECTION", "[Reflection-Check] mapPageToScreen: pdfFile field is NULL")
+            return null
+        } else {
+            android.util.Log.e("PDF_REFLECTION", "[Reflection-Check] mapPageToScreen: pdfFile field is FOUND/NON-NULL ($pdfFile)")
+        }
+
+        val getZoomMethod = cls.getMethod("getZoom")
+        val zoom = getZoomMethod.invoke(pdfView) as Float
+
+        val getXOffsetMethod = cls.getMethod("getCurrentXOffset")
+        val xOffset = getXOffsetMethod.invoke(pdfView) as Float
+
+        val getYOffsetMethod = cls.getMethod("getCurrentYOffset")
+        val yOffset = getYOffsetMethod.invoke(pdfView) as Float
+
+        val pdfFileCls = pdfFile.javaClass
+        val method = pdfFileCls.getMethod(
+            "mappedPageToScreen",
+            Int::class.javaPrimitiveType,
+            Float::class.javaPrimitiveType,
+            Float::class.javaPrimitiveType,
+            Float::class.javaPrimitiveType
+        )
+        if (method != null) {
+            android.util.Log.e("PDF_REFLECTION", "[Reflection-Check] mapPageToScreen: 4-parameter mappedPageToScreen method is FOUND")
+        } else {
+            android.util.Log.e("PDF_REFLECTION", "[Reflection-Check] mapPageToScreen: 4-parameter mappedPageToScreen method is NULL")
+        }
+        method.isAccessible = true
+        val localPoint = method.invoke(pdfFile, pageIndex, pageX, pageY, zoom) as android.graphics.PointF
+        android.util.Log.e("PDF_REFLECTION", "[Reflection-Check] mapPageToScreen successfully mapped page=$pageIndex point x=$pageX, y=$pageY to screen point x=${localPoint.x + xOffset}, y=${localPoint.y + yOffset}")
+        android.graphics.PointF(localPoint.x + xOffset, localPoint.y + yOffset)
+    } catch (e: Exception) {
+        android.util.Log.e("PDF_REFLECTION", "[Reflection-Check] mapPageToScreen Reflection Exception: ${e.message}", e)
+        try {
+            val cls = pdfView.javaClass
+            val method = cls.methods.firstOrNull { 
+                it.name.contains("mappedPageToScreen", ignoreCase = true) && it.parameterTypes.size == 2
+            } ?: cls.getDeclaredMethods().firstOrNull {
+                it.name.contains("mappedPageToScreen", ignoreCase = true) && it.parameterTypes.size == 2
+            }
+            if (method != null) {
+                method.isAccessible = true
+                method.invoke(pdfView, pageX, pageY) as? android.graphics.PointF
+            } else {
+                null
+            }
+        } catch (e2: Exception) {
             null
         }
-    } catch (e: Exception) {
-        null
     }
 }
