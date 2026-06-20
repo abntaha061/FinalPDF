@@ -61,7 +61,8 @@ fun PdfViewerWidget(
     onLongPress: ((androidx.compose.ui.geometry.Offset) -> Unit)? = null,
     onZoomChanged: ((Float) -> Unit)? = null,
     onNavigateToWebView: ((String) -> Unit)? = null,
-    onGestureTriggered: ((com.example.data.GestureType, androidx.compose.ui.geometry.Offset?) -> Unit)? = null
+    onGestureTriggered: ((com.example.data.GestureType, androidx.compose.ui.geometry.Offset?) -> Unit)? = null,
+    onScrollStateChanged: ((Float, Float, Float) -> Unit)? = null
 ) {
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -407,6 +408,7 @@ fun PdfViewerWidget(
                                     this@apply.rotation = normRot.toFloat()
                                     updateMinZoomForPage(this@apply, page)
                                     scrollCurrentPage = page
+                                    onScrollStateChanged?.invoke(this@apply.currentXOffset, this@apply.currentYOffset, this@apply.zoom)
                                 }
                                 .onPageScroll { page, positionOffset ->
                                     onZoomChanged?.invoke(this@apply.zoom)
@@ -414,6 +416,7 @@ fun PdfViewerWidget(
                                     scrollPositionOffset = positionOffset
                                     scrollEventId++
                                     isScrollingActive = true
+                                    onScrollStateChanged?.invoke(this@apply.currentXOffset, this@apply.currentYOffset, this@apply.zoom)
                                 }
                                 .onError { error ->
                                     loadError = error.message ?: "Unknown error"

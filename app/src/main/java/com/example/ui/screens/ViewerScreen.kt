@@ -94,6 +94,9 @@ import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import com.example.ui.components.BottomReaderBar
 import com.example.ui.components.PdfViewerWidget
 import com.example.ui.components.BookmarkDrawer
+import com.example.ui.components.PdfJsWebView
+import com.example.ui.components.PdfJsWebViewClient
+import com.example.ui.components.WebInterface
 import com.example.ui.theme.*
 import com.example.util.PdfPrintAdapter
 import com.example.util.PdfDocumentAdapter
@@ -1468,115 +1471,174 @@ fun ViewerScreen(
                                 }
                             }
                         } else {
-                            if (isPdfJsMode) {
-                                PdfJsWebViewWidget(
+                            Box(modifier = Modifier.fillMaxSize()) {
+                                PdfViewerWidget(
                                     pdfUriString = activeUri!!,
                                     currentPage = currentPage,
-                                    isNightMode = isNightMode,
-                                    onPageChanged = { page ->
-                                        viewModel.setCurrentPage(page)
-                                        viewModel.updateProgress(activeUri!!, page, totalPages)
-                                    }
-                                )
-                            } else {
-                                PdfViewerWidget(
-                                pdfUriString = activeUri!!,
-                                currentPage = currentPage,
-                                readingMode = readingMode,
-                                isSwipeHorizontal = isSwipeHorizontal,
-                                readingScrollMode = readingScrollMode,
-                                fitMode = fitMode,
-                                onPageChanged = { page, pageCount ->
-                                    viewModel.updateProgress(activeUri!!, page, pageCount)
-                                },
-                                onLoadComplete = { pageCount ->
-                                    viewModel.setViewerLoading(false)
-                                    viewModel.updateProgress(activeUri!!, currentPage, pageCount)
-                                    activeUri?.let { checkSearchabilityAndOcrBanner(it) }
-                                    if (currentPage > 0 && viewModel.shouldShowRestoreSnackbar(activeUri!!)) {
-                                        coroutineScope.launch {
-                                            val result = snackbarHostState.showSnackbar(
-                                                message = "استُؤنفت القراءة من الصفحة ${currentPage + 1}",
-                                                actionLabel = "البداية",
-                                                duration = SnackbarDuration.Short
-                                            )
-                                            if (result == SnackbarResult.ActionPerformed) {
-                                                pdfViewInst?.jumpTo(0)
-                                                viewModel.setCurrentPage(0)
+                                    readingMode = readingMode,
+                                    isSwipeHorizontal = isSwipeHorizontal,
+                                    readingScrollMode = readingScrollMode,
+                                    fitMode = fitMode,
+                                    onPageChanged = { page, pageCount ->
+                                        viewModel.updateProgress(activeUri!!, page, pageCount)
+                                    },
+                                    onLoadComplete = { pageCount ->
+                                        viewModel.setViewerLoading(false)
+                                        viewModel.updateProgress(activeUri!!, currentPage, pageCount)
+                                        activeUri?.let { checkSearchabilityAndOcrBanner(it) }
+                                        if (currentPage > 0 && viewModel.shouldShowRestoreSnackbar(activeUri!!)) {
+                                            coroutineScope.launch {
+                                                val result = snackbarHostState.showSnackbar(
+                                                    message = "استُؤنفت القراءة من الصفحة ${currentPage + 1}",
+                                                    actionLabel = "البداية",
+                                                    duration = SnackbarDuration.Short
+                                                )
+                                                if (result == SnackbarResult.ActionPerformed) {
+                                                    pdfViewInst?.jumpTo(0)
+                                                    viewModel.setCurrentPage(0)
+                                                }
                                             }
                                         }
-                                    }
-                                },
-                                onLongPress = { offset ->
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    val geo = pageGeometryState
-                                    if (geo != null && pdfViewInst != null) {
-                                        val pagePoint = mapScreenToPage(pdfViewInst!!, offset.x, offset.y)
-                                        if (pagePoint != null) {
-                                            val closestCharIdx = findClosestCharIndex(geo.characters, pagePoint)
-                                            if (closestCharIdx != -1) {
-                                                val word = geo.words.firstOrNull { closestCharIdx in it.startCharIdx until it.endCharIdx }
-                                                val startIdx = word?.startCharIdx ?: closestCharIdx
-                                                val endIdx = word?.endCharIdx ?: (closestCharIdx + 1)
-                                                
-                                                selectionStartCharIndex = startIdx
-                                                selectionEndCharIndex = endIdx
-                                                isTextSelected = true
-                                                showColorPicker = false
-                                                
-                                                val selectedWordsList = geo.characters.subList(
-                                                    minOf(startIdx, endIdx),
-                                                    maxOf(startIdx, endIdx)
-                                                )
-                                                val selectedTextStr = selectedWordsList.map { it.char }.joinToString("")
-                                                selectedText = selectedTextStr
-                                                
-                                                val textToSpeak = selectedTextStr.trim()
-                                                if (textToSpeak.isNotEmpty()) {
-                                                    try {
-                                                        tts?.let { textToSpeech ->
-                                                            val isArabic = textToSpeak.any { it in '\u0600'..'\u06FF' }
-                                                            if (isArabic) {
-                                                                textToSpeech.language = java.util.Locale("ar")
-                                                            } else {
-                                                                textToSpeech.language = java.util.Locale.GERMAN
+                                    },
+                                    onLongPress = { offset ->
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        val geo = pageGeometryState
+                                        if (geo != null && pdfViewInst != null) {
+                                            val pagePoint = mapScreenToPage(pdfViewInst!!, offset.x, offset.y)
+                                            if (pagePoint != null) {
+                                                val closestCharIdx = findClosestCharIndex(geo.characters, pagePoint)
+                                                if (closestCharIdx != -1) {
+                                                    val word = geo.words.firstOrNull { closestCharIdx in it.startCharIdx until it.endCharIdx }
+                                                    val startIdx = word?.startCharIdx ?: closestCharIdx
+                                                    val endIdx = word?.endCharIdx ?: (closestCharIdx + 1)
+                                                    
+                                                    selectionStartCharIndex = startIdx
+                                                    selectionEndCharIndex = endIdx
+                                                    isTextSelected = true
+                                                    showColorPicker = false
+                                                    
+                                                    val selectedWordsList = geo.characters.subList(
+                                                        minOf(startIdx, endIdx),
+                                                        maxOf(startIdx, endIdx)
+                                                    )
+                                                    val selectedTextStr = selectedWordsList.map { it.char }.joinToString("")
+                                                    selectedText = selectedTextStr
+                                                    
+                                                    val textToSpeak = selectedTextStr.trim()
+                                                    if (textToSpeak.isNotEmpty()) {
+                                                        try {
+                                                            tts?.let { textToSpeech ->
+                                                                val isArabic = textToSpeak.any { it in '\u0600'..'\u06FF' }
+                                                                if (isArabic) {
+                                                                    textToSpeech.language = java.util.Locale("ar")
+                                                                } else {
+                                                                    textToSpeech.language = java.util.Locale.GERMAN
+                                                                }
+                                                                val simulatedRect = android.graphics.RectF(offset.x - 60f, offset.y - 18f, offset.x + 60f, offset.y + 18f)
+                                                                com.example.util.AudioPlayerManager.setSpeechState(textToSpeak, simulatedRect, true)
+                                                                val ttsParams = android.os.Bundle().apply {
+                                                                    putString(android.speech.tts.TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "PDF_TTS_ID")
+                                                                }
+                                                                textToSpeech.speak(textToSpeak, android.speech.tts.TextToSpeech.QUEUE_FLUSH, ttsParams, "PDF_TTS_ID")
                                                             }
-                                                            val simulatedRect = android.graphics.RectF(offset.x - 60f, offset.y - 18f, offset.x + 60f, offset.y + 18f)
-                                                            com.example.util.AudioPlayerManager.setSpeechState(textToSpeak, simulatedRect, true)
-                                                            val ttsParams = android.os.Bundle().apply {
-                                                                putString(android.speech.tts.TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "PDF_TTS_ID")
-                                                            }
-                                                            textToSpeech.speak(textToSpeak, android.speech.tts.TextToSpeech.QUEUE_FLUSH, ttsParams, "PDF_TTS_ID")
+                                                        } catch (e: Exception) {
+                                                            android.util.Log.e("ViewerScreen", "Error playing automatic pronunciation on long press", e)
                                                         }
-                                                    } catch (e: Exception) {
-                                                        android.util.Log.e("ViewerScreen", "Error playing automatic pronunciation on long press", e)
                                                     }
                                                 }
                                             }
                                         }
+                                    },
+                                    onError = {
+                                        viewModel.setViewerLoading(false)
+                                    },
+                                    onPdfViewCreated = { pdf ->
+                                        pdfViewInst = pdf
+                                    },
+                                    onTap = {
+                                        isTextSelected = false
+                                        showColorPicker = false
+                                        viewModel.toggleToolbarVisibility()
+                                    },
+                                    onZoomChanged = { zoom ->
+                                        zoomLevel = zoom
+                                    },
+                                    viewModel = viewModel,
+                                    onNavigateToWebView = onNavigateToWebView,
+                                    onGestureTriggered = { gestureType, offset ->
+                                        val act = gestureMappings[gestureType] ?: com.example.data.GestureAction.NOTHING
+                                        executeGestureAction(act, pdfViewInst, offset)
+                                    },
+                                    onScrollStateChanged = { _, _, _ ->
+                                        // Scroll callback can be used if needed
                                     }
-                                },
-                                onError = {
-                                    viewModel.setViewerLoading(false)
-                                },
-                                onPdfViewCreated = { pdf ->
-                                    pdfViewInst = pdf
-                                },
-                                onTap = {
-                                    isTextSelected = false
-                                    showColorPicker = false
-                                    viewModel.toggleToolbarVisibility()
-                                },
-                                onZoomChanged = { zoom ->
-                                    zoomLevel = zoom
-                                },
-                                viewModel = viewModel,
-                                onNavigateToWebView = onNavigateToWebView,
-                                onGestureTriggered = { gestureType, offset ->
-                                    val act = gestureMappings[gestureType] ?: com.example.data.GestureAction.NOTHING
-                                    executeGestureAction(act, pdfViewInst, offset)
+                                )
+
+                                val currentPdfView = pdfViewInst
+                                if (currentPdfView != null) {
+                                    val overlayDensity = LocalDensity.current
+                                    var webViewRef by remember { mutableStateOf<android.webkit.WebView?>(null) }
+
+                                    val triggerOverlayUpdate = {
+                                        val pageCount = currentPdfView.pageCount
+                                        val jsonArray = JSONArray()
+                                        for (i in 0 until pageCount) {
+                                            val point = mapPageToScreen(currentPdfView, i, 0f, 0f)
+                                            if (point != null) {
+                                                val pageObj = JSONObject()
+                                                pageObj.put("index", i)
+                                                pageObj.put("x", point.x / overlayDensity.density)
+                                                pageObj.put("y", point.y / overlayDensity.density)
+                                                val pageSize = currentPdfView.getPageSize(i)
+                                                pageObj.put("w", (pageSize.width * currentPdfView.zoom) / overlayDensity.density)
+                                                pageObj.put("h", (pageSize.height * currentPdfView.zoom) / overlayDensity.density)
+                                                jsonArray.put(pageObj)
+                                            }
+                                        }
+                                        webViewRef?.evaluateJavascript("updatePagePositions(${jsonArray.toString()})", null)
+                                    }
+
+                                    // Instantly update transparent HTML spans when scroll state changes
+                                    LaunchedEffect(currentPdfView.zoom, currentPdfView.currentXOffset, currentPdfView.currentYOffset) {
+                                        triggerOverlayUpdate()
+                                    }
+
+                                    AndroidView(
+                                        factory = { ctx ->
+                                            PdfJsWebView(ctx).apply {
+                                                webViewRef = this
+                                                this.pdfView = currentPdfView // delegate scroll & zoom gestures natively!
+                                                
+                                                val webInterface = WebInterface(
+                                                    onLoadSuccess = { _ ->
+                                                        triggerOverlayUpdate()
+                                                    },
+                                                    onPageChange = { pageIdx ->
+                                                        viewModel.setCurrentPage(pageIdx)
+                                                    },
+                                                    onTextSelected = { text, x, y, w, h ->
+                                                        if (text.isNotEmpty()) {
+                                                            selectedText = text
+                                                            isTextSelected = true
+                                                            showColorPicker = false
+                                                            val xPx = x * overlayDensity.density
+                                                            val yPx = y * overlayDensity.density
+                                                            val wPx = w * overlayDensity.density
+                                                            magnifierPosition = Offset(xPx + (wPx / 2f), yPx)
+                                                        } else {
+                                                            isTextSelected = false
+                                                        }
+                                                    }
+                                                )
+                                                addJavascriptInterface(webInterface, "Android")
+                                                
+                                                webViewClient = PdfJsWebViewClient(ctx, activeUri!!)
+                                                loadUrl("https://localpdf/pdf_viewer.html")
+                                            }
+                                        },
+                                        modifier = Modifier.fillMaxSize()
+                                    )
                                 }
-                            )
                             }
                         }
                     }
@@ -3115,42 +3177,6 @@ fun ViewerScreen(
                         onShapeFillToggle = { annotationViewModel.setShapeFillEnabled(it) },
                         onStampClick = { showStampPicker = true }
                     )
-                }
-
-                // Engine toggle button on top of BottomReaderBar
-                AnimatedVisibility(
-                    visible = isToolbarVisible && !isExpanded,
-                    enter = slideInVertically(
-                        initialOffsetY = { it },
-                        animationSpec = tween(durationMillis = 300)
-                    ),
-                    exit = slideOutVertically(
-                        targetOffsetY = { it },
-                        animationSpec = tween(durationMillis = 300)
-                    )
-                ) {
-                    FilledTonalButton(
-                        onClick = { isPdfJsMode = !isPdfJsMode },
-                        modifier = Modifier
-                            .padding(bottom = 8.dp)
-                            .testTag("pdf_engine_toggle"),
-                        colors = ButtonDefaults.filledTonalButtonColors(
-                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                        )
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.SwapHoriz,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = if (isPdfJsMode) "وضع الأداء" else "وضع التحديد",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
                 }
 
                 // Overlay BottomReaderBar with Tween slide vertical animations (300ms)
