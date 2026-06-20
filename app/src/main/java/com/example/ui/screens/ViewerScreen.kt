@@ -1247,16 +1247,17 @@ fun ViewerScreen(
                     .focusable()
             ) {
             if (activeUri != null) {
-                // Interactive PDF Container
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .onGloballyPositioned { coordinates ->
-                            containerWidth = if (coordinates.size.width > 0) coordinates.size.width.toFloat() else 1f
-                            containerHeight = if (coordinates.size.height > 0) coordinates.size.height.toFloat() else 1f
-                        }
-                        .testTag("pdf_viewer_container")
-                ) {
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                    // Interactive PDF Container
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .onGloballyPositioned { coordinates ->
+                                containerWidth = if (coordinates.size.width > 0) coordinates.size.width.toFloat() else 1f
+                                containerHeight = if (coordinates.size.height > 0) coordinates.size.height.toFloat() else 1f
+                            }
+                            .testTag("pdf_viewer_container")
+                    ) {
                     if (errorState != null) {
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
@@ -2294,6 +2295,7 @@ fun ViewerScreen(
                             )
                         }
                     }
+                }
                 }
             } else {
                 // Empty case if opened without valid document
@@ -4459,11 +4461,12 @@ fun ViewerScreen(
 
             // Custom Text Selection Popup
             if (isTextSelected && selectionPos != null) {
-                val density = LocalDensity.current
-                val xDp = with(density) { selectionPos!!.x.toDp() }
-                val yDp = with(density) { selectionPos!!.y.toDp() }
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                    val density = LocalDensity.current
+                    val xDp = with(density) { selectionPos!!.x.toDp() }
+                    val yDp = with(density) { selectionPos!!.y.toDp() }
 
-                Popup(
+                    Popup(
                     alignment = Alignment.TopStart,
                     offset = IntOffset(
                         x = (selectionPos!!.x - with(density) { 110.dp.toPx() }).toInt().coerceAtLeast(0),
@@ -4679,6 +4682,7 @@ fun ViewerScreen(
                             }
                         }
                     }
+                }
                 }
             }
 
