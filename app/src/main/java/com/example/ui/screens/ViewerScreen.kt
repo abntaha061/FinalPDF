@@ -123,6 +123,8 @@ import kotlinx.coroutines.launch
 import android.speech.tts.TextToSpeech
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.foundation.magnifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.window.Popup
@@ -836,6 +838,15 @@ fun ViewerScreen(
     var selectedText by remember { mutableStateOf("") }
     var showColorPicker by remember { mutableStateOf(false) }
 
+    var cachedWordsPage by remember { mutableStateOf(-1) }
+    var cachedWordsList by remember { mutableStateOf<List<WordPositionStripper.WordInfo>>(emptyList()) }
+    var selectedWordStartIndex by remember { mutableStateOf(-1) }
+    var selectedWordEndIndex by remember { mutableStateOf(-1) }
+    var selectionStartPagePos by remember { mutableStateOf<android.graphics.PointF?>(null) }
+    var selectionEndPagePos by remember { mutableStateOf<android.graphics.PointF?>(null) }
+    var isDraggingHandle by remember { mutableStateOf(false) }
+    var magnifierPosition by remember { mutableStateOf(Offset.Unspecified) }
+
     // Android TextToSpeech engine
     var tts by remember { mutableStateOf<TextToSpeech?>(null) }
     DisposableEffect(context) {
@@ -866,6 +877,12 @@ fun ViewerScreen(
     LaunchedEffect(currentPage) {
         isTextSelected = false
         showColorPicker = false
+        selectedWordStartIndex = -1
+        selectedWordEndIndex = -1
+        selectionStartPagePos = null
+        selectionEndPagePos = null
+        isDraggingHandle = false
+        magnifierPosition = Offset.Unspecified
     }
 
     // Deleted redundant clipboardManager variable definition
@@ -902,6 +919,44 @@ fun ViewerScreen(
         }
     }
 
+    fun mapScreenToPage(pdfView: Any, screenX: Float, screenY: Float): android.graphics.PointF? {
+        return try {
+            val cls = pdfView.javaClass
+            val method = cls.methods.firstOrNull { 
+                it.name.contains("mappedScreenToPage", ignoreCase = true) && it.parameterTypes.size == 2
+            } ?: cls.declaredMethods.firstOrNull {
+                it.name.contains("mappedScreenToPage", ignoreCase = true) && it.parameterTypes.size == 2
+            }
+            if (method != null) {
+                method.isAccessible = true
+                method.invoke(pdfView, screenX, screenY) as? android.graphics.PointF
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    fun mapPageToScreen(pdfView: Any, pageX: Float, pageY: Float): android.graphics.PointF? {
+        return try {
+            val cls = pdfView.javaClass
+            val method = cls.methods.firstOrNull { 
+                it.name.contains("mappedPageToScreen", ignoreCase = true) && it.parameterTypes.size == 2
+            } ?: cls.declaredMethods.firstOrNull {
+                it.name.contains("mappedPageToScreen", ignoreCase = true) && it.parameterTypes.size == 2
+            }
+            if (method != null) {
+                method.isAccessible = true
+                method.invoke(pdfView, pageX, pageY) as? android.graphics.PointF
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     fun getRealSelectionText(
         context: Context,
         pdfUri: Uri,
@@ -909,98 +964,67 @@ fun ViewerScreen(
         offset: Offset,
         pdfView: Any?
     ): String {
+        if (pdfView == null) return ""
         return try {
-            PDFBoxResourceLoader.init(context.applicationContext)
-            var pageWidth = 595f
-            var pageHeight = 842f
-            var pageText = ""
-            
+            val stripper = WordPositionStripper()
+            com.tom_roush.pdfbox.android.PDFBoxResourceLoader.init(context.applicationContext)
             context.contentResolver.openInputStream(pdfUri)?.use { inputStream ->
-                PDDocument.load(inputStream).use { document ->
+                com.tom_roush.pdfbox.pdmodel.PDDocument.load(inputStream).use { document ->
                     if (page < document.numberOfPages) {
-                        val stripper = PDFTextStripper()
                         stripper.startPage = page + 1
                         stripper.endPage = page + 1
-                        pageText = stripper.getText(document) ?: ""
-                        
-                        val pageObj = document.getPage(page)
-                        val mediaBox = pageObj.mediaBox
-                        if (mediaBox != null) {
-                            pageWidth = mediaBox.width
-                            pageHeight = mediaBox.height
+                        stripper.getText(document)
+                        val words = stripper.wordsList
+                        val pagePoint = mapScreenToPage(pdfView, offset.x, offset.y)
+                        if (pagePoint != null && words.isNotEmpty()) {
+                            var closestWord: WordPositionStripper.WordInfo? = null
+                            var minDistance = Float.MAX_VALUE
+                            for (word in words) {
+                                val r = word.rect
+                                val dx = if (pagePoint.x < r.left) r.left - pagePoint.x else if (pagePoint.x > r.right) pagePoint.x - r.right else 0f
+                                val dy = if (pagePoint.y < r.top) r.top - pagePoint.y else if (pagePoint.y > r.bottom) pagePoint.y - r.bottom else 0f
+                                val dist = dx * dx + dy * dy
+                                if (dist < minDistance) {
+                                    minDistance = dist
+                                    closestWord = word
+                                }
+                            }
+                            return closestWord?.text ?: ""
                         }
                     }
                 }
             }
-
-            if (pageText.isBlank()) return ""
-            
-            val lines = pageText.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
-            if (lines.isEmpty()) return ""
-            
-            var rx = 0.5f
-            var ry = 0.5f
-            var mappedSuccess = false
-
-            if (pdfView != null) {
-                try {
-                    val pdfViewClass = pdfView.javaClass
-                    val mappedMethod = pdfViewClass.methods.firstOrNull { 
-                        it.name.contains("mappedScreenToPage", ignoreCase = true) && it.parameterTypes.size == 2
-                    } ?: pdfViewClass.declaredMethods.firstOrNull {
-                        it.name.contains("mappedScreenToPage", ignoreCase = true) && it.parameterTypes.size == 2
-                    }
-                    if (mappedMethod != null) {
-                        mappedMethod.isAccessible = true
-                        val point = mappedMethod.invoke(pdfView, offset.x, offset.y) as? android.graphics.PointF
-                        if (point != null) {
-                            rx = (point.x / pageWidth).coerceIn(0f, 1f)
-                            ry = (point.y / pageHeight).coerceIn(0f, 1f)
-                            mappedSuccess = true
-                        }
-                    }
-                } catch (ex: Exception) {
-                    Log.e("PdfViewerWidget", "Error extracting mapped coordinates via reflection", ex)
-                }
-            }
-
-            if (!mappedSuccess) {
-                rx = 0.5f
-                ry = 0.5f
-            }
-
-            val targetLineIndex = (ry * lines.size).toInt().coerceIn(0, lines.size - 1)
-            val lineText = lines[targetLineIndex]
-            
-            val words = lineText.split(Regex("\\s+")).map { it.trim() }.filter { it.isNotEmpty() && it != "|" && it != "/" && it != "-" }
-            if (words.isEmpty()) return lineText
-            
-            val isRtl = lineText.any { it in '\u0600'..'\u06FF' }
-            val targetWordIndex = if (isRtl) {
-                (words.size - 1 - (rx * words.size).toInt()).coerceIn(0, words.size - 1)
-            } else {
-                ((rx * words.size).toInt()).coerceIn(0, words.size - 1)
-            }
-            
-            val selectedWord = words[targetWordIndex]
-            
-            // For German learning PDFs: automatically select the article with the noun
-            if (!isRtl) {
-                if (targetWordIndex > 0) {
-                    val prevWord = words[targetWordIndex - 1]
-                    if (prevWord.lowercase(Locale.ROOT) in listOf("die", "der", "das", "de", "den", "dem", "des")) {
-                        return "$prevWord $selectedWord"
-                    }
-                }
-                if (selectedWord.lowercase(Locale.ROOT) in listOf("die", "der", "das", "de", "den", "dem", "des") && targetWordIndex < words.size - 1) {
-                    val nextWord = words[targetWordIndex + 1]
-                    return "$selectedWord $nextWord"
-                }
-            }
-            selectedWord
-        } catch (e: Exception) {
-            Log.e("PdfViewerWidget", "Error in getRealSelectionText", e)
             ""
+        } catch (e: Exception) {
+            ""
+        }
+    }
+
+    fun loadWordsForPage(context: Context, pdfUri: Uri, page: Int): List<WordPositionStripper.WordInfo> {
+        if (cachedWordsPage == page && cachedWordsList.isNotEmpty()) {
+            return cachedWordsList
+        }
+        return try {
+            com.tom_roush.pdfbox.android.PDFBoxResourceLoader.init(context.applicationContext)
+            context.contentResolver.openInputStream(pdfUri)?.use { inputStream ->
+                com.tom_roush.pdfbox.pdmodel.PDDocument.load(inputStream).use { document ->
+                    if (page < document.numberOfPages) {
+                        val stripper = WordPositionStripper()
+                        stripper.startPage = page + 1
+                        stripper.endPage = page + 1
+                        stripper.getText(document)
+                        val words = stripper.wordsList
+                        cachedWordsPage = page
+                        cachedWordsList = words
+                        words
+                    } else {
+                        emptyList()
+                    }
+                }
+            } ?: emptyList()
+        } catch (e: Exception) {
+            Log.e("PdfViewerWidget", "Error in loadWordsForPage", e)
+            emptyList()
         }
     }
 
@@ -1257,6 +1281,16 @@ fun ViewerScreen(
                                 containerHeight = if (coordinates.size.height > 0) coordinates.size.height.toFloat() else 1f
                             }
                             .testTag("pdf_viewer_container")
+                            .then(
+                                if (isDraggingHandle && magnifierPosition != Offset.Unspecified) {
+                                    Modifier.magnifier(
+                                        sourceCenter = { magnifierPosition },
+                                        magnifierCenter = { magnifierPosition + Offset(0f, -60.dp.toPx()) }
+                                    )
+                                } else {
+                                    Modifier
+                                }
+                            )
                     ) {
                     if (errorState != null) {
                         Column(
@@ -1467,6 +1501,66 @@ fun ViewerScreen(
                                         }
                                     }
                                 },
+                                      onLongPress = { offset ->
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    selectionPos = offset
+                                    val uriString = activeUri ?: ""
+                                    if (uriString.isNotEmpty() && pdfViewInst != null) {
+                                        val uri = Uri.parse(uriString)
+                                        val words = loadWordsForPage(context, uri, currentPage)
+                                        if (words.isNotEmpty()) {
+                                            val pagePoint = mapScreenToPage(pdfViewInst!!, offset.x, offset.y)
+                                            if (pagePoint != null) {
+                                                var closestWord: WordPositionStripper.WordInfo? = null
+                                                var closestIndex = -1
+                                                var minDistance = Float.MAX_VALUE
+                                                for (i in words.indices) {
+                                                    val word = words[i]
+                                                    val r = word.rect
+                                                    val dx = if (pagePoint.x < r.left) r.left - pagePoint.x else if (pagePoint.x > r.right) pagePoint.x - r.right else 0f
+                                                    val dy = if (pagePoint.y < r.top) r.top - pagePoint.y else if (pagePoint.y > r.bottom) pagePoint.y - r.bottom else 0f
+                                                    val dist = dx * dx + dy * dy
+                                                    if (dist < minDistance) {
+                                                        minDistance = dist
+                                                        closestWord = word
+                                                        closestIndex = i
+                                                    }
+                                                }
+                                                if (closestWord != null) {
+                                                    selectedWordStartIndex = closestIndex
+                                                    selectedWordEndIndex = closestIndex
+                                                    selectionStartPagePos = android.graphics.PointF(closestWord.rect.left, closestWord.rect.top)
+                                                    selectionEndPagePos = android.graphics.PointF(closestWord.rect.right, closestWord.rect.bottom)
+                                                    selectedText = closestWord.text
+                                                    
+                                                    val textToSpeak = closestWord.text.trim()
+                                                    if (textToSpeak.isNotEmpty()) {
+                                                        try {
+                                                            tts?.let { textToSpeech ->
+                                                                val isArabic = textToSpeak.any { it in '\u0600'..'\u06FF' }
+                                                                if (isArabic) {
+                                                                    textToSpeech.language = java.util.Locale("ar")
+                                                                } else {
+                                                                    textToSpeech.language = java.util.Locale.GERMAN
+                                                                }
+                                                                val simulatedRect = android.graphics.RectF(offset.x - 60f, offset.y - 18f, offset.x + 60f, offset.y + 18f)
+                                                                com.example.util.AudioPlayerManager.setSpeechState(textToSpeak, simulatedRect, true)
+                                                                val ttsParams = android.os.Bundle().apply {
+                                                                    putString(android.speech.tts.TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "PDF_TTS_ID")
+                                                                }
+                                                                textToSpeech.speak(textToSpeak, android.speech.tts.TextToSpeech.QUEUE_FLUSH, ttsParams, "PDF_TTS_ID")
+                                                            }
+                                                        } catch (e: Exception) {
+                                                            android.util.Log.e("ViewerScreen", "Error playing automatic pronunciation on long press", e)
+                                                        }
+                                                    }
+                                                    isTextSelected = true
+                                                    showColorPicker = false
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
                                 onError = {
                                     viewModel.setViewerLoading(false)
                                 },
@@ -1477,46 +1571,6 @@ fun ViewerScreen(
                                     isTextSelected = false
                                     showColorPicker = false
                                     viewModel.toggleToolbarVisibility()
-                                },
-                                onLongPress = { offset ->
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    selectionPos = offset
-                                    val uriString = activeUri ?: ""
-                                    val realText = if (uriString.isNotEmpty()) {
-                                        getRealSelectionText(
-                                            context = context,
-                                            pdfUri = Uri.parse(uriString),
-                                            page = currentPage,
-                                            offset = offset,
-                                            pdfView = pdfViewInst
-                                        )
-                                    } else {
-                                        ""
-                                    }
-                                    val textToSpeak = if (!realText.isNullOrBlank()) realText.trim() else getSelectionText(documentName, currentPage).trim()
-                                    selectedText = textToSpeak
-                                    if (textToSpeak.isNotEmpty()) {
-                                        try {
-                                            tts?.let { textToSpeech ->
-                                                val isArabic = textToSpeak.any { it in '\u0600'..'\u06FF' }
-                                                if (isArabic) {
-                                                    textToSpeech.language = java.util.Locale("ar")
-                                                } else {
-                                                    textToSpeech.language = java.util.Locale.GERMAN
-                                                }
-                                                val simulatedRect = android.graphics.RectF(offset.x - 60f, offset.y - 18f, offset.x + 60f, offset.y + 18f)
-                                                com.example.util.AudioPlayerManager.setSpeechState(textToSpeak, simulatedRect, true)
-                                                val ttsParams = android.os.Bundle().apply {
-                                                    putString(android.speech.tts.TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "PDF_TTS_ID")
-                                                }
-                                                textToSpeech.speak(textToSpeak, android.speech.tts.TextToSpeech.QUEUE_FLUSH, ttsParams, "PDF_TTS_ID")
-                                            }
-                                        } catch (e: Exception) {
-                                            android.util.Log.e("ViewerScreen", "Error playing automatic pronunciation on long press", e)
-                                        }
-                                    }
-                                    isTextSelected = true
-                                    showColorPicker = false
                                 },
                                 onZoomChanged = { zoom ->
                                     zoomLevel = zoom
@@ -2196,41 +2250,178 @@ fun ViewerScreen(
                     }
 
                     // Draw the custom Selection Highlight Overlay if text is selected
-                    if (isTextSelected && selectionPos != null) {
+                    if (isTextSelected && selectionStartPagePos != null && selectionEndPagePos != null && pdfViewInst != null) {
                         val density = LocalDensity.current
-                        val xDp = with(density) { selectionPos!!.x.toDp() }
-                        val yDp = with(density) { selectionPos!!.y.toDp() }
-
-                        // Translucent blue selection box overlay matching the long press location
-                        Box(
-                            modifier = Modifier
-                                .offset(
-                                    x = xDp - 100.dp,
-                                    y = yDp - 14.dp
-                                )
-                                .size(width = 200.dp, height = 28.dp)
-                                .background(Color(0x332196F3), shape = RoundedCornerShape(4.dp))
-                        )
-                        // Left teardrop handle pin
-                        Box(
-                            modifier = Modifier
-                                .offset(
-                                    x = xDp - 104.dp,
-                                    y = yDp + 10.dp
-                                )
-                                .size(8.dp)
-                                .background(Color(0xFF2196F3), shape = CircleShape)
-                        )
-                        // Right teardrop handle pin
-                        Box(
-                            modifier = Modifier
-                                .offset(
-                                    x = xDp + 96.dp,
-                                    y = yDp + 10.dp
-                                )
-                                .size(8.dp)
-                                .background(Color(0xFF2196F3), shape = CircleShape)
-                        )
+                        val words = cachedWordsList
+                        
+                        val startIdx = selectedWordStartIndex
+                        val endIdx = selectedWordEndIndex
+                        
+                        if (words.isNotEmpty() && startIdx in words.indices && endIdx in words.indices) {
+                            val minIdx = minOf(startIdx, endIdx)
+                            val maxIdx = maxOf(startIdx, endIdx)
+                            
+                            val selectedWords = words.subList(minIdx, maxIdx + 1)
+                            
+                            // 1. Draw highlighted boxes in REAL TIME on a custom canvas.
+                            // We map each word's page-space rect to screen space coordinates on the current page.
+                            Canvas(
+                                modifier = Modifier.fillMaxSize()
+                            ) {
+                                for (word in selectedWords) {
+                                    val r = word.rect
+                                    val tl = mapPageToScreen(pdfViewInst!!, r.left, r.top)
+                                    val br = mapPageToScreen(pdfViewInst!!, r.right, r.bottom)
+                                    if (tl != null && br != null) {
+                                        drawRect(
+                                            color = Color(0x332196F3), // 20% opacity blue
+                                            topLeft = Offset(tl.x, tl.y),
+                                            size = androidx.compose.ui.geometry.Size(br.x - tl.x, br.y - tl.y)
+                                        )
+                                    }
+                                }
+                            }
+                            
+                            val startWord = words[minIdx]
+                            val endWord = words[maxIdx]
+                            
+                            val startTl = mapPageToScreen(pdfViewInst!!, startWord.rect.left, startWord.rect.top)
+                            val startBr = mapPageToScreen(pdfViewInst!!, startWord.rect.left, startWord.rect.bottom)
+                            
+                            val endTl = mapPageToScreen(pdfViewInst!!, endWord.rect.right, endWord.rect.top)
+                            val endBr = mapPageToScreen(pdfViewInst!!, endWord.rect.right, endWord.rect.bottom)
+                            
+                            if (startBr != null && endBr != null) {
+                                val touchTargetSize = 48.dp
+                                val halfTouchPx = with(density) { touchTargetSize.toPx() / 2f }
+                                
+                                // Drag handle for Selection START (left side of the first word)
+                                Box(
+                                    modifier = Modifier
+                                        .offset(
+                                            x = with(density) { (startBr.x - halfTouchPx).toDp() },
+                                            y = with(density) { (startBr.y - halfTouchPx).toDp() }
+                                        )
+                                        .size(touchTargetSize)
+                                        .pointerInput(words) {
+                                            detectDragGestures(
+                                                onDragStart = {
+                                                    isDraggingHandle = true
+                                                    magnifierPosition = Offset(startBr.x, startBr.y)
+                                                },
+                                                onDrag = { change, dragAmount ->
+                                                    change.consume()
+                                                    val topLeftX = startBr.x - halfTouchPx
+                                                    val topLeftY = startBr.y - halfTouchPx
+                                                    val currentScreenPos = Offset(topLeftX + change.position.x, topLeftY + change.position.y)
+                                                    magnifierPosition = currentScreenPos
+                                                    
+                                                    val pagePoint = mapScreenToPage(pdfViewInst!!, currentScreenPos.x, currentScreenPos.y)
+                                                    if (pagePoint != null) {
+                                                        var closestIndex = -1
+                                                        var minDistance = Float.MAX_VALUE
+                                                        for (i in words.indices) {
+                                                            val r = words[i].rect
+                                                            val dx = if (pagePoint.x < r.left) r.left - pagePoint.x else if (pagePoint.x > r.right) pagePoint.x - r.right else 0f
+                                                            val dy = if (pagePoint.y < r.top) r.top - pagePoint.y else if (pagePoint.y > r.bottom) pagePoint.y - r.bottom else 0f
+                                                            val dist = dx * dx + dy * dy
+                                                            if (dist < minDistance) {
+                                                                minDistance = dist
+                                                                closestIndex = i
+                                                            }
+                                                        }
+                                                        if (closestIndex != -1) {
+                                                            selectedWordStartIndex = closestIndex
+                                                            selectionStartPagePos = android.graphics.PointF(words[closestIndex].rect.left, words[closestIndex].rect.top)
+                                                            val newText = words.subList(minOf(selectedWordStartIndex, selectedWordEndIndex), maxOf(selectedWordStartIndex, selectedWordEndIndex) + 1).joinToString(" ") { it.text }
+                                                            selectedText = newText
+                                                        }
+                                                    }
+                                                },
+                                                onDragEnd = {
+                                                    isDraggingHandle = false
+                                                    magnifierPosition = Offset.Unspecified
+                                                },
+                                                onDragCancel = {
+                                                    isDraggingHandle = false
+                                                    magnifierPosition = Offset.Unspecified
+                                                }
+                                            )
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(16.dp)
+                                            .background(Color(0xFF2196F3), shape = CircleShape)
+                                            .border(2.dp, Color.White, CircleShape)
+                                    )
+                                }
+                                
+                                // Drag handle for Selection END (right side of the last word)
+                                Box(
+                                    modifier = Modifier
+                                        .offset(
+                                            x = with(density) { (endBr.x - halfTouchPx).toDp() },
+                                            y = with(density) { (endBr.y - halfTouchPx).toDp() }
+                                        )
+                                        .size(touchTargetSize)
+                                        .pointerInput(words) {
+                                            detectDragGestures(
+                                                onDragStart = {
+                                                    isDraggingHandle = true
+                                                    magnifierPosition = Offset(endBr.x, endBr.y)
+                                                },
+                                                onDrag = { change, dragAmount ->
+                                                    change.consume()
+                                                    val topLeftX = endBr.x - halfTouchPx
+                                                    val topLeftY = endBr.y - halfTouchPx
+                                                    val currentScreenPos = Offset(topLeftX + change.position.x, topLeftY + change.position.y)
+                                                    magnifierPosition = currentScreenPos
+                                                    
+                                                    val pagePoint = mapScreenToPage(pdfViewInst!!, currentScreenPos.x, currentScreenPos.y)
+                                                    if (pagePoint != null) {
+                                                        var closestIndex = -1
+                                                        var minDistance = Float.MAX_VALUE
+                                                        for (i in words.indices) {
+                                                            val r = words[i].rect
+                                                            val dx = if (pagePoint.x < r.left) r.left - pagePoint.x else if (pagePoint.x > r.right) pagePoint.x - r.right else 0f
+                                                            val dy = if (pagePoint.y < r.top) r.top - pagePoint.y else if (pagePoint.y > r.bottom) pagePoint.y - r.bottom else 0f
+                                                            val dist = dx * dx + dy * dy
+                                                            if (dist < minDistance) {
+                                                                minDistance = dist
+                                                                closestIndex = i
+                                                            }
+                                                        }
+                                                        if (closestIndex != -1) {
+                                                            selectedWordEndIndex = closestIndex
+                                                            selectionEndPagePos = android.graphics.PointF(words[closestIndex].rect.right, words[closestIndex].rect.bottom)
+                                                            val newText = words.subList(minOf(selectedWordStartIndex, selectedWordEndIndex), maxOf(selectedWordStartIndex, selectedWordEndIndex) + 1).joinToString(" ") { it.text }
+                                                            selectedText = newText
+                                                        }
+                                                    }
+                                                },
+                                                onDragEnd = {
+                                                    isDraggingHandle = false
+                                                    magnifierPosition = Offset.Unspecified
+                                                },
+                                                onDragCancel = {
+                                                    isDraggingHandle = false
+                                                    magnifierPosition = Offset.Unspecified
+                                                }
+                                            )
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(16.dp)
+                                            .background(Color(0xFF2196F3), shape = CircleShape)
+                                            .border(2.dp, Color.White, CircleShape)
+                                    )
+                                }
+                            }
+                        }
                     }
 
                     // Floating Left and Right Navigation Arrow Overlays for Page-by-Page Mode
@@ -6302,5 +6493,74 @@ fun com.github.barteksc.pdfviewer.PDFView.saveSearchState(keyword: String, match
         this.jumpTo(matches[0])
     } else {
         this.setTag(null)
+    }
+}
+
+class WordPositionStripper : com.tom_roush.pdfbox.text.PDFTextStripper() {
+    init {
+        sortByPosition = true
+    }
+
+    data class WordInfo(
+        val text: String,
+        val rect: android.graphics.RectF
+    )
+
+    val wordsList = mutableListOf<WordInfo>()
+
+    override fun writeString(string: String?, textPositions: MutableList<com.tom_roush.pdfbox.text.TextPosition>?) {
+        if (string == null || textPositions == null || textPositions.isEmpty()) return
+        
+        var currentWordText = java.lang.StringBuilder()
+        var wordStartIdx = 0
+        
+        for (i in textPositions.indices) {
+            val tp = textPositions[i]
+            val charStr = tp.unicode
+            
+            if (charStr == null || charStr.isBlank() || charStr == " " || charStr == "\t") {
+                if (currentWordText.isNotEmpty()) {
+                    addWord(currentWordText.toString(), textPositions.subList(wordStartIdx, i))
+                    currentWordText = java.lang.StringBuilder()
+                }
+                wordStartIdx = i + 1
+            } else {
+                currentWordText.append(charStr)
+            }
+        }
+        
+        if (currentWordText.isNotEmpty()) {
+            addWord(currentWordText.toString(), textPositions.subList(wordStartIdx, textPositions.size))
+        }
+    }
+
+    private fun addWord(text: String, positions: List<com.tom_roush.pdfbox.text.TextPosition>) {
+        if (positions.isEmpty()) return
+        
+        var minX = Float.MAX_VALUE
+        var maxX = Float.MIN_VALUE
+        var minY = Float.MAX_VALUE
+        var maxY = Float.MIN_VALUE
+        
+        for (tp in positions) {
+            val x = tp.xDirAdj
+            val w = tp.widthDirAdj
+            val y = tp.yDirAdj
+            val h = tp.height
+            
+            val x1 = x
+            val x2 = x + w
+            val y1 = y - h
+            val y2 = y + h / 2f
+            
+            if (x1 < minX) minX = x1
+            if (x2 > maxX) maxX = x2
+            if (y1 < minY) minY = y1
+            if (y2 > maxY) maxY = y2
+        }
+        
+        if (minX <= maxX && minY <= maxY) {
+            wordsList.add(WordInfo(text, android.graphics.RectF(minX, minY, maxX, maxY)))
+        }
     }
 }
