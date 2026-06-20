@@ -499,15 +499,20 @@ fun PdfViewerWidget(
             modifier = Modifier.align(Alignment.TopEnd)
         ) {
             val coercedOffset = scrollPositionOffset.coerceIn(0f, 1f)
+            val globalScrollFraction = if (pageCount > 1) {
+                ((scrollCurrentPage + coercedOffset) / pageCount.toFloat()).coerceIn(0f, 1f)
+            } else {
+                0f
+            }
             val badgeHeight = 36.dp
             
-            val verticalOffset = remember(coercedOffset, containerHeight) {
+            val verticalOffset = remember(globalScrollFraction, containerHeight) {
                 val containerHeightPx = containerHeight
                 val badgeHeightPx = with(density) { badgeHeight.toPx() }
                 // Constrain the offset so the badge stays elegantly within the screen boundaries with a 16dp defensive margin at top and bottom
                 val marginPx = with(density) { 16.dp.toPx() }
                 val maxOffsetPx = (containerHeightPx - badgeHeightPx - (marginPx * 2f)).coerceAtLeast(0f)
-                val offsetPx = (coercedOffset * maxOffsetPx) + marginPx
+                val offsetPx = (globalScrollFraction * maxOffsetPx) + marginPx
                 with(density) { offsetPx.toDp() }
             }
 
