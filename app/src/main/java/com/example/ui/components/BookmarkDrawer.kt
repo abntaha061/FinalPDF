@@ -148,6 +148,11 @@ fun BookmarkDrawer(
             modifier = modifier
                 .fillMaxHeight()
                 .width(320.dp)
+                .clickable(
+                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                    indication = null,
+                    onClick = {} // explicitly consume taps inside the panel content area to prevent click-through dismissal
+                )
         ) {
             Column(
                 modifier = Modifier

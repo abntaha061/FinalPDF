@@ -133,9 +133,11 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.unit.IntOffset
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.BackHandler
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.focus.*
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.zIndex
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -659,6 +661,12 @@ fun ViewerScreen(
     val isMedium = screenWidth in 600..839
     val isExpanded = screenWidth >= 840
     val isAdaptive = false
+    val isDrawerOpen = drawerState.isOpen || drawerState.targetValue == DrawerValue.Open
+    BackHandler(enabled = !isAdaptive && isDrawerOpen) {
+        coroutineScope.launch {
+            drawerState.close()
+        }
+    }
     var selectedDrawerTab by remember { mutableStateOf(0) } // 0 = Bookmarks, 1 = Thumbnails
 
     // Jump dialog & File information dialog states
@@ -999,6 +1007,7 @@ fun ViewerScreen(
     ModalNavigationDrawer(
         drawerState = drawerState,
         gesturesEnabled = false,
+        scrimColor = Color.Transparent,
         drawerContent = {
             if (!isAdaptive) {
                 BookmarkDrawer(
@@ -1031,6 +1040,29 @@ fun ViewerScreen(
     ) {
         val sidebarWidth = if (isExpanded) 320.dp else 280.dp
         Box(modifier = modifier.fillMaxSize()) {
+            // Custom Scrim Overlay for ModalNavigationDrawer
+            AnimatedVisibility(
+                visible = !isAdaptive && isDrawerOpen,
+                enter = fadeIn(animationSpec = tween(200)),
+                exit = fadeOut(animationSpec = tween(250)),
+                modifier = Modifier.zIndex(100f)
+            ) {
+                val scrimInteractionSource = remember { MutableInteractionSource() }
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black.copy(alpha = 0.4f))
+                        .clickable(
+                            interactionSource = scrimInteractionSource,
+                            indication = null
+                        ) {
+                            coroutineScope.launch {
+                                drawerState.close()
+                            }
+                        }
+                )
+            }
+
             if (isAdaptive) {
                 Row(
                     modifier = Modifier

@@ -123,7 +123,7 @@ fun PdfViewerWidget(
             val containerRatio = containerWidth / containerHeight
             val pageRatio = pageW / pageH
             if (isLandscape) {
-                // Landscape orientation: Fit Width mode is the requirement (zoom level 1.0f with FitPolicy.WIDTH)
+                // Landscape orientation: Fit Width mode is the requirement. Since pageFitPolicy is strictly set to FitPolicy.WIDTH in landscape option, returning 1.0f guarantees the page scales to fit the width perfectly edge-to-edge.
                 1.0f
             } else {
                 // Portrait orientation: Contain fit logic
@@ -439,7 +439,7 @@ fun PdfViewerWidget(
                                 .enableAntialiasing(true)                  // Sharp and smooth text rendering
                                 
                                 .spacing(pageSpacing.toInt())                               // custom space between pages
-                                .pageFitPolicy(if (fitMode == "height") FitPolicy.HEIGHT else FitPolicy.WIDTH)
+                                .pageFitPolicy(if (isLandscape) FitPolicy.WIDTH else (if (fitMode == "height") FitPolicy.HEIGHT else FitPolicy.WIDTH))
                                 .nightMode(readingMode == "night")
                                 .scrollHandle(DefaultScrollHandle(ctx))
                                 .linkHandler(CustomLinkHandler(context, this, pdfUriString, onLinkTapped, onNavigateToWebView)) // Custom link handler
