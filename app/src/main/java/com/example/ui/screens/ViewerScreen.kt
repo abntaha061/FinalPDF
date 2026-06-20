@@ -2318,29 +2318,7 @@ fun ViewerScreen(
                 }
             }
 
-            // Always Visible Floating Scroll Pill Page Indicator
-            AnimatedVisibility(
-                visible = showPageIndicator && isScrollIndicatorVisible && totalPages > 0,
-                enter = fadeIn(animationSpec = tween(300)),
-                exit = fadeOut(animationSpec = tween(300)),
-                modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .padding(end = 16.dp)
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(50),
-                    color = AppSurface.copy(alpha = 0.8f),
-                    shadowElevation = 6.dp
-                ) {
-                    Text(
-                        text = "${currentPage + 1} / $totalPages",
-                        color = AppTextPrimary,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
-                    )
-                }
-            }
+
 
             // OCR Scanner Prompt Banner (non-intrusive banner below TopAppBar space)
             AnimatedVisibility(

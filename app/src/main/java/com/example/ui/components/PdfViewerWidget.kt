@@ -29,7 +29,6 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.example.ui.PdfViewModel
 import com.github.barteksc.pdfviewer.PDFView
 import com.github.barteksc.pdfviewer.CustomLinkHandler
-import com.github.barteksc.pdfviewer.scroll.DefaultScrollHandle
 import com.github.barteksc.pdfviewer.util.FitPolicy
 import kotlinx.coroutines.launch
 import androidx.compose.animation.AnimatedVisibility
@@ -441,7 +440,6 @@ fun PdfViewerWidget(
                                 .spacing(pageSpacing.toInt())                               // custom space between pages
                                 .pageFitPolicy(if (isLandscape) FitPolicy.WIDTH else (if (fitMode == "height") FitPolicy.HEIGHT else FitPolicy.WIDTH))
                                 .nightMode(readingMode == "night")
-                                .scrollHandle(DefaultScrollHandle(ctx))
                                 .linkHandler(CustomLinkHandler(context, this, pdfUriString, onLinkTapped, onNavigateToWebView)) // Custom link handler
                                 .load()
 
