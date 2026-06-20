@@ -93,6 +93,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.unit.dp
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.first
 import java.util.Locale
@@ -121,7 +122,11 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         var savedLang = "ar"
         try {
-            savedLang = runBlocking { pdfReaderDataStore.data.map { it[APP_LANGUAGE_KEY] ?: "ar" }.first() }
+            savedLang = runBlocking {
+                withTimeoutOrNull(250) {
+                    pdfReaderDataStore.data.map { it[APP_LANGUAGE_KEY] ?: "ar" }.first()
+                } ?: "ar"
+            }
         } catch (e: Exception) {
             android.util.Log.e("MainActivity", "Error reading language during cold start", e)
         }

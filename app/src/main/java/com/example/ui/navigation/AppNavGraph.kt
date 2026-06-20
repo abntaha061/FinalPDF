@@ -1,6 +1,7 @@
 package com.example.ui.navigation
 
 import android.net.Uri
+import com.example.util.findActivity
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
@@ -70,7 +71,7 @@ fun AppNavGraph(
         // FILES (FILE BROWSER)
         composable(Screen.FileBrowser.route) {
             val context = androidx.compose.ui.platform.LocalContext.current
-            val activity = context as? androidx.activity.ComponentActivity
+            val activity = context.findActivity()
                 ?: throw IllegalStateException("Context must be ComponentActivity")
             val viewModel = androidx.compose.runtime.remember(context) {
                 androidx.lifecycle.ViewModelProvider(activity)[com.example.ui.PdfViewModel::class.java]
@@ -108,7 +109,7 @@ fun AppNavGraph(
         // FAVORITES
         composable(Screen.Favorites.route) {
             val context = androidx.compose.ui.platform.LocalContext.current
-            val activity = context as? androidx.activity.ComponentActivity
+            val activity = context.findActivity()
                 ?: throw IllegalStateException("Context must be ComponentActivity")
             val viewModel = androidx.compose.runtime.remember(context) {
                 androidx.lifecycle.ViewModelProvider(activity)[com.example.ui.PdfViewModel::class.java]
@@ -125,7 +126,7 @@ fun AppNavGraph(
         // STATISTICS
         composable(Screen.Statistics.route) {
             val context = androidx.compose.ui.platform.LocalContext.current
-            val activity = context as? androidx.activity.ComponentActivity
+            val activity = context.findActivity()
                 ?: throw IllegalStateException("Context must be ComponentActivity")
             val viewModel = androidx.compose.runtime.remember(context) {
                 androidx.lifecycle.ViewModelProvider(activity)[com.example.ui.PdfViewModel::class.java]
@@ -167,7 +168,7 @@ fun AppNavGraph(
         // GESTURE SETTINGS
         composable(Screen.GestureSettings.route) {
             val context = androidx.compose.ui.platform.LocalContext.current
-            val activity = context as? androidx.activity.ComponentActivity
+            val activity = context.findActivity()
                 ?: throw IllegalStateException("Context must be ComponentActivity")
             val viewModel = androidx.compose.runtime.remember(context) {
                 androidx.lifecycle.ViewModelProvider(activity)[com.example.ui.PdfViewModel::class.java]

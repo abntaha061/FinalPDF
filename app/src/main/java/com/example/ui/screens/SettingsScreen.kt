@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import android.app.AlertDialog
 import android.content.Context
+import com.example.util.findActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -40,7 +41,7 @@ import androidx.compose.ui.draw.alpha
 fun SettingsScreen(navController: androidx.navigation.NavController) {
     val context = LocalContext.current
     val viewModel = remember(context) {
-        val activity = context as? androidx.activity.ComponentActivity
+        val activity = context.findActivity()
             ?: throw IllegalStateException("Context must be ComponentActivity")
         androidx.lifecycle.ViewModelProvider(activity)[PdfViewModel::class.java]
     }

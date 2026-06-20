@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
+import com.example.util.findActivity
 import android.webkit.*
 import android.view.ViewGroup
 import androidx.activity.compose.BackHandler
@@ -95,7 +96,7 @@ fun WebViewScreen(
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
 
     if (android.os.Build.VERSION.SDK_INT >= 34) {
-        val activity = context as? androidx.activity.ComponentActivity
+        val activity = context.findActivity()
         if (activity != null) {
             val dispatcher = activity.onBackInvokedDispatcher
             val callback = remember(webViewInstance) {

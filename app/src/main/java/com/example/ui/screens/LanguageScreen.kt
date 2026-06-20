@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.MainActivity
 import com.example.ui.PdfViewModel
+import com.example.util.findActivity
 import com.example.ui.theme.AppBackground
 import com.example.ui.theme.AppSurface
 import com.example.ui.theme.AppTextPrimary
@@ -32,7 +33,7 @@ import java.util.Locale
 fun LanguageScreen(navController: androidx.navigation.NavController) {
     val context = LocalContext.current
     val viewModel = remember(context) {
-        val activity = context as? androidx.activity.ComponentActivity
+        val activity = context.findActivity()
             ?: throw IllegalStateException("Context must be ComponentActivity")
         androidx.lifecycle.ViewModelProvider(activity)[PdfViewModel::class.java]
     }

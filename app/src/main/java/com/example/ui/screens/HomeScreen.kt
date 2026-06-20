@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import android.net.Uri
+import com.example.util.findActivity
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -551,7 +552,7 @@ fun HomeScreenRealFiles(
 fun HomeScreen(navController: androidx.navigation.NavController) {
     val context = LocalContext.current
     val viewModel = remember(context) {
-        val activity = context as? androidx.activity.ComponentActivity
+        val activity = context.findActivity()
             ?: throw IllegalStateException("Context must be ComponentActivity")
         androidx.lifecycle.ViewModelProvider(activity)[PdfViewModel::class.java]
     }

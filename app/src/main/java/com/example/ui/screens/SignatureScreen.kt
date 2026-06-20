@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import android.content.Context
+import com.example.util.findActivity
 import android.graphics.Bitmap
 import android.graphics.ImageDecoder
 import android.graphics.Typeface
@@ -60,7 +61,7 @@ import java.io.FileOutputStream
 fun SignatureScreen(
     navController: NavController,
     viewModel: PdfViewModel = viewModel(
-        LocalContext.current as androidx.activity.ComponentActivity
+        LocalContext.current.findActivity() ?: throw IllegalStateException("Context must be ComponentActivity")
     )
 ) {
     val context = LocalContext.current

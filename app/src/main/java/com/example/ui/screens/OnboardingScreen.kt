@@ -30,12 +30,13 @@ import kotlinx.coroutines.launch
 
 import androidx.compose.ui.platform.LocalContext
 import com.example.ui.PdfViewModel
+import com.example.util.findActivity
 
 @Composable
 fun OnboardingScreen(navController: androidx.navigation.NavController) {
     val context = LocalContext.current
     val viewModel = remember(context) {
-        val activity = context as? androidx.activity.ComponentActivity
+        val activity = context.findActivity()
             ?: throw IllegalStateException("Context must be ComponentActivity")
         androidx.lifecycle.ViewModelProvider(activity)[PdfViewModel::class.java]
     }

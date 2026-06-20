@@ -147,6 +147,68 @@ fun ViewerScreen(
     onNavigateToReader: ((String) -> Unit)? = null,
     onNavigateToSignature: (() -> Unit)? = null
 ) {
+    val securityExceptionUri by viewModel.securityExceptionUri.collectAsState()
+    val isNightMode by viewModel.isNightMode.collectAsState()
+
+    if (securityExceptionUri != null) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(if (isNightMode) Color(0xFF13131A) else Color(0xFFF9F9FB))
+                .padding(24.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("security_exception_view")
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Lock,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier
+                        .size(96.dp)
+                        .testTag("security_exception_icon")
+                )
+                Spacer(modifier = Modifier.height(24.dp))
+                Text(
+                    text = "انتهت صلاحية الوصول لملف الـ PDF السابقة، يرجى إعادة فتحه يدوياً.",
+                    color = if (isNightMode) Color.White else Color(0xFF13131A),
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier
+                        .padding(horizontal = 16.dp)
+                        .testTag("security_exception_text")
+                )
+                Spacer(modifier = Modifier.height(32.dp))
+                Button(
+                    onClick = {
+                        viewModel.clearSecurityException()
+                        onBack()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth(0.8f)
+                        .height(56.dp)
+                        .testTag("security_exception_home_button")
+                ) {
+                    Text(
+                        text = "الذهاب لصفحة البداية",
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+        return
+    }
+
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
@@ -160,7 +222,6 @@ fun ViewerScreen(
     val activeUri by viewModel.selectedUri.collectAsState()
     val currentPage by viewModel.currentPage.collectAsState()
     val totalPages by viewModel.totalPages.collectAsState()
-    val isNightMode by viewModel.isNightMode.collectAsState()
     val readingMode by viewModel.readingMode.collectAsState()
     val isSwipeHorizontal by viewModel.isSwipeHorizontal.collectAsState()
     val isPageBookmarked by viewModel.isCurrentPageBookmarked.collectAsState()

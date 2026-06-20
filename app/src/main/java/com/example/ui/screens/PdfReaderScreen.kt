@@ -12,6 +12,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.navigation.NavController
 import com.example.ui.PdfViewModel
 import com.example.ui.navigation.Screen
+import com.example.util.findActivity
 
 @Composable
 fun PdfReaderScreen(
@@ -20,13 +21,13 @@ fun PdfReaderScreen(
 ) {
     val context = LocalContext.current
     val viewModel = remember(context) {
-        val activity = context as? androidx.activity.ComponentActivity
+        val activity = context.findActivity()
             ?: throw IllegalStateException("Context must be ComponentActivity")
         androidx.lifecycle.ViewModelProvider(activity)[PdfViewModel::class.java]
     }
 
     if (android.os.Build.VERSION.SDK_INT >= 34) {
-        val activity = context as? androidx.activity.ComponentActivity
+        val activity = context.findActivity()
         if (activity != null) {
             val dispatcher = activity.onBackInvokedDispatcher
             val callback = remember {

@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import android.content.Context
 import android.net.Uri
+import com.example.util.findActivity
 import android.provider.OpenableColumns
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -67,7 +68,7 @@ fun MultiFileSearchScreen(
     val coroutineScope = rememberCoroutineScope()
 
     val viewModel = remember(context) {
-        val activity = context as? androidx.activity.ComponentActivity
+        val activity = context.findActivity()
             ?: throw IllegalStateException("Context must be ComponentActivity")
         androidx.lifecycle.ViewModelProvider(activity)[PdfViewModel::class.java]
     }
