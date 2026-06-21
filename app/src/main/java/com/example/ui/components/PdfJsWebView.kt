@@ -25,6 +25,10 @@ class PdfJsWebView @JvmOverloads constructor(
         // Enable hardware acceleration
         setLayerType(LAYER_TYPE_HARDWARE, null)
 
+        // Disable native scroll bars
+        isVerticalScrollBarEnabled = false
+        isHorizontalScrollBarEnabled = false
+
         settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
@@ -33,7 +37,7 @@ class PdfJsWebView @JvmOverloads constructor(
             textZoom = 100
             useWideViewPort = true
             loadWithOverviewMode = true
-            setSupportZoom(true)
+            setSupportZoom(false) // Disable WebView native zoom to avoid dual-zooming conflicts
             builtInZoomControls = false
             displayZoomControls = false
         }

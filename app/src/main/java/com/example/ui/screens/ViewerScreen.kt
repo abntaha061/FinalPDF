@@ -1575,7 +1575,7 @@ fun ViewerScreen(
                                 )
 
                                 val currentPdfView = pdfViewInst
-                                if (currentPdfView != null) {
+                                if (isPdfJsMode && currentPdfView != null) {
                                     val overlayDensity = LocalDensity.current
                                     var webViewRef by remember { mutableStateOf<android.webkit.WebView?>(null) }
 
