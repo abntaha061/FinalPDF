@@ -549,16 +549,9 @@ class PdfViewModel(
             }
         }
         viewModelScope.launch {
-            try {
-                kotlinx.coroutines.withTimeoutOrNull(1500L) {
-                    recentDocuments.first()
-                    _isOnboardingDone.filterNotNull().first()
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("PdfViewModel", "Watchdog startup timed out or failed", e)
-            } finally {
-                _isReady.value = true
-            }
+            recentDocuments.first()
+            _isOnboardingDone.filterNotNull().first()
+            _isReady.value = true
         }
         viewModelScope.launch {
             currentPage

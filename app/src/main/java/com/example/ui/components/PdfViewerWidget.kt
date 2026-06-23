@@ -15,11 +15,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.platform.testTag
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -29,6 +26,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.example.ui.PdfViewModel
 import com.github.barteksc.pdfviewer.PDFView
 import com.github.barteksc.pdfviewer.CustomLinkHandler
+import com.github.barteksc.pdfviewer.scroll.DefaultScrollHandle
 import com.github.barteksc.pdfviewer.util.FitPolicy
 import kotlinx.coroutines.launch
 import androidx.compose.animation.AnimatedVisibility
@@ -61,17 +59,13 @@ fun PdfViewerWidget(
     onLongPress: ((androidx.compose.ui.geometry.Offset) -> Unit)? = null,
     onZoomChanged: ((Float) -> Unit)? = null,
     onNavigateToWebView: ((String) -> Unit)? = null,
-    onGestureTriggered: ((com.example.data.GestureType, androidx.compose.ui.geometry.Offset?) -> Unit)? = null,
-    onScrollStateChanged: ((Float, Float, Float) -> Unit)? = null
+    onGestureTriggered: ((com.example.data.GestureType, androidx.compose.ui.geometry.Offset?) -> Unit)? = null
 ) {
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
     val pageSpacing by viewModel.pageSpacing.collectAsState()
-    val orientation = LocalConfiguration.current.orientation
-    val isLandscape = (orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE)
-
-    var isLoaded by remember(pdfUriString, orientation) { mutableStateOf(false) }
-    var loadError by remember(pdfUriString, orientation) { mutableStateOf<String?>(null) }
+    var isLoaded by remember { mutableStateOf(false) }
+    var loadError by remember { mutableStateOf<String?>(null) }
 
     val haptic = LocalHapticFeedback.current
 
@@ -116,31 +110,29 @@ fun PdfViewerWidget(
         sizes
     }
 
-    val getFitScaleForPage = { pageW: Float, pageH: Float ->
-        if (containerWidth <= 0f || containerHeight <= 0f) {
-            1.0f
-        } else {
-            val containerRatio = containerWidth / containerHeight
-            val pageRatio = pageW / pageH
-            if (isLandscape) {
-                // Landscape orientation: Fit Width mode is the requirement. Since pageFitPolicy is strictly set to FitPolicy.WIDTH in landscape option, returning 1.0f guarantees the page scales to fit the width perfectly edge-to-edge.
-                1.0f
-            } else {
-                // Portrait orientation: Contain fit logic
-                if (fitMode == "height") {
-                    if (pageRatio > containerRatio) containerRatio / pageRatio else 1.0f
-                } else { // default or "width"
-                    if (pageRatio < containerRatio) pageRatio / containerRatio else 1.0f
-                }
-            }
-        }
-    }
-
     val updateMinZoomForPage: (PDFView, Int) -> Unit = { pdfView, pageIndex ->
         if (containerWidth > 0f && containerHeight > 0f) {
             val size = pageSizes[pageIndex]
             if (size != null && size.first > 0f && size.second > 0f) {
-                val fitScale = getFitScaleForPage(size.first, size.second)
+                val pageW = size.first
+                val pageH = size.second
+                val containerRatio = containerWidth / containerHeight
+                val pageRatio = pageW / pageH
+
+                val fitScale: Float = if (fitMode == "height") {
+                    if (pageRatio > containerRatio) {
+                        containerRatio / pageRatio
+                    } else {
+                        1.0f
+                    }
+                } else { // default or "width"
+                    if (pageRatio < containerRatio) {
+                        pageRatio / containerRatio
+                    } else {
+                        1.0f
+                    }
+                }
+
                 pdfView.setMinZoom(fitScale)
                 if (pdfView.zoom < fitScale) {
                     pdfView.zoomTo(fitScale)
@@ -152,18 +144,6 @@ fun PdfViewerWidget(
 
     var localPdfViewRef by remember { mutableStateOf<PDFView?>(null) }
     var showFastScrollBadge by remember { mutableStateOf(false) }
-
-    var scrollPositionOffset by remember(pdfUriString) { mutableStateOf(0.0f) }
-    var scrollCurrentPage by remember(pdfUriString) { mutableStateOf(currentPage) }
-    var scrollEventId by remember(pdfUriString) { mutableStateOf(0L) }
-    var isScrollingActive by remember(pdfUriString) { mutableStateOf(false) }
-
-    LaunchedEffect(scrollEventId) {
-        if (isScrollingActive) {
-            kotlinx.coroutines.delay(350L) // Fast auto-hide stop delay (target ~350ms)
-            isScrollingActive = false
-        }
-    }
 
     var touchTime by remember { mutableStateOf(0L) }
     var isMultiTap by remember { mutableStateOf(false) }
@@ -314,7 +294,7 @@ fun PdfViewerWidget(
             }
         }
 
-        key(readingMode, isSwipeHorizontal, pdfUriString, pageSpacing, readingScrollMode, fitMode, orientation) {
+        key(readingMode, isSwipeHorizontal, pdfUriString, pageSpacing, readingScrollMode, fitMode) {
             AndroidView(
                 factory = { ctx ->
                     PDFView(ctx, null).apply {
@@ -379,7 +359,15 @@ fun PdfViewerWidget(
                                         // Set initial zoom to the dynamic contain-fit scale
                                         val size = pageSizes[currentPage]
                                         if (size != null && size.first > 0f && size.second > 0f) {
-                                            val fitScale = getFitScaleForPage(size.first, size.second)
+                                            val pageW = size.first
+                                            val pageH = size.second
+                                            val containerRatio = containerWidth / containerHeight
+                                            val pageRatio = pageW / pageH
+                                            val fitScale = if (fitMode == "height") {
+                                                if (pageRatio > containerRatio) containerRatio / pageRatio else 1.0f
+                                            } else {
+                                                if (pageRatio < containerRatio) pageRatio / containerRatio else 1.0f
+                                            }
                                             this@apply.zoomTo(fitScale)
                                             onZoomChanged?.invoke(fitScale)
                                         }
@@ -407,16 +395,9 @@ fun PdfViewerWidget(
                                     val normRot = ((rot % 360) + 360) % 360
                                     this@apply.rotation = normRot.toFloat()
                                     updateMinZoomForPage(this@apply, page)
-                                    scrollCurrentPage = page
-                                    onScrollStateChanged?.invoke(this@apply.currentXOffset, this@apply.currentYOffset, this@apply.zoom)
                                 }
                                 .onPageScroll { page, positionOffset ->
                                     onZoomChanged?.invoke(this@apply.zoom)
-                                    scrollCurrentPage = page
-                                    scrollPositionOffset = positionOffset
-                                    scrollEventId++
-                                    isScrollingActive = true
-                                    onScrollStateChanged?.invoke(this@apply.currentXOffset, this@apply.currentYOffset, this@apply.zoom)
                                 }
                                 .onError { error ->
                                     loadError = error.message ?: "Unknown error"
@@ -441,8 +422,9 @@ fun PdfViewerWidget(
                                 .enableAntialiasing(true)                  // Sharp and smooth text rendering
                                 
                                 .spacing(pageSpacing.toInt())                               // custom space between pages
-                                .pageFitPolicy(if (isLandscape) FitPolicy.WIDTH else (if (fitMode == "height") FitPolicy.HEIGHT else FitPolicy.WIDTH))
+                                .pageFitPolicy(if (fitMode == "height") FitPolicy.HEIGHT else FitPolicy.WIDTH)
                                 .nightMode(readingMode == "night")
+                                .scrollHandle(DefaultScrollHandle(ctx))
                                 .linkHandler(CustomLinkHandler(context, this, pdfUriString, onLinkTapped, onNavigateToWebView)) // Custom link handler
                                 .load()
 
@@ -489,51 +471,6 @@ fun PdfViewerWidget(
                     .size(width = widthDp, height = heightDp)
                     .background(Color(0xFF2196F3).copy(alpha = 0.35f)) // Translucent light-blue visual shade highlight
             )
-        }
-
-        // Real-time dynamic vertical scroll-position page indicator badge
-        val showBadge = isScrollingActive && pageCount > 0
-        AnimatedVisibility(
-            visible = showBadge,
-            enter = fadeIn(animationSpec = tween(150)),
-            exit = fadeOut(animationSpec = tween(200)),
-            modifier = Modifier.align(Alignment.TopEnd)
-        ) {
-            val coercedOffset = scrollPositionOffset.coerceIn(0f, 1f)
-            val globalScrollFraction = if (pageCount > 1) {
-                ((scrollCurrentPage + coercedOffset) / pageCount.toFloat()).coerceIn(0f, 1f)
-            } else {
-                0f
-            }
-            val badgeHeight = 36.dp
-            
-            val verticalOffset = remember(globalScrollFraction, containerHeight) {
-                val containerHeightPx = containerHeight
-                val badgeHeightPx = with(density) { badgeHeight.toPx() }
-                // Constrain the offset so the badge stays elegantly within the screen boundaries with a 16dp defensive margin at top and bottom
-                val marginPx = with(density) { 16.dp.toPx() }
-                val maxOffsetPx = (containerHeightPx - badgeHeightPx - (marginPx * 2f)).coerceAtLeast(0f)
-                val offsetPx = (globalScrollFraction * maxOffsetPx) + marginPx
-                with(density) { offsetPx.toDp() }
-            }
-
-            Surface(
-                modifier = Modifier
-                    .offset(y = verticalOffset)
-                    .padding(end = 12.dp)
-                    .testTag("scroll_page_indicator"),
-                color = Color.Black.copy(alpha = 0.75f),
-                shape = RoundedCornerShape(18.dp),
-                shadowElevation = 8.dp
-            ) {
-                Text(
-                    text = "${scrollCurrentPage + 1} / $pageCount",
-                    color = Color.White,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                )
-            }
         }
     }
 }

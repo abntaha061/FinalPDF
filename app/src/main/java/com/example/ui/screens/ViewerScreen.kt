@@ -94,9 +94,6 @@ import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import com.example.ui.components.BottomReaderBar
 import com.example.ui.components.PdfViewerWidget
 import com.example.ui.components.BookmarkDrawer
-import com.example.ui.components.PdfJsWebView
-import com.example.ui.components.PdfJsWebViewClient
-import com.example.ui.components.WebInterface
 import com.example.ui.theme.*
 import com.example.util.PdfPrintAdapter
 import com.example.util.PdfDocumentAdapter
@@ -126,8 +123,6 @@ import kotlinx.coroutines.launch
 import android.speech.tts.TextToSpeech
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.foundation.magnifier
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.window.Popup
@@ -138,11 +133,9 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.unit.IntOffset
 import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.compose.BackHandler
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.focus.*
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.zIndex
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -154,68 +147,6 @@ fun ViewerScreen(
     onNavigateToReader: ((String) -> Unit)? = null,
     onNavigateToSignature: (() -> Unit)? = null
 ) {
-    val securityExceptionUri by viewModel.securityExceptionUri.collectAsState()
-    val isNightMode by viewModel.isNightMode.collectAsState()
-
-    if (securityExceptionUri != null) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(if (isNightMode) Color(0xFF13131A) else Color(0xFFF9F9FB))
-                .padding(24.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("security_exception_view")
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Lock,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.error,
-                    modifier = Modifier
-                        .size(96.dp)
-                        .testTag("security_exception_icon")
-                )
-                Spacer(modifier = Modifier.height(24.dp))
-                Text(
-                    text = "انتهت صلاحية الوصول لملف الـ PDF السابقة، يرجى إعادة فتحه يدوياً.",
-                    color = if (isNightMode) Color.White else Color(0xFF13131A),
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                    modifier = Modifier
-                        .padding(horizontal = 16.dp)
-                        .testTag("security_exception_text")
-                )
-                Spacer(modifier = Modifier.height(32.dp))
-                Button(
-                    onClick = {
-                        viewModel.clearSecurityException()
-                        onBack()
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .fillMaxWidth(0.8f)
-                        .height(56.dp)
-                        .testTag("security_exception_home_button")
-                ) {
-                    Text(
-                        text = "الذهاب لصفحة البداية",
-                        color = Color.White,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-        }
-        return
-    }
-
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
@@ -229,6 +160,7 @@ fun ViewerScreen(
     val activeUri by viewModel.selectedUri.collectAsState()
     val currentPage by viewModel.currentPage.collectAsState()
     val totalPages by viewModel.totalPages.collectAsState()
+    val isNightMode by viewModel.isNightMode.collectAsState()
     val readingMode by viewModel.readingMode.collectAsState()
     val isSwipeHorizontal by viewModel.isSwipeHorizontal.collectAsState()
     val isPageBookmarked by viewModel.isCurrentPageBookmarked.collectAsState()
@@ -666,12 +598,6 @@ fun ViewerScreen(
     val isMedium = screenWidth in 600..839
     val isExpanded = screenWidth >= 840
     val isAdaptive = false
-    val isDrawerOpen = drawerState.isOpen || drawerState.targetValue == DrawerValue.Open
-    BackHandler(enabled = !isAdaptive && isDrawerOpen) {
-        coroutineScope.launch {
-            drawerState.close()
-        }
-    }
     var selectedDrawerTab by remember { mutableStateOf(0) } // 0 = Bookmarks, 1 = Thumbnails
 
     // Jump dialog & File information dialog states
@@ -684,19 +610,6 @@ fun ViewerScreen(
     var showCompressionResultDialog by remember { mutableStateOf(false) }
     var compressionResultText by remember { mutableStateOf("") }
     var compressedFileUriString by remember { mutableStateOf("") }
-
-    var isPdfJsMode by remember { mutableStateOf(false) }
-    var showPdfJsBanner by remember { mutableStateOf(false) }
-
-    LaunchedEffect(isPdfJsMode) {
-        if (isPdfJsMode) {
-            showPdfJsBanner = true
-            delay(3000)
-            showPdfJsBanner = false
-        } else {
-            pdfViewInst?.jumpTo(currentPage)
-        }
-    }
 
     var zoomLevel by remember { mutableStateOf(1.0f) }
     var showZoomBadge by remember { mutableStateOf(false) }
@@ -850,50 +763,9 @@ fun ViewerScreen(
 
     // Text Selection & Touch Popup States
     var isTextSelected by remember { mutableStateOf(false) }
+    var selectionPos by remember { mutableStateOf<Offset?>(null) }
     var selectedText by remember { mutableStateOf("") }
     var showColorPicker by remember { mutableStateOf(false) }
-
-    var pageGeometryState by remember { mutableStateOf<PageTextGeometry?>(null) }
-    var selectionStartCharIndex by remember { mutableStateOf<Int?>(null) }
-    var selectionEndCharIndex by remember { mutableStateOf<Int?>(null) }
-    var isDraggingHandle by remember { mutableStateOf(false) }
-    var magnifierPosition by remember { mutableStateOf(Offset.Unspecified) }
-
-    fun screenPointToPageCoordinate(touchX: Float, touchY: Float): android.graphics.PointF? {
-        val pdfView = pdfViewInst ?: return null
-        return mapScreenToPage(pdfView, touchX, touchY)
-    }
-
-    fun screenPointToPageCoordinate(pageIndex: Int, touchX: Float, touchY: Float): android.graphics.PointF? {
-        val pdfView = pdfViewInst ?: return null
-        return mapScreenToPageWithPageIndex(pdfView, pageIndex, touchX, touchY)
-    }
-
-    fun pageCoordinateToScreenPoint(pageX: Float, pageY: Float): android.graphics.PointF? {
-        val pdfView = pdfViewInst ?: return null
-        val cp = pdfView.currentPage
-        return mapPageToScreen(pdfView, cp, pageX, pageY)
-    }
-
-    fun pageCoordinateToScreenPoint(pageIndex: Int, pageX: Float, pageY: Float): android.graphics.PointF? {
-        val pdfView = pdfViewInst ?: return null
-        return mapPageToScreen(pdfView, pageIndex, pageX, pageY)
-    }
-
-    val selectionPos = remember(selectionStartCharIndex, selectionEndCharIndex, pageGeometryState) {
-        val geo = pageGeometryState ?: return@remember null
-        val startIdx = selectionStartCharIndex ?: return@remember null
-        val endIdx = selectionEndCharIndex ?: return@remember null
-        val minIdx = minOf(startIdx, endIdx).coerceIn(geo.characters.indices)
-        val maxIdx = (maxOf(startIdx, endIdx) - 1).coerceIn(geo.characters.indices)
-        val endChar = geo.characters[maxIdx]
-        val screenPoint = pageCoordinateToScreenPoint(geo.pageIndex, endChar.rect.right, endChar.rect.top)
-        if (screenPoint != null) {
-            Offset(screenPoint.x, screenPoint.y)
-        } else {
-            null
-        }
-    }
 
     // Android TextToSpeech engine
     var tts by remember { mutableStateOf<TextToSpeech?>(null) }
@@ -925,24 +797,6 @@ fun ViewerScreen(
     LaunchedEffect(currentPage) {
         isTextSelected = false
         showColorPicker = false
-        selectionStartCharIndex = null
-        selectionEndCharIndex = null
-        isDraggingHandle = false
-        magnifierPosition = Offset.Unspecified
-    }
-
-    LaunchedEffect(activeUri, currentPage) {
-        val uri = activeUri
-        if (uri != null) {
-            val ctx = context
-            val pg = currentPage
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                val geo = extractPageGeometry(ctx, Uri.parse(uri), pg)
-                pageGeometryState = geo
-            }
-        } else {
-            pageGeometryState = null
-        }
     }
 
     // Deleted redundant clipboardManager variable definition
@@ -979,8 +833,6 @@ fun ViewerScreen(
         }
     }
 
-
-
     fun getRealSelectionText(
         context: Context,
         pdfUri: Uri,
@@ -988,48 +840,104 @@ fun ViewerScreen(
         offset: Offset,
         pdfView: Any?
     ): String {
-        if (pdfView == null) return ""
         return try {
-            val stripper = WordPositionStripper()
-            com.tom_roush.pdfbox.android.PDFBoxResourceLoader.init(context.applicationContext)
+            PDFBoxResourceLoader.init(context.applicationContext)
+            var pageWidth = 595f
+            var pageHeight = 842f
+            var pageText = ""
+            
             context.contentResolver.openInputStream(pdfUri)?.use { inputStream ->
-                com.tom_roush.pdfbox.pdmodel.PDDocument.load(inputStream).use { document ->
+                PDDocument.load(inputStream).use { document ->
                     if (page < document.numberOfPages) {
+                        val stripper = PDFTextStripper()
                         stripper.startPage = page + 1
                         stripper.endPage = page + 1
-                        stripper.getText(document)
-                        val words = stripper.wordsList
-                        val pagePoint = mapScreenToPage(pdfView, offset.x, offset.y)
-                        if (pagePoint != null && words.isNotEmpty()) {
-                            var closestWord: WordPositionStripper.WordInfo? = null
-                            var minDistance = Float.MAX_VALUE
-                            for (word in words) {
-                                val r = word.rect
-                                val dx = if (pagePoint.x < r.left) r.left - pagePoint.x else if (pagePoint.x > r.right) pagePoint.x - r.right else 0f
-                                val dy = if (pagePoint.y < r.top) r.top - pagePoint.y else if (pagePoint.y > r.bottom) pagePoint.y - r.bottom else 0f
-                                val dist = dx * dx + dy * dy
-                                if (dist < minDistance) {
-                                    minDistance = dist
-                                    closestWord = word
-                                }
-                            }
-                            return closestWord?.text ?: ""
+                        pageText = stripper.getText(document) ?: ""
+                        
+                        val pageObj = document.getPage(page)
+                        val mediaBox = pageObj.mediaBox
+                        if (mediaBox != null) {
+                            pageWidth = mediaBox.width
+                            pageHeight = mediaBox.height
                         }
                     }
                 }
             }
-            ""
+
+            if (pageText.isBlank()) return ""
+            
+            val lines = pageText.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
+            if (lines.isEmpty()) return ""
+            
+            var rx = 0.5f
+            var ry = 0.5f
+            var mappedSuccess = false
+
+            if (pdfView != null) {
+                try {
+                    val pdfViewClass = pdfView.javaClass
+                    val mappedMethod = pdfViewClass.methods.firstOrNull { 
+                        it.name.contains("mappedScreenToPage", ignoreCase = true) && it.parameterTypes.size == 2
+                    } ?: pdfViewClass.declaredMethods.firstOrNull {
+                        it.name.contains("mappedScreenToPage", ignoreCase = true) && it.parameterTypes.size == 2
+                    }
+                    if (mappedMethod != null) {
+                        mappedMethod.isAccessible = true
+                        val point = mappedMethod.invoke(pdfView, offset.x, offset.y) as? android.graphics.PointF
+                        if (point != null) {
+                            rx = (point.x / pageWidth).coerceIn(0f, 1f)
+                            ry = (point.y / pageHeight).coerceIn(0f, 1f)
+                            mappedSuccess = true
+                        }
+                    }
+                } catch (ex: Exception) {
+                    Log.e("PdfViewerWidget", "Error extracting mapped coordinates via reflection", ex)
+                }
+            }
+
+            if (!mappedSuccess) {
+                rx = 0.5f
+                ry = 0.5f
+            }
+
+            val targetLineIndex = (ry * lines.size).toInt().coerceIn(0, lines.size - 1)
+            val lineText = lines[targetLineIndex]
+            
+            val words = lineText.split(Regex("\\s+")).map { it.trim() }.filter { it.isNotEmpty() && it != "|" && it != "/" && it != "-" }
+            if (words.isEmpty()) return lineText
+            
+            val isRtl = lineText.any { it in '\u0600'..'\u06FF' }
+            val targetWordIndex = if (isRtl) {
+                (words.size - 1 - (rx * words.size).toInt()).coerceIn(0, words.size - 1)
+            } else {
+                ((rx * words.size).toInt()).coerceIn(0, words.size - 1)
+            }
+            
+            val selectedWord = words[targetWordIndex]
+            
+            // For German learning PDFs: automatically select the article with the noun
+            if (!isRtl) {
+                if (targetWordIndex > 0) {
+                    val prevWord = words[targetWordIndex - 1]
+                    if (prevWord.lowercase(Locale.ROOT) in listOf("die", "der", "das", "de", "den", "dem", "des")) {
+                        return "$prevWord $selectedWord"
+                    }
+                }
+                if (selectedWord.lowercase(Locale.ROOT) in listOf("die", "der", "das", "de", "den", "dem", "des") && targetWordIndex < words.size - 1) {
+                    val nextWord = words[targetWordIndex + 1]
+                    return "$selectedWord $nextWord"
+                }
+            }
+            selectedWord
         } catch (e: Exception) {
+            Log.e("PdfViewerWidget", "Error in getRealSelectionText", e)
             ""
         }
     }
 
-
-
     ModalNavigationDrawer(
         drawerState = drawerState,
         gesturesEnabled = false,
-        scrimColor = Color.Transparent,
         drawerContent = {
             if (!isAdaptive) {
                 BookmarkDrawer(
@@ -1062,29 +970,6 @@ fun ViewerScreen(
     ) {
         val sidebarWidth = if (isExpanded) 320.dp else 280.dp
         Box(modifier = modifier.fillMaxSize()) {
-            // Custom Scrim Overlay for ModalNavigationDrawer
-            AnimatedVisibility(
-                visible = !isAdaptive && isDrawerOpen,
-                enter = fadeIn(animationSpec = tween(200)),
-                exit = fadeOut(animationSpec = tween(250)),
-                modifier = Modifier.zIndex(100f)
-            ) {
-                val scrimInteractionSource = remember { MutableInteractionSource() }
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.4f))
-                        .clickable(
-                            interactionSource = scrimInteractionSource,
-                            indication = null
-                        ) {
-                            coroutineScope.launch {
-                                drawerState.close()
-                            }
-                        }
-                )
-            }
-
             if (isAdaptive) {
                 Row(
                     modifier = Modifier
@@ -1269,27 +1154,16 @@ fun ViewerScreen(
                     .focusable()
             ) {
             if (activeUri != null) {
-                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                    // Interactive PDF Container
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .onGloballyPositioned { coordinates ->
-                                containerWidth = if (coordinates.size.width > 0) coordinates.size.width.toFloat() else 1f
-                                containerHeight = if (coordinates.size.height > 0) coordinates.size.height.toFloat() else 1f
-                            }
-                            .testTag("pdf_viewer_container")
-                            .then(
-                                if (isDraggingHandle && magnifierPosition != Offset.Unspecified) {
-                                    Modifier.magnifier(
-                                        sourceCenter = { magnifierPosition },
-                                        magnifierCenter = { magnifierPosition + Offset(0f, -60.dp.toPx()) }
-                                    )
-                                } else {
-                                    Modifier
-                                }
-                            )
-                    ) {
+                // Interactive PDF Container
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .onGloballyPositioned { coordinates ->
+                            containerWidth = if (coordinates.size.width > 0) coordinates.size.width.toFloat() else 1f
+                            containerHeight = if (coordinates.size.height > 0) coordinates.size.height.toFloat() else 1f
+                        }
+                        .testTag("pdf_viewer_container")
+                ) {
                     if (errorState != null) {
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
@@ -1471,175 +1345,95 @@ fun ViewerScreen(
                                 }
                             }
                         } else {
-                            Box(modifier = Modifier.fillMaxSize()) {
-                                PdfViewerWidget(
-                                    pdfUriString = activeUri!!,
-                                    currentPage = currentPage,
-                                    readingMode = readingMode,
-                                    isSwipeHorizontal = isSwipeHorizontal,
-                                    readingScrollMode = readingScrollMode,
-                                    fitMode = fitMode,
-                                    onPageChanged = { page, pageCount ->
-                                        viewModel.updateProgress(activeUri!!, page, pageCount)
-                                    },
-                                    onLoadComplete = { pageCount ->
-                                        viewModel.setViewerLoading(false)
-                                        viewModel.updateProgress(activeUri!!, currentPage, pageCount)
-                                        activeUri?.let { checkSearchabilityAndOcrBanner(it) }
-                                        if (currentPage > 0 && viewModel.shouldShowRestoreSnackbar(activeUri!!)) {
-                                            coroutineScope.launch {
-                                                val result = snackbarHostState.showSnackbar(
-                                                    message = "استُؤنفت القراءة من الصفحة ${currentPage + 1}",
-                                                    actionLabel = "البداية",
-                                                    duration = SnackbarDuration.Short
-                                                )
-                                                if (result == SnackbarResult.ActionPerformed) {
-                                                    pdfViewInst?.jumpTo(0)
-                                                    viewModel.setCurrentPage(0)
+                            PdfViewerWidget(
+                                pdfUriString = activeUri!!,
+                                currentPage = currentPage,
+                                readingMode = readingMode,
+                                isSwipeHorizontal = isSwipeHorizontal,
+                                readingScrollMode = readingScrollMode,
+                                fitMode = fitMode,
+                                onPageChanged = { page, pageCount ->
+                                    viewModel.updateProgress(activeUri!!, page, pageCount)
+                                },
+                                onLoadComplete = { pageCount ->
+                                    viewModel.setViewerLoading(false)
+                                    viewModel.updateProgress(activeUri!!, currentPage, pageCount)
+                                    activeUri?.let { checkSearchabilityAndOcrBanner(it) }
+                                    if (currentPage > 0 && viewModel.shouldShowRestoreSnackbar(activeUri!!)) {
+                                        coroutineScope.launch {
+                                            val result = snackbarHostState.showSnackbar(
+                                                message = "استُؤنفت القراءة من الصفحة ${currentPage + 1}",
+                                                actionLabel = "البداية",
+                                                duration = SnackbarDuration.Short
+                                            )
+                                            if (result == SnackbarResult.ActionPerformed) {
+                                                pdfViewInst?.jumpTo(0)
+                                                viewModel.setCurrentPage(0)
+                                            }
+                                        }
+                                    }
+                                },
+                                onError = {
+                                    viewModel.setViewerLoading(false)
+                                },
+                                onPdfViewCreated = { pdf ->
+                                    pdfViewInst = pdf
+                                },
+                                onTap = {
+                                    isTextSelected = false
+                                    showColorPicker = false
+                                    viewModel.toggleToolbarVisibility()
+                                },
+                                onLongPress = { offset ->
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    selectionPos = offset
+                                    val uriString = activeUri ?: ""
+                                    val realText = if (uriString.isNotEmpty()) {
+                                        getRealSelectionText(
+                                            context = context,
+                                            pdfUri = Uri.parse(uriString),
+                                            page = currentPage,
+                                            offset = offset,
+                                            pdfView = pdfViewInst
+                                        )
+                                    } else {
+                                        ""
+                                    }
+                                    val textToSpeak = if (!realText.isNullOrBlank()) realText.trim() else getSelectionText(documentName, currentPage).trim()
+                                    selectedText = textToSpeak
+                                    if (textToSpeak.isNotEmpty()) {
+                                        try {
+                                            tts?.let { textToSpeech ->
+                                                val isArabic = textToSpeak.any { it in '\u0600'..'\u06FF' }
+                                                if (isArabic) {
+                                                    textToSpeech.language = java.util.Locale("ar")
+                                                } else {
+                                                    textToSpeech.language = java.util.Locale.GERMAN
                                                 }
-                                            }
-                                        }
-                                    },
-                                    onLongPress = { offset ->
-                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        val geo = pageGeometryState
-                                        if (geo != null && pdfViewInst != null) {
-                                            val pagePoint = mapScreenToPage(pdfViewInst!!, offset.x, offset.y)
-                                            if (pagePoint != null) {
-                                                val closestCharIdx = findClosestCharIndex(geo.characters, pagePoint)
-                                                if (closestCharIdx != -1) {
-                                                    val word = geo.words.firstOrNull { closestCharIdx in it.startCharIdx until it.endCharIdx }
-                                                    val startIdx = word?.startCharIdx ?: closestCharIdx
-                                                    val endIdx = word?.endCharIdx ?: (closestCharIdx + 1)
-                                                    
-                                                    selectionStartCharIndex = startIdx
-                                                    selectionEndCharIndex = endIdx
-                                                    isTextSelected = true
-                                                    showColorPicker = false
-                                                    
-                                                    val selectedWordsList = geo.characters.subList(
-                                                        minOf(startIdx, endIdx),
-                                                        maxOf(startIdx, endIdx)
-                                                    )
-                                                    val selectedTextStr = selectedWordsList.map { it.char }.joinToString("")
-                                                    selectedText = selectedTextStr
-                                                    
-                                                    val textToSpeak = selectedTextStr.trim()
-                                                    if (textToSpeak.isNotEmpty()) {
-                                                        try {
-                                                            tts?.let { textToSpeech ->
-                                                                val isArabic = textToSpeak.any { it in '\u0600'..'\u06FF' }
-                                                                if (isArabic) {
-                                                                    textToSpeech.language = java.util.Locale("ar")
-                                                                } else {
-                                                                    textToSpeech.language = java.util.Locale.GERMAN
-                                                                }
-                                                                val simulatedRect = android.graphics.RectF(offset.x - 60f, offset.y - 18f, offset.x + 60f, offset.y + 18f)
-                                                                com.example.util.AudioPlayerManager.setSpeechState(textToSpeak, simulatedRect, true)
-                                                                val ttsParams = android.os.Bundle().apply {
-                                                                    putString(android.speech.tts.TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "PDF_TTS_ID")
-                                                                }
-                                                                textToSpeech.speak(textToSpeak, android.speech.tts.TextToSpeech.QUEUE_FLUSH, ttsParams, "PDF_TTS_ID")
-                                                            }
-                                                        } catch (e: Exception) {
-                                                            android.util.Log.e("ViewerScreen", "Error playing automatic pronunciation on long press", e)
-                                                        }
-                                                    }
+                                                val simulatedRect = android.graphics.RectF(offset.x - 60f, offset.y - 18f, offset.x + 60f, offset.y + 18f)
+                                                com.example.util.AudioPlayerManager.setSpeechState(textToSpeak, simulatedRect, true)
+                                                val ttsParams = android.os.Bundle().apply {
+                                                    putString(android.speech.tts.TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "PDF_TTS_ID")
                                                 }
+                                                textToSpeech.speak(textToSpeak, android.speech.tts.TextToSpeech.QUEUE_FLUSH, ttsParams, "PDF_TTS_ID")
                                             }
+                                        } catch (e: Exception) {
+                                            android.util.Log.e("ViewerScreen", "Error playing automatic pronunciation on long press", e)
                                         }
-                                    },
-                                    onError = {
-                                        viewModel.setViewerLoading(false)
-                                    },
-                                    onPdfViewCreated = { pdf ->
-                                        pdfViewInst = pdf
-                                    },
-                                    onTap = {
-                                        isTextSelected = false
-                                        showColorPicker = false
-                                        viewModel.toggleToolbarVisibility()
-                                    },
-                                    onZoomChanged = { zoom ->
-                                        zoomLevel = zoom
-                                    },
-                                    viewModel = viewModel,
-                                    onNavigateToWebView = onNavigateToWebView,
-                                    onGestureTriggered = { gestureType, offset ->
-                                        val act = gestureMappings[gestureType] ?: com.example.data.GestureAction.NOTHING
-                                        executeGestureAction(act, pdfViewInst, offset)
-                                    },
-                                    onScrollStateChanged = { _, _, _ ->
-                                        // Scroll callback can be used if needed
                                     }
-                                )
-
-                                val currentPdfView = pdfViewInst
-                                if (isPdfJsMode && currentPdfView != null) {
-                                    val overlayDensity = LocalDensity.current
-                                    var webViewRef by remember { mutableStateOf<android.webkit.WebView?>(null) }
-
-                                    val triggerOverlayUpdate = {
-                                        val pageCount = currentPdfView.pageCount
-                                        val jsonArray = JSONArray()
-                                        for (i in 0 until pageCount) {
-                                            val point = mapPageToScreen(currentPdfView, i, 0f, 0f)
-                                            if (point != null) {
-                                                val pageObj = JSONObject()
-                                                pageObj.put("index", i)
-                                                pageObj.put("x", point.x / overlayDensity.density)
-                                                pageObj.put("y", point.y / overlayDensity.density)
-                                                val pageSize = currentPdfView.getPageSize(i)
-                                                pageObj.put("w", (pageSize.width * currentPdfView.zoom) / overlayDensity.density)
-                                                pageObj.put("h", (pageSize.height * currentPdfView.zoom) / overlayDensity.density)
-                                                jsonArray.put(pageObj)
-                                            }
-                                        }
-                                        webViewRef?.evaluateJavascript("updatePagePositions(${jsonArray.toString()})", null)
-                                    }
-
-                                    // Instantly update transparent HTML spans when scroll state changes
-                                    LaunchedEffect(currentPdfView.zoom, currentPdfView.currentXOffset, currentPdfView.currentYOffset) {
-                                        triggerOverlayUpdate()
-                                    }
-
-                                    AndroidView(
-                                        factory = { ctx ->
-                                            PdfJsWebView(ctx).apply {
-                                                webViewRef = this
-                                                this.pdfView = currentPdfView // delegate scroll & zoom gestures natively!
-                                                
-                                                val webInterface = WebInterface(
-                                                    onLoadSuccess = { _ ->
-                                                        triggerOverlayUpdate()
-                                                    },
-                                                    onPageChange = { pageIdx ->
-                                                        viewModel.setCurrentPage(pageIdx)
-                                                    },
-                                                    onTextSelected = { text, x, y, w, h ->
-                                                        if (text.isNotEmpty()) {
-                                                            selectedText = text
-                                                            isTextSelected = true
-                                                            showColorPicker = false
-                                                            val xPx = x * overlayDensity.density
-                                                            val yPx = y * overlayDensity.density
-                                                            val wPx = w * overlayDensity.density
-                                                            magnifierPosition = Offset(xPx + (wPx / 2f), yPx)
-                                                        } else {
-                                                            isTextSelected = false
-                                                        }
-                                                    }
-                                                )
-                                                addJavascriptInterface(webInterface, "Android")
-                                                
-                                                webViewClient = PdfJsWebViewClient(ctx, activeUri!!)
-                                                loadUrl("https://localpdf/pdf_viewer.html")
-                                            }
-                                        },
-                                        modifier = Modifier.fillMaxSize()
-                                    )
+                                    isTextSelected = true
+                                    showColorPicker = false
+                                },
+                                onZoomChanged = { zoom ->
+                                    zoomLevel = zoom
+                                },
+                                viewModel = viewModel,
+                                onNavigateToWebView = onNavigateToWebView,
+                                onGestureTriggered = { gestureType, offset ->
+                                    val act = gestureMappings[gestureType] ?: com.example.data.GestureAction.NOTHING
+                                    executeGestureAction(act, pdfViewInst, offset)
                                 }
-                            }
+                            )
                         }
                     }
 
@@ -2308,154 +2102,41 @@ fun ViewerScreen(
                     }
 
                     // Draw the custom Selection Highlight Overlay if text is selected
-                    if (isTextSelected && selectionStartCharIndex != null && selectionEndCharIndex != null && pdfViewInst != null) {
+                    if (isTextSelected && selectionPos != null) {
                         val density = LocalDensity.current
-                        val geo = pageGeometryState
-                        val startIdx = selectionStartCharIndex!!
-                        val endIdx = selectionEndCharIndex!!
-                        
-                        if (geo != null && startIdx in geo.characters.indices && endIdx in 0..geo.characters.size) {
-                            val minIdx = minOf(startIdx, endIdx).coerceIn(geo.characters.indices)
-                            val maxIdx = (maxOf(startIdx, endIdx) - 1).coerceIn(geo.characters.indices)
-                            
-                            // 1. Draw highlighted boxes in REAL TIME on a custom canvas.
-                            Box(modifier = Modifier.fillMaxSize()) {
-                                Canvas(modifier = Modifier.fillMaxSize()) {
-                                    for (i in minIdx..maxIdx) {
-                                        val charInfo = geo.characters[i]
-                                        if (charInfo.char.isWhitespace()) continue
-                                        
-                                        val r = charInfo.rect
-                                        val tl = pageCoordinateToScreenPoint(geo.pageIndex, r.left, r.top)
-                                        val br = pageCoordinateToScreenPoint(geo.pageIndex, r.right, r.bottom)
-                                        if (tl != null && br != null) {
-                                            drawRect(
-                                                color = Color(0x332196F3), // 20% opacity blue
-                                                topLeft = Offset(tl.x, tl.y),
-                                                size = androidx.compose.ui.geometry.Size(br.x - tl.x, br.y - tl.y)
-                                            )
-                                        }
-                                    }
-                                }
-                                
-                                val startChar = geo.characters[minIdx]
-                                val endChar = geo.characters[maxIdx]
-                                
-                                val startBr = pageCoordinateToScreenPoint(geo.pageIndex, startChar.rect.left, startChar.rect.bottom)
-                                val endBr = pageCoordinateToScreenPoint(geo.pageIndex, endChar.rect.right, endChar.rect.bottom)
-                                
-                                if (startBr != null && endBr != null) {
-                                    val touchTargetSize = 48.dp
-                                    val halfTouchPx = with(density) { touchTargetSize.toPx() / 2f }
-                                    
-                                    // Drag handle for Selection START (left side of the first word)
-                                    Box(
-                                        modifier = Modifier
-                                            .offset(
-                                                x = with(density) { (startBr.x - halfTouchPx).toDp() },
-                                                y = with(density) { (startBr.y - halfTouchPx).toDp() }
-                                            )
-                                            .size(touchTargetSize)
-                                            .pointerInput(geo) {
-                                                detectDragGestures(
-                                                    onDragStart = {
-                                                        isDraggingHandle = true
-                                                        magnifierPosition = Offset(startBr.x, startBr.y)
-                                                    },
-                                                    onDrag = { change, _ ->
-                                                        change.consume()
-                                                        val topLeftX = startBr.x - halfTouchPx
-                                                        val topLeftY = startBr.y - halfTouchPx
-                                                        val currentScreenPos = Offset(topLeftX + change.position.x, topLeftY + change.position.y)
-                                                        magnifierPosition = currentScreenPos
-                                                        
-                                                        val pagePoint = screenPointToPageCoordinate(geo.pageIndex, currentScreenPos.x, currentScreenPos.y)
-                                                        if (pagePoint != null) {
-                                                            val closestIndex = findClosestCharIndex(geo.characters, pagePoint)
-                                                            if (closestIndex != -1) {
-                                                                selectionStartCharIndex = closestIndex
-                                                                
-                                                                val newMin = minOf(closestIndex, selectionEndCharIndex ?: closestIndex)
-                                                                val newMax = maxOf(closestIndex, selectionEndCharIndex ?: closestIndex)
-                                                                selectedText = geo.characters.subList(newMin, newMax.coerceAtMost(geo.characters.size)).map { it.char }.joinToString("")
-                                                            }
-                                                        }
-                                                    },
-                                                    onDragEnd = {
-                                                        isDraggingHandle = false
-                                                        magnifierPosition = Offset.Unspecified
-                                                    },
-                                                    onDragCancel = {
-                                                        isDraggingHandle = false
-                                                        magnifierPosition = Offset.Unspecified
-                                                    }
-                                                )
-                                            },
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(16.dp)
-                                                .background(Color(0xFF2196F3), shape = CircleShape)
-                                                .border(2.dp, Color.White, CircleShape)
-                                        )
-                                    }
-                                    
-                                    // Drag handle for Selection END (right side of the last word)
-                                    Box(
-                                        modifier = Modifier
-                                            .offset(
-                                                x = with(density) { (endBr.x - halfTouchPx).toDp() },
-                                                y = with(density) { (endBr.y - halfTouchPx).toDp() }
-                                            )
-                                            .size(touchTargetSize)
-                                            .pointerInput(geo) {
-                                                detectDragGestures(
-                                                    onDragStart = {
-                                                        isDraggingHandle = true
-                                                        magnifierPosition = Offset(endBr.x, endBr.y)
-                                                    },
-                                                    onDrag = { change, _ ->
-                                                        change.consume()
-                                                        val topLeftX = endBr.x - halfTouchPx
-                                                        val topLeftY = endBr.y - halfTouchPx
-                                                        val currentScreenPos = Offset(topLeftX + change.position.x, topLeftY + change.position.y)
-                                                        magnifierPosition = currentScreenPos
-                                                        
-                                                        val pagePoint = screenPointToPageCoordinate(geo.pageIndex, currentScreenPos.x, currentScreenPos.y)
-                                                        if (pagePoint != null) {
-                                                            val closestIndex = findClosestCharIndex(geo.characters, pagePoint)
-                                                            if (closestIndex != -1) {
-                                                                selectionEndCharIndex = closestIndex
-                                                                
-                                                                val newMin = minOf(selectionStartCharIndex ?: closestIndex, closestIndex)
-                                                                val newMax = maxOf(selectionStartCharIndex ?: closestIndex, closestIndex)
-                                                                selectedText = geo.characters.subList(newMin, newMax.coerceAtMost(geo.characters.size)).map { it.char }.joinToString("")
-                                                            }
-                                                        }
-                                                    },
-                                                    onDragEnd = {
-                                                        isDraggingHandle = false
-                                                        magnifierPosition = Offset.Unspecified
-                                                    },
-                                                    onDragCancel = {
-                                                        isDraggingHandle = false
-                                                        magnifierPosition = Offset.Unspecified
-                                                    }
-                                                )
-                                            },
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(16.dp)
-                                                .background(Color(0xFF2196F3), shape = CircleShape)
-                                                .border(2.dp, Color.White, CircleShape)
-                                        )
-                                    }
-                                }
-                            }
-                        }
+                        val xDp = with(density) { selectionPos!!.x.toDp() }
+                        val yDp = with(density) { selectionPos!!.y.toDp() }
+
+                        // Translucent blue selection box overlay matching the long press location
+                        Box(
+                            modifier = Modifier
+                                .offset(
+                                    x = xDp - 100.dp,
+                                    y = yDp - 14.dp
+                                )
+                                .size(width = 200.dp, height = 28.dp)
+                                .background(Color(0x332196F3), shape = RoundedCornerShape(4.dp))
+                        )
+                        // Left teardrop handle pin
+                        Box(
+                            modifier = Modifier
+                                .offset(
+                                    x = xDp - 104.dp,
+                                    y = yDp + 10.dp
+                                )
+                                .size(8.dp)
+                                .background(Color(0xFF2196F3), shape = CircleShape)
+                        )
+                        // Right teardrop handle pin
+                        Box(
+                            modifier = Modifier
+                                .offset(
+                                    x = xDp + 96.dp,
+                                    y = yDp + 10.dp
+                                )
+                                .size(8.dp)
+                                .background(Color(0xFF2196F3), shape = CircleShape)
+                        )
                     }
 
                     // Floating Left and Right Navigation Arrow Overlays for Page-by-Page Mode
@@ -2521,7 +2202,6 @@ fun ViewerScreen(
                         }
                     }
                 }
-                }
             } else {
                 // Empty case if opened without valid document
                 Box(
@@ -2545,7 +2225,29 @@ fun ViewerScreen(
                 }
             }
 
-
+            // Always Visible Floating Scroll Pill Page Indicator
+            AnimatedVisibility(
+                visible = showPageIndicator && isScrollIndicatorVisible && totalPages > 0,
+                enter = fadeIn(animationSpec = tween(300)),
+                exit = fadeOut(animationSpec = tween(300)),
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 16.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = AppSurface.copy(alpha = 0.8f),
+                    shadowElevation = 6.dp
+                ) {
+                    Text(
+                        text = "${currentPage + 1} / $totalPages",
+                        color = AppTextPrimary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                    )
+                }
+            }
 
             // OCR Scanner Prompt Banner (non-intrusive banner below TopAppBar space)
             AnimatedVisibility(
@@ -2630,50 +2332,6 @@ fun ViewerScreen(
                                 modifier = Modifier.size(20.dp)
                             )
                         }
-                    }
-                }
-            }
-
-            // PDF.js Selection Mode Prompt Banner (non-intrusive banner below TopAppBar space)
-            AnimatedVisibility(
-                visible = showPdfJsBanner,
-                enter = slideInVertically(initialOffsetY = { -it }),
-                exit = slideOutVertically(targetOffsetY = { -it }),
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .statusBarsPadding()
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-                    .testTag("pdf_js_banner")
-            ) {
-                Surface(
-                    color = MaterialTheme.colorScheme.secondaryContainer,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .border(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.3f), RoundedCornerShape(12.dp))
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        Text(
-                            text = "وضع التحديد - اضغط مطولاً لتحديد النص",
-                            color = MaterialTheme.colorScheme.onSecondaryContainer,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            textAlign = TextAlign.Center
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Icon(
-                            imageVector = Icons.Default.SwapHoriz,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.secondary,
-                            modifier = Modifier.size(20.dp)
-                        )
                     }
                 }
             }
@@ -4730,12 +4388,11 @@ fun ViewerScreen(
 
             // Custom Text Selection Popup
             if (isTextSelected && selectionPos != null) {
-                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                    val density = LocalDensity.current
-                    val xDp = with(density) { selectionPos!!.x.toDp() }
-                    val yDp = with(density) { selectionPos!!.y.toDp() }
+                val density = LocalDensity.current
+                val xDp = with(density) { selectionPos!!.x.toDp() }
+                val yDp = with(density) { selectionPos!!.y.toDp() }
 
-                    Popup(
+                Popup(
                     alignment = Alignment.TopStart,
                     offset = IntOffset(
                         x = (selectionPos!!.x - with(density) { 110.dp.toPx() }).toInt().coerceAtLeast(0),
@@ -4951,7 +4608,6 @@ fun ViewerScreen(
                             }
                         }
                     }
-                }
                 }
             }
 
@@ -6571,640 +6227,5 @@ fun com.github.barteksc.pdfviewer.PDFView.saveSearchState(keyword: String, match
         this.jumpTo(matches[0])
     } else {
         this.setTag(null)
-    }
-}
-
-class WordPositionStripper : com.tom_roush.pdfbox.text.PDFTextStripper() {
-    init {
-        sortByPosition = true
-    }
-
-    data class WordInfo(
-        val text: String,
-        val rect: android.graphics.RectF
-    )
-
-    val wordsList = mutableListOf<WordInfo>()
-
-    override fun writeString(string: String?, textPositions: MutableList<com.tom_roush.pdfbox.text.TextPosition>?) {
-        if (string == null || textPositions == null || textPositions.isEmpty()) return
-        
-        var currentWordText = java.lang.StringBuilder()
-        var wordStartIdx = 0
-        
-        for (i in textPositions.indices) {
-            val tp = textPositions[i]
-            val charStr = tp.unicode
-            
-            if (charStr == null || charStr.isBlank() || charStr == " " || charStr == "\t") {
-                if (currentWordText.isNotEmpty()) {
-                    addWord(currentWordText.toString(), textPositions.subList(wordStartIdx, i))
-                    currentWordText = java.lang.StringBuilder()
-                }
-                wordStartIdx = i + 1
-            } else {
-                currentWordText.append(charStr)
-            }
-        }
-        
-        if (currentWordText.isNotEmpty()) {
-            addWord(currentWordText.toString(), textPositions.subList(wordStartIdx, textPositions.size))
-        }
-    }
-
-    private fun addWord(text: String, positions: List<com.tom_roush.pdfbox.text.TextPosition>) {
-        if (positions.isEmpty()) return
-        
-        var minX = Float.MAX_VALUE
-        var maxX = Float.MIN_VALUE
-        var minY = Float.MAX_VALUE
-        var maxY = Float.MIN_VALUE
-        
-        for (tp in positions) {
-            val x = tp.xDirAdj
-            val w = tp.widthDirAdj
-            val y = tp.yDirAdj
-            val h = tp.height
-            
-            val x1 = x
-            val x2 = x + w
-            val y1 = y - h
-            val y2 = y + h / 2f
-            
-            if (x1 < minX) minX = x1
-            if (x2 > maxX) maxX = x2
-            if (y1 < minY) minY = y1
-            if (y2 > maxY) maxY = y2
-        }
-        
-        if (minX <= maxX && minY <= maxY) {
-            wordsList.add(WordInfo(text, android.graphics.RectF(minX, minY, maxX, maxY)))
-        }
-    }
-}
-
-data class CharInfo(
-    val char: Char,
-    val rect: android.graphics.RectF
-)
-
-data class WordInfoNew(
-    val text: String,
-    val startCharIdx: Int,
-    val endCharIdx: Int,
-    val rect: android.graphics.RectF
-)
-
-data class PageTextGeometry(
-    val pageIndex: Int,
-    val characters: List<CharInfo>,
-    val words: List<WordInfoNew>
-)
-
-fun extractPageGeometry(context: Context, pdfUri: Uri, page: Int): PageTextGeometry? {
-    return try {
-        com.tom_roush.pdfbox.android.PDFBoxResourceLoader.init(context.applicationContext)
-        context.contentResolver.openInputStream(pdfUri)?.use { inputStream ->
-            com.tom_roush.pdfbox.pdmodel.PDDocument.load(inputStream).use { document ->
-                if (page < document.numberOfPages) {
-                    val stripper = CharacterPositionStripper()
-                    stripper.startPage = page + 1
-                    stripper.endPage = page + 1
-                    stripper.getText(document)
-                    val characters = stripper.charactersList
-                    
-                    val words = mutableListOf<WordInfoNew>()
-                    var currentWordStart = -1
-                    val currentWordChars = java.lang.StringBuilder()
-                    
-                    for (i in characters.indices) {
-                        val charInfo = characters[i]
-                        val c = charInfo.char
-                        val isDelimiter = c.isWhitespace() || c == ',' || c == '.' || c == ';' || c == ':' || c == '?' || c == '!' || c == '-' || c == '_'
-                        
-                        if (isDelimiter) {
-                            if (currentWordStart != -1) {
-                                val wordText = currentWordChars.toString()
-                                val wordRect = unionRects(characters.subList(currentWordStart, i))
-                                words.add(WordInfoNew(wordText, currentWordStart, i, wordRect))
-                                currentWordStart = -1
-                                currentWordChars.setLength(0)
-                            }
-                        } else {
-                            if (currentWordStart == -1) {
-                                currentWordStart = i
-                            }
-                            currentWordChars.append(c)
-                        }
-                    }
-                    if (currentWordStart != -1) {
-                        val wordText = currentWordChars.toString()
-                        val wordRect = unionRects(characters.subList(currentWordStart, characters.size))
-                        words.add(WordInfoNew(wordText, currentWordStart, characters.size, wordRect))
-                    }
-                    
-                    PageTextGeometry(page, characters, words)
-                } else {
-                    null
-                }
-            }
-        }
-    } catch (e: Exception) {
-        android.util.Log.e("ViewerScreen", "Error extracting page geometry", e)
-        null
-    }
-}
-
-fun unionRects(charInfos: List<CharInfo>): android.graphics.RectF {
-    if (charInfos.isEmpty()) return android.graphics.RectF()
-    var minX = Float.MAX_VALUE
-    var maxX = Float.MIN_VALUE
-    var minY = Float.MAX_VALUE
-    var maxY = Float.MIN_VALUE
-    for (charInfo in charInfos) {
-        val r = charInfo.rect
-        if (r.left < minX) minX = r.left
-        if (r.right > maxX) maxX = r.right
-        if (r.top < minY) minY = r.top
-        if (r.bottom > maxY) maxY = r.bottom
-    }
-    return android.graphics.RectF(minX, minY, maxX, maxY)
-}
-
-class CharacterPositionStripper : com.tom_roush.pdfbox.text.PDFTextStripper() {
-    init {
-        sortByPosition = true
-    }
-    
-    val charactersList = mutableListOf<CharInfo>()
-    
-    override fun writeString(string: String?, textPositions: MutableList<com.tom_roush.pdfbox.text.TextPosition>?) {
-        if (textPositions == null) return
-        for (tp in textPositions) {
-            val charStr = tp.unicode ?: continue
-            if (charStr.isEmpty()) continue
-            val c = charStr[0]
-            
-            val x = tp.xDirAdj
-            val w = tp.widthDirAdj
-            val y = tp.yDirAdj
-            val h = tp.height
-            
-            val rect = android.graphics.RectF(x, y - h, x + w, y + h / 2f)
-            charactersList.add(CharInfo(c, rect))
-        }
-    }
-}
-
-fun findClosestCharIndex(characters: List<CharInfo>, pagePoint: android.graphics.PointF): Int {
-    if (characters.isEmpty()) return -1
-    var closestIdx = -1
-    var minDistance = Float.MAX_VALUE
-    for (i in characters.indices) {
-        val r = characters[i].rect
-        val dx = if (pagePoint.x < r.left) r.left - pagePoint.x else if (pagePoint.x > r.right) pagePoint.x - r.right else 0f
-        val dy = if (pagePoint.y < r.top) r.top - pagePoint.y else if (pagePoint.y > r.bottom) pagePoint.y - r.bottom else 0f
-        val dist = dx * dx + dy * dy
-        if (dist < minDistance) {
-            minDistance = dist
-            closestIdx = i
-        }
-    }
-    return closestIdx
-}
-
-fun mapScreenToPage(pdfView: Any, screenX: Float, screenY: Float): android.graphics.PointF? {
-    return try {
-        val view = pdfView as com.github.barteksc.pdfviewer.PDFView
-        val zoom = view.zoom
-        val xOffset = view.currentXOffset  // قيمة سالبة
-        val yOffset = view.currentYOffset  // قيمة سالبة
-        val density = view.resources.displayMetrics.density
-        val spacingPx = 8f * density       // المسافة بين الصفحات (8dp)
-
-        // تحويل إحداثيات الشاشة → إحداثيات المستند الكلي
-        val docX = screenX - xOffset
-        val docY = screenY - yOffset
-
-        // إيجاد الصفحة الصحيحة بتراكم الارتفاعات
-        var cumulativeY = 0f
-        var targetPage = view.currentPage
-        val pageCount = view.pageCount
-
-        for (i in 0 until pageCount) {
-            val pageSize = view.getPageSize(i)
-            val pageHeightScaled = pageSize.height * zoom
-            if (docY < cumulativeY + pageHeightScaled) {
-                targetPage = i
-                break
-            }
-            cumulativeY += pageHeightScaled + spacingPx
-            if (i == pageCount - 1) targetPage = i
-        }
-
-        // حساب الـ Padding الأفقي (التوسيط)
-        val pageSize = view.getPageSize(targetPage)
-        val pageWidthScaled = pageSize.width * zoom
-        val horizontalPadding = if (pageWidthScaled < view.width) {
-            (view.width - pageWidthScaled) / 2f
-        } else 0f
-
-        // تحويل إلى إحداثيات محلية داخل الصفحة
-        val pageLocalX = (docX - horizontalPadding) / zoom
-        val pageLocalY = (docY - cumulativeY) / zoom
-
-        android.graphics.PointF(pageLocalX, pageLocalY)
-    } catch (e: Exception) {
-        android.util.Log.e("PDF_MAP", "mapScreenToPage error: ${e.message}")
-        null
-    }
-}
-
-// ============================================================
-// الدالة 2: تحويل الشاشة → الصفحة مع تحديد رقم الصفحة
-// ============================================================
-fun mapScreenToPageWithPageIndex(
-    pdfView: Any,
-    pageIndex: Int,
-    screenX: Float,
-    screenY: Float
-): android.graphics.PointF? {
-    return try {
-        val view = pdfView as com.github.barteksc.pdfviewer.PDFView
-        val zoom = view.zoom
-        val xOffset = view.currentXOffset
-        val yOffset = view.currentYOffset
-        val density = view.resources.displayMetrics.density
-        val spacingPx = 8f * density
-
-        val docX = screenX - xOffset
-        val docY = screenY - yOffset
-
-        // حساب بداية الصفحة المطلوبة تراكمياً
-        var cumulativeY = 0f
-        for (i in 0 until pageIndex) {
-            val pageSize = view.getPageSize(i)
-            cumulativeY += pageSize.height * zoom + spacingPx
-        }
-
-        val pageSize = view.getPageSize(pageIndex)
-        val pageWidthScaled = pageSize.width * zoom
-        val horizontalPadding = if (pageWidthScaled < view.width) {
-            (view.width - pageWidthScaled) / 2f
-        } else 0f
-
-        val pageLocalX = (docX - horizontalPadding) / zoom
-        val pageLocalY = (docY - cumulativeY) / zoom
-
-        android.graphics.PointF(pageLocalX, pageLocalY)
-    } catch (e: Exception) {
-        android.util.Log.e("PDF_MAP", "mapScreenToPageWithPageIndex error: ${e.message}")
-        null
-    }
-}
-
-// ============================================================
-// الدالة 3: تحويل إحداثيات الصفحة → إحداثيات الشاشة (عكسي)
-// ============================================================
-fun mapPageToScreen(
-    pdfView: Any,
-    pageIndex: Int,
-    pageX: Float,
-    pageY: Float
-): android.graphics.PointF? {
-    return try {
-        val view = pdfView as com.github.barteksc.pdfviewer.PDFView
-        val zoom = view.zoom
-        val xOffset = view.currentXOffset
-        val yOffset = view.currentYOffset
-        val density = view.resources.displayMetrics.density
-        val spacingPx = 8f * density
-
-        // حساب موضع بداية الصفحة تراكمياً
-        var cumulativeY = 0f
-        for (i in 0 until pageIndex) {
-            val pageSize = view.getPageSize(i)
-            cumulativeY += pageSize.height * zoom + spacingPx
-        }
-
-        // حساب الـ Padding الأفقي
-        val pageSize = view.getPageSize(pageIndex)
-        val pageWidthScaled = pageSize.width * zoom
-        val horizontalPadding = if (pageWidthScaled < view.width) {
-            (view.width - pageWidthScaled) / 2f
-        } else 0f
-
-        // تحويل عكسي: إحداثيات الصفحة → الشاشة
-        val screenX = (pageX * zoom) + horizontalPadding + xOffset
-        val screenY = (pageY * zoom) + cumulativeY + yOffset
-
-        android.graphics.PointF(screenX, screenY)
-    } catch (e: Exception) {
-        android.util.Log.e("PDF_MAP", "mapPageToScreen error: ${e.message}")
-        null
-    }
-}
-
-@Composable
-fun PdfJsWebViewWidget(
-    pdfUriString: String,
-    currentPage: Int,
-    isNightMode: Boolean,
-    onPageChanged: (Int) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val context = LocalContext.current
-    var pdfBase64 by remember { mutableStateOf<String?>(null) }
-    var isLoadingBase64 by remember { mutableStateOf(true) }
-
-    LaunchedEffect(pdfUriString) {
-        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            try {
-                val uri = Uri.parse(pdfUriString)
-                val inputStream = context.contentResolver.openInputStream(uri)
-                val bytes = inputStream?.readBytes()
-                inputStream?.close()
-                if (bytes != null) {
-                    pdfBase64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("PdfJsWebView", "Error converting PDF to base64", e)
-            } finally {
-                isLoadingBase64 = false
-            }
-        }
-    }
-
-    if (isLoadingBase64) {
-        Box(
-            modifier = modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
-        ) {
-            CircularProgressIndicator()
-        }
-    } else if (pdfBase64 == null) {
-        Box(
-            modifier = modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = "تعذر تحميل مستند PDF في وضع التحديد",
-                color = MaterialTheme.colorScheme.error,
-                fontSize = 14.sp
-            )
-        }
-    } else {
-        val hClass = if (isNightMode) "dark" else ""
-        val htmlContent = """
-            <!DOCTYPE html>
-            <html lang="ar">
-            <head>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
-            <style>
-              body {
-                margin: 0;
-                padding: 16px 0;
-                background-color: #ECEFF1;
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                -webkit-user-select: text;
-                user-select: text;
-              }
-              body.dark {
-                background-color: #0D0D0F;
-              }
-              #container {
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                width: 100%;
-              }
-              .page-container {
-                position: relative;
-                margin: 12px 0;
-                box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-                background-color: white;
-                max-width: 95%;
-              }
-              body.dark .page-container {
-                box-shadow: 0 4px 12px rgba(255,255,255,0.05);
-                background-color: #1E1E24;
-              }
-              canvas {
-                display: block;
-                width: 100% !important;
-                height: auto !important;
-              }
-              .textLayer {
-                position: absolute;
-                left: 0;
-                top: 0;
-                right: 0;
-                bottom: 0;
-                overflow: hidden;
-                opacity: 1;
-                line-height: 1.0;
-                -webkit-user-select: text;
-                user-select: text;
-              }
-              .textLayer span {
-                color: transparent;
-                position: absolute;
-                white-space: pre;
-                cursor: text;
-                transform-origin: 0% 0%;
-              }
-            </style>
-            </head>
-            <body class="${hClass}">
-            <div id="container"></div>
-
-            <script type="module">
-              import * as pdfjsLib from 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.mjs';
-              pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs';
-
-              const base64Data = "${pdfBase64!!.replace("\n", "").replace("\r", "")}";
-              const raw = window.atob(base64Data);
-              const rawLength = raw.length;
-              const array = new Uint8Array(new ArrayBuffer(rawLength));
-              for(let i = 0; i < rawLength; i++) {
-                array[i] = raw.charCodeAt(i);
-              }
-
-              const loadingTask = pdfjsLib.getDocument({data: array});
-              loadingTask.promise.then(async function(pdf) {
-                const container = document.getElementById('container');
-                const totalPages = pdf.numPages;
-                
-                if (window.Android) {
-                  window.Android.onPdfLoaded(totalPages);
-                }
-                
-                for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
-                  const page = await pdf.getPage(pageNum);
-                  const scale = window.devicePixelRatio || 1.5;
-                  const viewport = page.getViewport({scale: scale});
-                  
-                  const pageContainer = document.createElement('div');
-                  pageContainer.className = 'page-container';
-                  pageContainer.style.width = (viewport.width / scale) + 'px';
-                  pageContainer.style.height = (viewport.height / scale) + 'px';
-                  pageContainer.id = 'page-' + pageNum;
-                  
-                  const canvas = document.createElement('canvas');
-                  canvas.width = viewport.width;
-                  canvas.height = viewport.height;
-                  const context = canvas.getContext('2d');
-                  
-                  pageContainer.appendChild(canvas);
-                  container.appendChild(pageContainer);
-                  
-                  const renderContext = {
-                    canvasContext: context,
-                    viewport: viewport
-                  };
-                  
-                  await page.render(renderContext).promise;
-                  
-                  const textContent = await page.getTextContent();
-                  const textLayerDiv = document.createElement('div');
-                  textLayerDiv.className = 'textLayer';
-                  textLayerDiv.style.width = '100%';
-                  textLayerDiv.style.height = '100%';
-                  
-                  textContent.items.forEach(function (textItem) {
-                    const tx = pdfjsLib.Util.transform(
-                      viewport.transform,
-                      textItem.transform
-                    );
-                    const span = document.createElement('span');
-                    span.textContent = textItem.str;
-                    span.style.fontFamily = textItem.fontName;
-                    
-                    const fontSize = Math.sqrt(tx[0]*tx[0] + tx[1]*tx[1]);
-                    const fontSizeScaled = fontSize / scale;
-                    span.style.fontSize = fontSizeScaled + 'px';
-                    
-                    span.style.left = (tx[4] / scale) + 'px';
-                    span.style.top = (((viewport.height - tx[5]) - fontSize) / scale) + 'px';
-                    
-                    const itemWidth = textItem.width / scale;
-                    if (itemWidth > 0) {
-                      span.style.width = itemWidth + 'px';
-                    }
-                    
-                    textLayerDiv.appendChild(span);
-                  });
-                  
-                  pageContainer.appendChild(textLayerDiv);
-                }
-                
-                document.addEventListener('selectionchange', () => {
-                  const selection = window.getSelection().toString();
-                  if (window.Android) {
-                    window.Android.onTextSelected(selection);
-                  }
-                });
-
-                window.addEventListener('scroll', () => {
-                  const pageContainers = document.querySelectorAll('.page-container');
-                  let currentVisiblePage = 1;
-                  const threshold = window.innerHeight / 2;
-                  
-                  pageContainers.forEach((el, idx) => {
-                    const rect = el.getBoundingClientRect();
-                    if (rect.top < threshold && rect.bottom > threshold) {
-                      currentVisiblePage = idx + 1;
-                    }
-                  });
-                  
-                  if (window.Android) {
-                    window.Android.onPageScrolled(currentVisiblePage);
-                  }
-                });
-                
-                const initialPage = ${currentPage + 1};
-                if (initialPage > 1) {
-                  setTimeout(() => {
-                    const targetEl = document.getElementById('page-' + initialPage);
-                    if (targetEl) {
-                      targetEl.scrollIntoView({behavior: 'smooth'});
-                    }
-                  }, 600);
-                }
-                
-              }, function(error) {
-                if (window.Android) {
-                  window.Android.onError(error.toString());
-                }
-              });
-            </script>
-            </body>
-            </html>
-        """.trimIndent()
-
-        AndroidView(
-            modifier = modifier.fillMaxSize(),
-            factory = { ctx ->
-                android.webkit.WebView(ctx).apply {
-                    settings.apply {
-                        javaScriptEnabled = true
-                        domStorageEnabled = true
-                        allowContentAccess = true
-                        allowFileAccess = true
-                        textZoom = 100
-                        useWideViewPort = true
-                        loadWithOverviewMode = true
-                        setSupportZoom(true)
-                        builtInZoomControls = true
-                        displayZoomControls = false
-                    }
-                    
-                    isLongClickable = true
-                    
-                    webChromeClient = android.webkit.WebChromeClient()
-                    webViewClient = object : android.webkit.WebViewClient() {
-                        override fun shouldOverrideUrlLoading(
-                            view: android.webkit.WebView?,
-                            request: android.webkit.WebResourceRequest?
-                        ): Boolean {
-                            return false
-                        }
-                    }
-
-                    addJavascriptInterface(object {
-                        @android.webkit.JavascriptInterface
-                        fun onPdfLoaded(totalPages: Int) {
-                            android.util.Log.d("PdfJsWebView", "Loaded PDF with " + totalPages + " pages")
-                        }
-
-                        @android.webkit.JavascriptInterface
-                        fun onTextSelected(text: String) {
-                            android.util.Log.d("PdfJsWebView", "Selected text: " + text)
-                        }
-
-                        @android.webkit.JavascriptInterface
-                        fun onPageScrolled(pageIndex: Int) {
-                            onPageChanged(pageIndex - 1)
-                        }
-
-                        @android.webkit.JavascriptInterface
-                        fun onError(error: String) {
-                            android.util.Log.e("PdfJsWebView", "Error: " + error)
-                        }
-                    }, "Android")
-
-                    loadDataWithBaseURL(
-                        "https://cdnjs.cloudflare.com/",
-                        htmlContent,
-                        "text/html",
-                        "UTF-8",
-                        null
-                    )
-                }
-            }
-        )
     }
 }
