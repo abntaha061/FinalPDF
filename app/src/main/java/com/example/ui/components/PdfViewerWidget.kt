@@ -263,11 +263,16 @@ fun PdfViewerWidget(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
-                Text(text = loadError ?: "حدث خطأ مجهول")
+                Text(
+                    text = loadError ?: "حدث خطأ مجهول",
+                    color = Color.Red,
+                    fontWeight = FontWeight.Bold
+                )
             }
         }
 
-        if (fileResolved && resolvedFile != null) {
+        // إخفاء الـ WebView لو حصل فيه كراش (OOM) عشان ميعملش شاشة بيضاء أو يوقع التطبيق
+        if (fileResolved && resolvedFile != null && loadError == null) {
             key(readingMode, isSwipeHorizontal, pdfUriString, pageSpacing, readingScrollMode, fitMode) {
                 AndroidView(
                     factory = { ctx ->
@@ -309,10 +314,12 @@ fun PdfViewerWidget(
                                 }
 
                                 @JavascriptInterface
-                                fun onPageRendered(page: Int, total: Int) {
+                                fun onPageScrolled(page: Int) {
                                     android.os.Handler(android.os.Looper.getMainLooper()).post {
-                                        viewModel.setCurrentPage(page - 1)
-                                        onPageChanged(page - 1, total)
+                                        if (currentPage != page - 1) {
+                                            viewModel.setCurrentPage(page - 1)
+                                            onPageChanged(page - 1, viewModel.totalPages.value)
+                                        }
                                     }
                                 }
                             }, "AndroidBridge")
@@ -323,7 +330,7 @@ fun PdfViewerWidget(
                                     WebViewAssetLoader.InternalStoragePathHandler(ctx, ctx.cacheDir)
                                 )
                                 .addPathHandler(
-                                    "/pdfjs/",
+                                    "/assets/",
                                     WebViewAssetLoader.AssetsPathHandler(ctx)
                                 )
                                 .build()
@@ -335,7 +342,7 @@ fun PdfViewerWidget(
                                     return assetLoader.shouldInterceptRequest(request.url)
                                 }
                                 
-                                // منع الكراش في حالة نفاد الذاكرة القصوى
+                                // منع الكراش الخفي بسبب الذاكرة وإظهار رسالة للمستخدم بدلاً من الخروج
                                 override fun onRenderProcessGone(view: WebView?, detail: android.webkit.RenderProcessGoneDetail?): Boolean {
                                     android.os.Handler(android.os.Looper.getMainLooper()).post {
                                         loadError = "نفدت الذاكرة أثناء عرض الملف. يرجى إعادة فتح المستند."
@@ -351,10 +358,10 @@ fun PdfViewerWidget(
                                 <html>
                                 <head>
                                     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=4.0, user-scalable=yes">
-                                    <script src="https://appassets.androidplatform.net/pdfjs/pdf.min.js"></script>
+                                    <script src="https://appassets.androidplatform.net/assets/pdfjs/pdf.min.js"></script>
                                     <style>
                                         body { margin: 0; padding: 0; background: ${if(readingMode == "night") "#121212" else if (readingMode == "sepia") "#f4ecd8" else "#ffffff"}; display: flex; flex-direction: column; align-items: center; }
-                                        .pdf-page-container { position: relative; margin-bottom: ${pageSpacing}px; }
+                                        .pdf-page-container { position: relative; margin-bottom: ${pageSpacing}px; display: flex; justify-content: center; align-items: center; background: #fff; }
                                         canvas { display: block; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
                                         .textLayer { position: absolute; left: 0; top: 0; right: 0; bottom: 0; overflow: hidden; opacity: 0; line-height: 1.0; }
                                         .textLayer ::selection { background: rgba(0, 123, 255, 0.3); }
@@ -365,7 +372,8 @@ fun PdfViewerWidget(
                                 <body>
                                     <div id="pdf-viewer"></div>
                                     <script>
-                                        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://appassets.androidplatform.net/pdfjs/pdf.worker.min.js';
+                                        // تم تعديل المسار لضمان عمل الـ Worker وتفادي تحميل المعالج الأساسي
+                                        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://appassets.androidplatform.net/assets/pdfjs/pdf.worker.min.js';
                                         const url = 'https://appassets.androidplatform.net/local_pdf/$safeFileName';
                                         const viewer = document.getElementById('pdf-viewer');
 
@@ -374,102 +382,151 @@ fun PdfViewerWidget(
                                             window.AndroidBridge.onPdfLoaded(totalPages);
                                             
                                             pdf.getPage(1).then(firstPage => {
-                                                const screenWidth = window.innerWidth;
+                                                // حماية إضافية لحجم الشاشة عشان ميحسبش صفر ويعمل كراش
+                                                let sWidth = window.innerWidth || screen.width || 800;
                                                 const defaultViewport = firstPage.getViewport({ scale: 1.0 });
-                                                const scale = screenWidth / defaultViewport.width;
+                                                const scale = sWidth / defaultViewport.width;
                                                 const scaledViewport = firstPage.getViewport({ scale: scale });
-                                                const pageHeight = scaledViewport.height;
+                                                let pHeight = scaledViewport.height || 1000;
+
+                                                let renderQueue = [];
+                                                let isRendering = false;
+
+                                                // نظام تتبع السكرول لتحديث رقم الصفحة بدقة عالية
+                                                let scrollTimeout;
+                                                window.addEventListener('scroll', () => {
+                                                    if (scrollTimeout) clearTimeout(scrollTimeout);
+                                                    scrollTimeout = setTimeout(() => {
+                                                        const containers = document.querySelectorAll('.pdf-page-container');
+                                                        for(let i = 0; i < containers.length; i++) {
+                                                            const rect = containers[i].getBoundingClientRect();
+                                                            if(rect.top >= -rect.height/2 && rect.top <= window.innerHeight/2) {
+                                                                window.AndroidBridge.onPageScrolled(parseInt(containers[i].dataset.pageNumber));
+                                                                break;
+                                                            }
+                                                        }
+                                                    }, 150);
+                                                });
 
                                                 const observer = new IntersectionObserver((entries) => {
                                                     entries.forEach(entry => {
                                                         if (entry.isIntersecting) {
-                                                            renderPage(entry.target);
+                                                            queueRender(entry.target);
                                                         } else {
                                                             cleanupPage(entry.target);
                                                         }
                                                     });
-                                                }, { rootMargin: "100% 0px" });
+                                                }, { rootMargin: "150% 0px" });
 
                                                 for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
                                                     const container = document.createElement('div');
                                                     container.className = 'pdf-page-container';
-                                                    container.style.width = screenWidth + 'px';
-                                                    container.style.height = pageHeight + 'px'; 
+                                                    container.style.width = sWidth + 'px';
+                                                    container.style.height = pHeight + 'px'; 
                                                     container.dataset.pageNumber = pageNum;
                                                     container.dataset.loaded = "false";
+                                                    container.dataset.queued = "false";
                                                     viewer.appendChild(container);
                                                     observer.observe(container);
                                                 }
-                                            });
 
-                                            function renderPage(container) {
-                                                if (container.dataset.loaded === "true") return;
-                                                container.dataset.loaded = "true";
-                                                const pageNum = parseInt(container.dataset.pageNumber);
+                                                // خوارزمية طابور الريندر (لمنع استهلاك الذاكرة العشوائي)
+                                                function queueRender(container) {
+                                                    if (container.dataset.loaded === "true" || container.dataset.queued === "true") return;
+                                                    container.dataset.queued = "true";
+                                                    renderQueue.push(container);
+                                                    processQueue();
+                                                }
 
-                                                pdf.getPage(pageNum).then(page => {
-                                                    const screenWidth = window.innerWidth;
-                                                    const defaultViewport = page.getViewport({ scale: 1.0 });
-                                                    const scale = screenWidth / defaultViewport.width;
-                                                    const viewport = page.getViewport({ scale: scale });
+                                                function processQueue() {
+                                                    if (isRendering || renderQueue.length === 0) return;
+                                                    isRendering = true;
+                                                    const container = renderQueue.shift();
                                                     
-                                                    container.style.height = viewport.height + 'px';
-                                                    
-                                                    const canvas = document.createElement('canvas');
-                                                    const context = canvas.getContext('2d', { alpha: false });
-                                                    canvas.height = viewport.height;
-                                                    canvas.width = viewport.width;
-                                                    container.appendChild(canvas);
+                                                    if (container.dataset.queued === "false") {
+                                                        isRendering = false;
+                                                        processQueue();
+                                                        return;
+                                                    }
 
-                                                    page.render({ canvasContext: context, viewport: viewport }).promise.then(() => {
-                                                        const textLayerDiv = document.createElement('div');
-                                                        textLayerDiv.className = 'textLayer';
-                                                        container.appendChild(textLayerDiv);
-                                                        page.getTextContent().then(textContent => {
-                                                            pdfjsLib.renderTextLayer({
-                                                                textContent: textContent,
-                                                                container: textLayerDiv,
-                                                                viewport: viewport,
-                                                                textDivs: []
-                                                            });
-                                                        });
-
-                                                        page.getAnnotations().then(annotations => {
-                                                            const annotationLayerDiv = document.createElement('div');
-                                                            annotationLayerDiv.className = 'annotationLayer';
-                                                            container.appendChild(annotationLayerDiv);
-                                                            pdfjsLib.AnnotationLayer.render({
-                                                                viewport: viewport.clone({ dontFlip: true }),
-                                                                div: annotationLayerDiv,
-                                                                annotations: annotations,
-                                                                page: page,
-                                                                linkService: {
-                                                                    getDestinationHash: () => '',
-                                                                    getAnchorUrl: () => '',
-                                                                    executeNamedAction: () => {}
-                                                                },
-                                                                downloadManager: null
-                                                            });
-
-                                                            annotationLayerDiv.addEventListener('click', (e) => {
-                                                                const target = e.target.closest('a');
-                                                                if (target && target.href) {
-                                                                    e.preventDefault();
-                                                                    window.AndroidBridge.onAudioLinkClick(target.href);
-                                                                }
-                                                            });
-                                                        });
-                                                        
-                                                        window.AndroidBridge.onPageRendered(pageNum, totalPages);
+                                                    renderPage(container).then(() => {
+                                                        isRendering = false;
+                                                        processQueue();
+                                                    }).catch(err => {
+                                                        console.error(err);
+                                                        isRendering = false;
+                                                        processQueue();
                                                     });
-                                                });
-                                            }
+                                                }
 
-                                            function cleanupPage(container) {
-                                                if (container.dataset.loaded === "false") return;
-                                                container.innerHTML = '';
-                                                container.dataset.loaded = "false";
-                                            }
+                                                function renderPage(container) {
+                                                    return new Promise((resolve, reject) => {
+                                                        const pageNum = parseInt(container.dataset.pageNumber);
+                                                        pdf.getPage(pageNum).then(page => {
+                                                            let cWidth = window.innerWidth || screen.width || 800;
+                                                            const cViewport = page.getViewport({ scale: 1.0 });
+                                                            const cScale = cWidth / cViewport.width;
+                                                            const viewport = page.getViewport({ scale: cScale });
+                                                            
+                                                            container.style.width = viewport.width + 'px';
+                                                            container.style.height = viewport.height + 'px';
+                                                            
+                                                            const canvas = document.createElement('canvas');
+                                                            const context = canvas.getContext('2d');
+                                                            canvas.height = viewport.height;
+                                                            canvas.width = viewport.width;
+                                                            container.appendChild(canvas);
+
+                                                            page.render({ canvasContext: context, viewport: viewport }).promise.then(() => {
+                                                                const textLayerDiv = document.createElement('div');
+                                                                textLayerDiv.className = 'textLayer';
+                                                                container.appendChild(textLayerDiv);
+                                                                page.getTextContent().then(textContent => {
+                                                                    pdfjsLib.renderTextLayer({
+                                                                        textContent: textContent,
+                                                                        container: textLayerDiv,
+                                                                        viewport: viewport,
+                                                                        textDivs: []
+                                                                    });
+                                                                });
+
+                                                                page.getAnnotations().then(annotations => {
+                                                                    const annotationLayerDiv = document.createElement('div');
+                                                                    annotationLayerDiv.className = 'annotationLayer';
+                                                                    container.appendChild(annotationLayerDiv);
+                                                                    pdfjsLib.AnnotationLayer.render({
+                                                                        viewport: viewport.clone({ dontFlip: true }),
+                                                                        div: annotationLayerDiv,
+                                                                        annotations: annotations,
+                                                                        page: page,
+                                                                        linkService: { getDestinationHash:()=>'', getAnchorUrl:()=>'', executeNamedAction:()=>{} },
+                                                                        downloadManager: null
+                                                                    });
+
+                                                                    annotationLayerDiv.addEventListener('click', (e) => {
+                                                                        const target = e.target.closest('a');
+                                                                        if (target && target.href) {
+                                                                            e.preventDefault();
+                                                                            window.AndroidBridge.onAudioLinkClick(target.href);
+                                                                        }
+                                                                    });
+                                                                });
+                                                                
+                                                                container.dataset.loaded = "true";
+                                                                container.dataset.queued = "false";
+                                                                resolve();
+                                                            }).catch(reject);
+                                                        }).catch(reject);
+                                                    });
+                                                }
+
+                                                function cleanupPage(container) {
+                                                    container.dataset.queued = "false";
+                                                    if (container.dataset.loaded === "false") return;
+                                                    container.innerHTML = '';
+                                                    container.dataset.loaded = "false";
+                                                }
+                                            });
                                         }).catch(err => {
                                             console.error(err);
                                         });
@@ -489,6 +546,18 @@ fun PdfViewerWidget(
                                 else -> "none"
                             }
                             webView.evaluateJavascript("document.body.style.filter = '$filterCss';", null)
+                            
+                            // توجيه الـ WebView للصفحة الصحيحة عند التغيير الخارجي
+                            if (webView.url != null) {
+                                webView.evaluateJavascript("""
+                                    (function() {
+                                        const containers = document.querySelectorAll('.pdf-page-container');
+                                        if (containers.length >= ${currentPage + 1}) {
+                                            containers[${currentPage}].scrollIntoView({behavior: 'smooth'});
+                                        }
+                                    })();
+                                """.trimIndent(), null)
+                            }
                         }
                     },
                     modifier = Modifier.fillMaxSize()
