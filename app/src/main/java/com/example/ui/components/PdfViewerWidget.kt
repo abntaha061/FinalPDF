@@ -47,6 +47,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.foundation.layout.padding
 import androidx.webkit.WebViewAssetLoader
 import java.io.File
+import java.io.FileInputStream
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -105,32 +106,43 @@ fun PdfViewerWidget(
         }
     }
 
+    // تم التعديل هنا: نسخ أي ملف بأمان لمجلد الـ Cache لمنع كراش الـ WebViewAssetLoader
     LaunchedEffect(pdfUriString) {
-        val fileUri = Uri.parse(pdfUriString)
-        val file: File? = when (fileUri.scheme) {
-            "file" -> fileUri.path?.let { File(it) }
-            "content" -> withContext(Dispatchers.IO) {
-                try {
-                    val cacheFile = File(context.cacheDir, "pdf_viewer_temp.pdf")
-                    context.contentResolver.openInputStream(fileUri)?.use { input ->
-                        cacheFile.outputStream().use { output ->
-                            input.copyTo(output)
-                        }
+        withContext(Dispatchers.IO) {
+            try {
+                val fileUri = Uri.parse(pdfUriString)
+                val cacheFile = File(context.cacheDir, "pdf_viewer_temp.pdf")
+                
+                val inputStream = if (fileUri.scheme == "content") {
+                    context.contentResolver.openInputStream(fileUri)
+                } else if (fileUri.scheme == "file") {
+                    FileInputStream(File(fileUri.path ?: ""))
+                } else {
+                    FileInputStream(File(pdfUriString))
+                }
+                
+                inputStream?.use { input ->
+                    cacheFile.outputStream().use { output ->
+                        input.copyTo(output)
                     }
-                    cacheFile
-                } catch (e: Exception) {
-                    Log.e("PdfViewerWidget", "Failed to copy content URI to cache", e)
-                    null
+                }
+                
+                withContext(Dispatchers.Main) {
+                    if (cacheFile.exists() && cacheFile.length() > 0) {
+                        resolvedFile = cacheFile
+                    } else {
+                        loadError = "تعذّر قراءة الملف (حجمه 0)"
+                    }
+                    fileResolved = true
+                }
+            } catch (e: Exception) {
+                Log.e("PdfViewerWidget", "Failed to cache PDF securely", e)
+                withContext(Dispatchers.Main) {
+                    loadError = "تعذّر قراءة مسار الملف"
+                    fileResolved = true
                 }
             }
-            else -> null
         }
-        if (file == null || !file.exists()) {
-            loadError = "تعذّر قراءة الملف"
-        } else {
-            resolvedFile = file
-        }
-        fileResolved = true
     }
 
     Box(
@@ -252,7 +264,7 @@ fun PdfViewerWidget(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
-                Text(text = "Error reading PDF: $loadError")
+                Text(text = loadError ?: "حدث خطأ مجهول")
             }
         }
 
@@ -263,8 +275,6 @@ fun PdfViewerWidget(
                         WebView(ctx).apply {
                             localWebViewRef = this
                             
-                            // no-op: PDFView not used with WebView implementation
-
                             settings.apply {
                                 javaScriptEnabled = true
                                 domStorageEnabled = true
@@ -276,7 +286,6 @@ fun PdfViewerWidget(
                                 allowFileAccess = true
                             }
 
-                            // Bridge for Audio Links and Page Changes
                             addJavascriptInterface(object {
                                 @JavascriptInterface
                                 fun onAudioLinkClick(url: String) {
@@ -303,19 +312,19 @@ fun PdfViewerWidget(
                                 }
                             }, "AndroidBridge")
 
-                            val file = resolvedFile ?: return@apply
-
+                            // التعديل الأهم: تحديد مسار الـ cacheDir بشكل ثابت للـ InternalStoragePathHandler لمنع الكراش
                             val assetLoader = WebViewAssetLoader.Builder()
                                 .addPathHandler(
                                     "/local_pdf/",
-                                    WebViewAssetLoader.InternalStoragePathHandler(ctx, file.parentFile ?: ctx.cacheDir)
+                                    WebViewAssetLoader.InternalStoragePathHandler(ctx, ctx.cacheDir)
                                 )
                                 .addPathHandler(
                                     "/pdfjs/",
                                     WebViewAssetLoader.AssetsPathHandler(ctx)
                                 )
                                 .build()
-                            val safeFileName = file.name
+                                
+                            val safeFileName = "pdf_viewer_temp.pdf"
 
                             webViewClient = object : WebViewClient() {
                                 override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
@@ -325,7 +334,6 @@ fun PdfViewerWidget(
 
                             webChromeClient = WebChromeClient()
 
-                            // Injecting PDF.js via HTML string
                             val htmlContent = """
                                 <!DOCTYPE html>
                                 <html>
@@ -371,7 +379,6 @@ fun PdfViewerWidget(
                                                     viewer.appendChild(container);
 
                                                     page.render({ canvasContext: context, viewport: viewport }).promise.then(() => {
-                                                        // Text Layer for Perfect Selection
                                                         const textLayerDiv = document.createElement('div');
                                                         textLayerDiv.className = 'textLayer';
                                                         container.appendChild(textLayerDiv);
@@ -384,7 +391,6 @@ fun PdfViewerWidget(
                                                             });
                                                         });
 
-                                                        // Annotation Layer for Audio Links
                                                         page.getAnnotations().then(annotations => {
                                                             const annotationLayerDiv = document.createElement('div');
                                                             annotationLayerDiv.className = 'annotationLayer';
@@ -402,7 +408,6 @@ fun PdfViewerWidget(
                                                                 downloadManager: null
                                                             });
 
-                                                            // Intercept clicks
                                                             annotationLayerDiv.addEventListener('click', (e) => {
                                                                 const target = e.target.closest('a');
                                                                 if (target && target.href) {
@@ -429,7 +434,6 @@ fun PdfViewerWidget(
                     },
                     update = { webView ->
                         if (isLoaded) {
-                            // Night / Sepia mode updates via JavaScript evaluation dynamically
                             val filterCss = when (readingMode) {
                                 "night" -> "invert(1) hue-rotate(180deg) brightness(0.85)"
                                 "sepia" -> "sepia(0.6) brightness(0.9)"
