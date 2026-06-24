@@ -273,15 +273,24 @@ fun ViewerScreen(
     LaunchedEffect(activeUri) {
         val uriStr = activeUri
         if (uriStr != null) {
-            val result = viewModel.getOcrResultByUri(uriStr)
-            ocrResultEntity = result
-            hasOcrResult = result != null
+            withContext(Dispatchers.IO) {
+                try {
+                    val result = viewModel.getOcrResultByUri(uriStr)
+                    withContext(Dispatchers.Main) {
+                        ocrResultEntity = result
+                        hasOcrResult = result != null
+                    }
+                } catch (e: Throwable) {
+                    Log.e("ViewerScreen", "DB Error", e)
+                }
+            }
         } else {
             ocrResultEntity = null
             hasOcrResult = false
             showOcrBanner = false
         }
     }
+
 
     val checkSearchabilityAndOcrBanner: (String) -> Unit = { uriStr ->
         coroutineScope.launch(Dispatchers.IO) {
