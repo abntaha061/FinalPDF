@@ -11,7 +11,6 @@ import android.net.Uri
 import android.provider.MediaStore
 import android.print.PrintManager
 import android.util.Log
-import com.example.ui.components.setPageRotation
 import java.io.File
 import java.io.FileOutputStream
 import java.io.ByteArrayOutputStream
@@ -121,7 +120,6 @@ import com.github.barteksc.pdfviewer.PDFView
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import android.speech.tts.TextToSpeech
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
@@ -135,7 +133,6 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.focus.*
-import androidx.compose.ui.graphics.graphicsLayer
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -3005,28 +3002,18 @@ fun ViewerScreen(
                             showSaveAsImageConfirmDialog = true
                         },
                         onRotateRightClick = {
-                            pdfViewInst?.let { pdfView ->
-                                val currentRot = viewModel.pageRotations[currentPage] ?: 0
-                                val newRot = currentRot + 90
-                                viewModel.pageRotations[currentPage] = newRot
-                                pdfView.setPageRotation(currentPage, newRot % 360)
-                                pdfView.invalidate()
+                            coroutineScope.launch {
+                                snackbarHostState.showSnackbar("تدوير الصفحة غير متاح في وضع WebView حالياً")
                             }
                         },
                         onRotateLeftClick = {
-                            pdfViewInst?.let { pdfView ->
-                                val currentRot = viewModel.pageRotations[currentPage] ?: 0
-                                val newRot = currentRot - 90
-                                viewModel.pageRotations[currentPage] = newRot
-                                pdfView.setPageRotation(currentPage, ((newRot % 360) + 360) % 360)
-                                pdfView.invalidate()
+                            coroutineScope.launch {
+                                snackbarHostState.showSnackbar("تدوير الصفحة غير متاح في وضع WebView حالياً")
                             }
                         },
                         onResetRotationClick = {
-                            pdfViewInst?.let { pdfView ->
-                                viewModel.pageRotations[currentPage] = 0
-                                pdfView.setPageRotation(currentPage, 0)
-                                pdfView.invalidate()
+                            coroutineScope.launch {
+                                snackbarHostState.showSnackbar("تدوير الصفحة غير متاح في وضع WebView حالياً")
                             }
                         },
                         isScreenRotationLocked = isScreenRotationLocked,
