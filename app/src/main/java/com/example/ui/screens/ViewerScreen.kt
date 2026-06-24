@@ -303,12 +303,13 @@ fun ViewerScreen(
                 return@launch
             }
 
-            // Otherwise check searchable using PDFBox
+            // Otherwise check searchable using PDFBox safely (Temp files & Throwable)
             var searchable = true
             try {
                 com.tom_roush.pdfbox.android.PDFBoxResourceLoader.init(context)
                 context.contentResolver.openInputStream(Uri.parse(uriStr))?.use { inputStream ->
-                    val document = com.tom_roush.pdfbox.pdmodel.PDDocument.load(inputStream)
+                    val memorySetting = com.tom_roush.pdfbox.io.MemoryUsageSetting.setupTempFileOnly()
+                    val document = com.tom_roush.pdfbox.pdmodel.PDDocument.load(inputStream, memorySetting)
                     val stripper = com.tom_roush.pdfbox.text.PDFTextStripper()
                     stripper.startPage = 1
                     stripper.endPage = 1
@@ -316,7 +317,7 @@ fun ViewerScreen(
                     searchable = pageText?.trim()?.length ?: 0 > 50
                     document.close()
                 }
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 Log.e("ViewerScreen", "Error checking searchable", e)
             }
 
