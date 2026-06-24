@@ -282,7 +282,7 @@ fun PdfViewerWidget(
                                 fun onAudioLinkClick(url: String) {
                                     if (url.endsWith(".mp3") || url.endsWith(".wav") || url.endsWith(".ogg") || url.endsWith(".m4a")) {
                                         onLinkTapped(RectF())
-                                        com.example.util.AudioPlayerManager.playAudio(url)
+                                        com.example.util.AudioPlayerManager.play(ctx, url)
                                     } else {
                                         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
                                         ctx.startActivity(intent)
@@ -336,7 +336,7 @@ fun PdfViewerWidget(
                                         body { margin: 0; padding: 0; background: ${if(readingMode == "night") "#121212" else if (readingMode == "sepia") "#f4ecd8" else "#ffffff"}; display: flex; flex-direction: column; align-items: center; }
                                         .pdf-page-container { position: relative; margin-bottom: ${pageSpacing}px; }
                                         canvas { display: block; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
-                                        .textLayer { position: absolute; left: 0; top: 0; right: 0; bottom: 0; overflow: hidden; opacity: 0.2; line-height: 1.0; }
+                                        .textLayer { position: absolute; left: 0; top: 0; right: 0; bottom: 0; overflow: hidden; opacity: 0; line-height: 1.0; }
                                         .textLayer ::selection { background: rgba(0, 123, 255, 0.3); }
                                         .annotationLayer { position: absolute; left: 0; top: 0; right: 0; bottom: 0; pointer-events: none; }
                                         .annotationLayer section { position: absolute; cursor: pointer; pointer-events: auto; }
