@@ -106,7 +106,6 @@ fun PdfViewerWidget(
         }
     }
 
-    // تم التعديل هنا: نسخ أي ملف بأمان لمجلد الـ Cache لمنع كراش الـ WebViewAssetLoader
     LaunchedEffect(pdfUriString) {
         withContext(Dispatchers.IO) {
             try {
@@ -299,20 +298,25 @@ fun PdfViewerWidget(
                                 }
 
                                 @JavascriptInterface
-                                fun onPageRendered(page: Int, total: Int) {
+                                fun onPdfLoaded(total: Int) {
                                     android.os.Handler(android.os.Looper.getMainLooper()).post {
                                         if (!isLoaded) {
                                             isLoaded = true
                                             viewModel.setTotalPages(total)
                                             onLoadComplete(total)
                                         }
+                                    }
+                                }
+
+                                @JavascriptInterface
+                                fun onPageRendered(page: Int, total: Int) {
+                                    android.os.Handler(android.os.Looper.getMainLooper()).post {
                                         viewModel.setCurrentPage(page - 1)
                                         onPageChanged(page - 1, total)
                                     }
                                 }
                             }, "AndroidBridge")
 
-                            // التعديل الأهم: تحديد مسار الـ cacheDir بشكل ثابت للـ InternalStoragePathHandler لمنع الكراش
                             val assetLoader = WebViewAssetLoader.Builder()
                                 .addPathHandler(
                                     "/local_pdf/",
@@ -329,6 +333,14 @@ fun PdfViewerWidget(
                             webViewClient = object : WebViewClient() {
                                 override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                                     return assetLoader.shouldInterceptRequest(request.url)
+                                }
+                                
+                                // منع الكراش في حالة نفاد الذاكرة القصوى
+                                override fun onRenderProcessGone(view: WebView?, detail: android.webkit.RenderProcessGoneDetail?): Boolean {
+                                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                        loadError = "نفدت الذاكرة أثناء عرض الملف. يرجى إعادة فتح المستند."
+                                    }
+                                    return true 
                                 }
                             }
 
@@ -359,24 +371,55 @@ fun PdfViewerWidget(
 
                                         pdfjsLib.getDocument(url).promise.then(pdf => {
                                             const totalPages = pdf.numPages;
-                                            for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+                                            window.AndroidBridge.onPdfLoaded(totalPages);
+                                            
+                                            pdf.getPage(1).then(firstPage => {
+                                                const screenWidth = window.innerWidth;
+                                                const defaultViewport = firstPage.getViewport({ scale: 1.0 });
+                                                const scale = screenWidth / defaultViewport.width;
+                                                const scaledViewport = firstPage.getViewport({ scale: scale });
+                                                const pageHeight = scaledViewport.height;
+
+                                                const observer = new IntersectionObserver((entries) => {
+                                                    entries.forEach(entry => {
+                                                        if (entry.isIntersecting) {
+                                                            renderPage(entry.target);
+                                                        } else {
+                                                            cleanupPage(entry.target);
+                                                        }
+                                                    });
+                                                }, { rootMargin: "100% 0px" });
+
+                                                for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+                                                    const container = document.createElement('div');
+                                                    container.className = 'pdf-page-container';
+                                                    container.style.width = screenWidth + 'px';
+                                                    container.style.height = pageHeight + 'px'; 
+                                                    container.dataset.pageNumber = pageNum;
+                                                    container.dataset.loaded = "false";
+                                                    viewer.appendChild(container);
+                                                    observer.observe(container);
+                                                }
+                                            });
+
+                                            function renderPage(container) {
+                                                if (container.dataset.loaded === "true") return;
+                                                container.dataset.loaded = "true";
+                                                const pageNum = parseInt(container.dataset.pageNumber);
+
                                                 pdf.getPage(pageNum).then(page => {
                                                     const screenWidth = window.innerWidth;
                                                     const defaultViewport = page.getViewport({ scale: 1.0 });
                                                     const scale = screenWidth / defaultViewport.width;
                                                     const viewport = page.getViewport({ scale: scale });
                                                     
-                                                    const container = document.createElement('div');
-                                                    container.className = 'pdf-page-container';
-                                                    container.style.width = viewport.width + 'px';
                                                     container.style.height = viewport.height + 'px';
                                                     
                                                     const canvas = document.createElement('canvas');
-                                                    const context = canvas.getContext('2d');
+                                                    const context = canvas.getContext('2d', { alpha: false });
                                                     canvas.height = viewport.height;
                                                     canvas.width = viewport.width;
                                                     container.appendChild(canvas);
-                                                    viewer.appendChild(container);
 
                                                     page.render({ canvasContext: context, viewport: viewport }).promise.then(() => {
                                                         const textLayerDiv = document.createElement('div');
@@ -420,6 +463,12 @@ fun PdfViewerWidget(
                                                         window.AndroidBridge.onPageRendered(pageNum, totalPages);
                                                     });
                                                 });
+                                            }
+
+                                            function cleanupPage(container) {
+                                                if (container.dataset.loaded === "false") return;
+                                                container.innerHTML = '';
+                                                container.dataset.loaded = "false";
                                             }
                                         }).catch(err => {
                                             console.error(err);
