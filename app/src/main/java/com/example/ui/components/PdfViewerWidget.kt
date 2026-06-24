@@ -271,7 +271,6 @@ fun PdfViewerWidget(
             }
         }
 
-        // إخفاء الـ WebView لو حصل فيه كراش (OOM) عشان ميعملش شاشة بيضاء أو يوقع التطبيق
         if (fileResolved && resolvedFile != null && loadError == null) {
             key(readingMode, isSwipeHorizontal, pdfUriString, pageSpacing, readingScrollMode, fitMode) {
                 AndroidView(
@@ -342,7 +341,6 @@ fun PdfViewerWidget(
                                     return assetLoader.shouldInterceptRequest(request.url)
                                 }
                                 
-                                // منع الكراش الخفي بسبب الذاكرة وإظهار رسالة للمستخدم بدلاً من الخروج
                                 override fun onRenderProcessGone(view: WebView?, detail: android.webkit.RenderProcessGoneDetail?): Boolean {
                                     android.os.Handler(android.os.Looper.getMainLooper()).post {
                                         loadError = "نفدت الذاكرة أثناء عرض الملف. يرجى إعادة فتح المستند."
@@ -372,7 +370,6 @@ fun PdfViewerWidget(
                                 <body>
                                     <div id="pdf-viewer"></div>
                                     <script>
-                                        // تم تعديل المسار لضمان عمل الـ Worker وتفادي تحميل المعالج الأساسي
                                         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://appassets.androidplatform.net/assets/pdfjs/pdf.worker.min.js';
                                         const url = 'https://appassets.androidplatform.net/local_pdf/$safeFileName';
                                         const viewer = document.getElementById('pdf-viewer');
@@ -382,7 +379,6 @@ fun PdfViewerWidget(
                                             window.AndroidBridge.onPdfLoaded(totalPages);
                                             
                                             pdf.getPage(1).then(firstPage => {
-                                                // حماية إضافية لحجم الشاشة عشان ميحسبش صفر ويعمل كراش
                                                 let sWidth = window.innerWidth || screen.width || 800;
                                                 const defaultViewport = firstPage.getViewport({ scale: 1.0 });
                                                 const scale = sWidth / defaultViewport.width;
@@ -392,7 +388,6 @@ fun PdfViewerWidget(
                                                 let renderQueue = [];
                                                 let isRendering = false;
 
-                                                // نظام تتبع السكرول لتحديث رقم الصفحة بدقة عالية
                                                 let scrollTimeout;
                                                 window.addEventListener('scroll', () => {
                                                     if (scrollTimeout) clearTimeout(scrollTimeout);
@@ -430,7 +425,6 @@ fun PdfViewerWidget(
                                                     observer.observe(container);
                                                 }
 
-                                                // خوارزمية طابور الريندر (لمنع استهلاك الذاكرة العشوائي)
                                                 function queueRender(container) {
                                                     if (container.dataset.loaded === "true" || container.dataset.queued === "true") return;
                                                     container.dataset.queued = "true";
@@ -547,7 +541,6 @@ fun PdfViewerWidget(
                             }
                             webView.evaluateJavascript("document.body.style.filter = '$filterCss';", null)
                             
-                            // توجيه الـ WebView للصفحة الصحيحة عند التغيير الخارجي
                             if (webView.url != null) {
                                 webView.evaluateJavascript("""
                                     (function() {
