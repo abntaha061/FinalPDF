@@ -1,8 +1,16 @@
 package com.example.ui.components
 
+import android.annotation.SuppressLint
+import android.content.Intent
 import android.net.Uri
 import android.util.Log
 import android.graphics.RectF
+import android.webkit.JavascriptInterface
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,21 +26,18 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.ui.PdfViewModel
 import com.github.barteksc.pdfviewer.PDFView
-import com.github.barteksc.pdfviewer.CustomLinkHandler
-import com.github.barteksc.pdfviewer.scroll.DefaultScrollHandle
-import com.github.barteksc.pdfviewer.util.FitPolicy
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
@@ -40,7 +45,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import androidx.compose.material3.Surface
 import androidx.compose.foundation.layout.padding
+import androidx.webkit.WebViewAssetLoader
+import java.io.File
 
+@SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun PdfViewerWidget(
     pdfUriString: String,
@@ -66,6 +74,8 @@ fun PdfViewerWidget(
     val pageSpacing by viewModel.pageSpacing.collectAsState()
     var isLoaded by remember { mutableStateOf(false) }
     var loadError by remember { mutableStateOf<String?>(null) }
+    var resolvedFile by remember { mutableStateOf<File?>(null) }
+    var fileResolved by remember { mutableStateOf(false) }
 
     val haptic = LocalHapticFeedback.current
 
@@ -73,76 +83,10 @@ fun PdfViewerWidget(
         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
     }
 
-    // Pre-calculate page count for the .pages(...) configuration
-    val pageCount = remember(pdfUriString) {
-        try {
-            val fileUri = Uri.parse(pdfUriString)
-            context.contentResolver.openFileDescriptor(fileUri, "r")?.use { pfd ->
-                android.graphics.pdf.PdfRenderer(pfd).use { renderer ->
-                    renderer.pageCount
-                }
-            } ?: 0
-        } catch (e: Exception) {
-            Log.e("PdfViewerWidget", "Failed reading pageCount standard", e)
-            0
-        }
-    }
-
     var containerWidth by remember { mutableStateOf(0f) }
     var containerHeight by remember { mutableStateOf(0f) }
 
-    val pageSizes = remember(pdfUriString) {
-        val sizes = mutableMapOf<Int, Pair<Float, Float>>()
-        try {
-            val fileUri = Uri.parse(pdfUriString)
-            context.contentResolver.openFileDescriptor(fileUri, "r")?.use { pfd ->
-                android.graphics.pdf.PdfRenderer(pfd).use { renderer ->
-                    for (i in 0 until renderer.pageCount) {
-                        renderer.openPage(i).use { page ->
-                            sizes[i] = Pair(page.width.toFloat(), page.height.toFloat())
-                        }
-                    }
-                }
-            }
-        } catch (e: Exception) {
-            Log.e("PdfViewerWidget", "Failed reading page sizes via PdfRenderer", e)
-        }
-        sizes
-    }
-
-    val updateMinZoomForPage: (PDFView, Int) -> Unit = { pdfView, pageIndex ->
-        if (containerWidth > 0f && containerHeight > 0f) {
-            val size = pageSizes[pageIndex]
-            if (size != null && size.first > 0f && size.second > 0f) {
-                val pageW = size.first
-                val pageH = size.second
-                val containerRatio = containerWidth / containerHeight
-                val pageRatio = pageW / pageH
-
-                val fitScale: Float = if (fitMode == "height") {
-                    if (pageRatio > containerRatio) {
-                        containerRatio / pageRatio
-                    } else {
-                        1.0f
-                    }
-                } else { // default or "width"
-                    if (pageRatio < containerRatio) {
-                        pageRatio / containerRatio
-                    } else {
-                        1.0f
-                    }
-                }
-
-                pdfView.setMinZoom(fitScale)
-                if (pdfView.zoom < fitScale) {
-                    pdfView.zoomTo(fitScale)
-                    onZoomChanged?.invoke(fitScale)
-                }
-            }
-        }
-    }
-
-    var localPdfViewRef by remember { mutableStateOf<PDFView?>(null) }
+    var localWebViewRef by remember { mutableStateOf<WebView?>(null) }
     var showFastScrollBadge by remember { mutableStateOf(false) }
 
     var touchTime by remember { mutableStateOf(0L) }
@@ -161,6 +105,34 @@ fun PdfViewerWidget(
         }
     }
 
+    LaunchedEffect(pdfUriString) {
+        val fileUri = Uri.parse(pdfUriString)
+        val file: File? = when (fileUri.scheme) {
+            "file" -> fileUri.path?.let { File(it) }
+            "content" -> withContext(Dispatchers.IO) {
+                try {
+                    val cacheFile = File(context.cacheDir, "pdf_viewer_temp.pdf")
+                    context.contentResolver.openInputStream(fileUri)?.use { input ->
+                        cacheFile.outputStream().use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                    cacheFile
+                } catch (e: Exception) {
+                    Log.e("PdfViewerWidget", "Failed to copy content URI to cache", e)
+                    null
+                }
+            }
+            else -> null
+        }
+        if (file == null || !file.exists()) {
+            loadError = "تعذّر قراءة الملف"
+        } else {
+            resolvedFile = file
+        }
+        fileResolved = true
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -175,9 +147,6 @@ fun PdfViewerWidget(
                         val event = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
                         val changes = event.changes
                         
-                        // If it's a single finger event, do NOT intercept it in the Initial pass!
-                        // This ensures that native single-finger scrolling and double-tap zoom 
-                        // in PDFView work with 100% native responsiveness and smoothness.
                         if (changes.size < 2 && !isMultiTap) {
                             continue
                         }
@@ -205,26 +174,20 @@ fun PdfViewerWidget(
                                 val dy = endY - startY
                                 
                                 if (isMultiTap) {
-                                    // Multi-touch gestures
                                     val endX2 = if (changes.size >= 2) changes[1].position.x else startX2
                                     val endY2 = if (changes.size >= 2) changes[1].position.y else startY2
                                     val finalTwoFingerY = (endY + endY2) / 2
                                     val deltaYTwo = finalTwoFingerY - initialTwoFingerPageY
                                     
                                     if (deltaYTwo < -150f) {
-                                        // TWO_FINGER_SWIPE_UP
                                         onGestureTriggered(com.example.data.GestureType.TWO_FINGER_SWIPE_UP, null)
                                     } else if (deltaYTwo > 150f) {
-                                        // TWO_FINGER_SWIPE_DOWN
                                         onGestureTriggered(com.example.data.GestureType.TWO_FINGER_SWIPE_DOWN, null)
                                     } else if (duration < 400) {
-                                        // TWO_FINGER_TAP
                                         onGestureTriggered(com.example.data.GestureType.TWO_FINGER_TAP, null)
                                     }
                                     isMultiTap = false
                                 } else {
-                                    // No custom single-finger swipe actions here to avoid breaking native PDF scroll physics.
-                                    // Standard single tap, long press, and zoom are natively handled by PDFView configurator callbacks.
                                     if (kotlin.math.abs(dx) < 20f && kotlin.math.abs(dy) < 20f) {
                                         if (duration > 500) {
                                             onGestureTriggered(com.example.data.GestureType.LONG_PRESS, androidx.compose.ui.geometry.Offset(endX, endY))
@@ -252,7 +215,7 @@ fun PdfViewerWidget(
                 }
             }
     ) {
-        if (!isLoaded && loadError == null) {
+        if (!fileResolved || (!isLoaded && loadError == null)) {
             CircularProgressIndicator(
                 modifier = Modifier
                     .size(48.dp)
@@ -261,7 +224,6 @@ fun PdfViewerWidget(
             )
         }
 
-        // CenterTop Badge for Fast Scroll
         AnimatedVisibility(
             visible = showFastScrollBadge,
             enter = fadeIn(tween(200)),
@@ -294,167 +256,191 @@ fun PdfViewerWidget(
             }
         }
 
-        key(readingMode, isSwipeHorizontal, pdfUriString, pageSpacing, readingScrollMode, fitMode) {
-            AndroidView(
-                factory = { ctx ->
-                    PDFView(ctx, null).apply {
-                        localPdfViewRef = this
-                        onPdfViewCreated?.invoke(this)
-                        
-                        // Set min, mid, and max zoom limits as requested
-                        setMinZoom(0.5f)
-                        setMidZoom(1.5f)
-                        setMaxZoom(4.0f)
+        if (fileResolved && resolvedFile != null) {
+            key(readingMode, isSwipeHorizontal, pdfUriString, pageSpacing, readingScrollMode, fitMode) {
+                AndroidView(
+                    factory = { ctx ->
+                        WebView(ctx).apply {
+                            localWebViewRef = this
+                            
+                            // no-op: PDFView not used with WebView implementation
 
-                        // Apply sepia filter or normal filter dynamically
-                        if (readingMode == "sepia") {
-                            val paint = android.graphics.Paint().apply {
-                                colorFilter = android.graphics.ColorMatrixColorFilter(
-                                    android.graphics.ColorMatrix(
-                                        floatArrayOf(
-                                            0.393f, 0.769f, 0.189f, 0f, 0f,
-                                            0.349f, 0.686f, 0.168f, 0f, 0f,
-                                            0.272f, 0.534f, 0.131f, 0f, 0f,
-                                            0f,      0f,      0f,      1f, 0f
-                                        )
-                                    )
-                                )
-                            }
-                            setLayerType(android.view.View.LAYER_TYPE_HARDWARE, paint)
-                        } else {
-                            setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
-                        }
-                        
-                        // Removed custom touch listener to prevent breaking the native pinch-to-zoom/scroll drag and drop interactions of the PDFView.
-
-
-                        try {
-                            val fileUri = Uri.parse(pdfUriString)
-                            val configurator = fromUri(fileUri)
-
-                            // 1. Pages configuration
-                            if (pageCount > 0) {
-                                val pagesList = IntArray(pageCount) { it }
-                                configurator.pages(*pagesList)
+                            settings.apply {
+                                javaScriptEnabled = true
+                                domStorageEnabled = true
+                                builtInZoomControls = true
+                                displayZoomControls = false
+                                setSupportZoom(true)
+                                loadWithOverviewMode = true
+                                useWideViewPort = true
+                                allowFileAccess = true
                             }
 
-                            val isPaged = (readingScrollMode == "paged")
-
-                            // 2. Exact configured properties
-                            configurator
-                                .enableSwipe(true)
-                                .swipeHorizontal(if (isPaged) true else false)
-                                .pageSnap(if (isPaged) true else false)
-                                .autoSpacing(false)                       // Disable autoSpacing so that custom pageSpacing setting is precisely and cleanly respected (like WPS Office)
-                                .pageFling(isPaged)                       // Enable pageFling only in paged mode for smooth momentum scrolling
-                                .enableDoubletap(true)                    // native double tap zoom enabled
-                                .defaultPage(currentPage)                 // start from current page
-                                .onLoad { totalPages ->
-                                    isLoaded = true
-                                    viewModel.setTotalPages(totalPages)
-                                    updateMinZoomForPage(this@apply, currentPage)
-                                    if (fitMode == "actual") {
-                                        this@apply.zoomTo(1.0f)
+                            // Bridge for Audio Links and Page Changes
+                            addJavascriptInterface(object {
+                                @JavascriptInterface
+                                fun onAudioLinkClick(url: String) {
+                                    if (url.endsWith(".mp3") || url.endsWith(".wav") || url.endsWith(".ogg") || url.endsWith(".m4a")) {
+                                        onLinkTapped(RectF())
+                                        com.example.util.AudioPlayerManager.playAudio(url)
                                     } else {
-                                        // Set initial zoom to the dynamic contain-fit scale
-                                        val size = pageSizes[currentPage]
-                                        if (size != null && size.first > 0f && size.second > 0f) {
-                                            val pageW = size.first
-                                            val pageH = size.second
-                                            val containerRatio = containerWidth / containerHeight
-                                            val pageRatio = pageW / pageH
-                                            val fitScale = if (fitMode == "height") {
-                                                if (pageRatio > containerRatio) containerRatio / pageRatio else 1.0f
-                                            } else {
-                                                if (pageRatio < containerRatio) pageRatio / containerRatio else 1.0f
-                                            }
-                                            this@apply.zoomTo(fitScale)
-                                            onZoomChanged?.invoke(fitScale)
-                                        }
+                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                                        ctx.startActivity(intent)
                                     }
-                                    try {
-                                        val toc = tableOfContents
-                                        if (toc != null) {
-                                            viewModel.setTableOfContents(toc)
-                                        } else {
-                                            viewModel.setTableOfContents(emptyList())
-                                        }
-                                    } catch (e: Exception) {
-                                        Log.e("PdfViewerWidget", "Could not get table of contents", e)
-                                        viewModel.setTableOfContents(emptyList())
-                                    }
-                                    val rot = viewModel.pageRotations[currentPage] ?: 0
-                                    val normRot = ((rot % 360) + 360) % 360
-                                    this@apply.rotation = normRot.toFloat()
-                                    onLoadComplete(totalPages)
                                 }
-                                .onPageChange { page, total ->
-                                    viewModel.setCurrentPage(page)
-                                    onPageChanged(page, total)
-                                    val rot = viewModel.pageRotations[page] ?: 0
-                                    val normRot = ((rot % 360) + 360) % 360
-                                    this@apply.rotation = normRot.toFloat()
-                                    updateMinZoomForPage(this@apply, page)
-                                }
-                                .onPageScroll { page, positionOffset ->
-                                    onZoomChanged?.invoke(this@apply.zoom)
-                                }
-                                .onError { error ->
-                                    loadError = error.message ?: "Unknown error"
-                                    viewModel.setError(error.message)
-                                    onError(error)
-                                }
-                                .onPageError { page, error ->
-                                    Log.e("PdfViewerWidget", "Error on page $page", error)
-                                }
-                                .onTap { e ->
-                                    val isLink = com.github.barteksc.pdfviewer.CustomLinkHandler.isTapOnLink(this@apply, e.x, e.y)
-                                     if (isLink) return@onTap true
-                                    if (!isLink) {
-                                        onTap?.invoke()
-                                    }
-                                    true
-                                }
-                                .onLongPress { e ->
-                                    onLongPress?.invoke(androidx.compose.ui.geometry.Offset(e.x, e.y))
-                                }
-                                .enableAnnotationRendering(true)          // renders PDF annotations
-                                .enableAntialiasing(true)                  // Sharp and smooth text rendering
-                                
-                                .spacing(pageSpacing.toInt())                               // custom space between pages
-                                .pageFitPolicy(if (fitMode == "height") FitPolicy.HEIGHT else FitPolicy.WIDTH)
-                                .nightMode(readingMode == "night")
-                                .scrollHandle(DefaultScrollHandle(ctx))
-                                .linkHandler(CustomLinkHandler(context, this, pdfUriString, onLinkTapped, onNavigateToWebView)) // Custom link handler
-                                .load()
 
-                        } catch (e: Exception) {
-                            Log.e("PdfViewerWidget", "Exception parsing URI", e)
-                            loadError = e.message ?: "URI error"
-                            viewModel.setError(e.message)
-                            onError(e)
-                        }
-                    }
-                },
-                update = { pdfView ->
-                    // Apply layout updates dynamically safely
-                    if (isLoaded) {
-                        try {
-                            viewModel.pageRotations.forEach { (pageIdx, rot) ->
-                                val normRot = ((rot % 360) + 360) % 360
-                                pdfView.setPageRotation(pageIdx, normRot)
+                                @JavascriptInterface
+                                fun onPageRendered(page: Int, total: Int) {
+                                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                        if (!isLoaded) {
+                                            isLoaded = true
+                                            viewModel.setTotalPages(total)
+                                            onLoadComplete(total)
+                                        }
+                                        viewModel.setCurrentPage(page - 1)
+                                        onPageChanged(page - 1, total)
+                                    }
+                                }
+                            }, "AndroidBridge")
+
+                            val file = resolvedFile ?: return@apply
+
+                            val assetLoader = WebViewAssetLoader.Builder()
+                                .addPathHandler(
+                                    "/local_pdf/",
+                                    WebViewAssetLoader.InternalStoragePathHandler(ctx, file.parentFile ?: ctx.cacheDir)
+                                )
+                                .addPathHandler(
+                                    "/pdfjs/",
+                                    WebViewAssetLoader.AssetsPathHandler(ctx)
+                                )
+                                .build()
+                            val safeFileName = file.name
+
+                            webViewClient = object : WebViewClient() {
+                                override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+                                    return assetLoader.shouldInterceptRequest(request.url)
+                                }
                             }
-                            if (pdfView.currentPage != currentPage) {
-                                pdfView.jumpTo(currentPage)
-                            }
-                            updateMinZoomForPage(pdfView, currentPage)
-                        } catch (e: Exception) {
-                            // ignore
+
+                            webChromeClient = WebChromeClient()
+
+                            // Injecting PDF.js via HTML string
+                            val htmlContent = """
+                                <!DOCTYPE html>
+                                <html>
+                                <head>
+                                    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=4.0, user-scalable=yes">
+                                    <script src="https://appassets.androidplatform.net/pdfjs/pdf.min.js"></script>
+                                    <style>
+                                        body { margin: 0; padding: 0; background: ${if(readingMode == "night") "#121212" else if (readingMode == "sepia") "#f4ecd8" else "#ffffff"}; display: flex; flex-direction: column; align-items: center; }
+                                        .pdf-page-container { position: relative; margin-bottom: ${pageSpacing}px; }
+                                        canvas { display: block; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
+                                        .textLayer { position: absolute; left: 0; top: 0; right: 0; bottom: 0; overflow: hidden; opacity: 0.2; line-height: 1.0; }
+                                        .textLayer ::selection { background: rgba(0, 123, 255, 0.3); }
+                                        .annotationLayer { position: absolute; left: 0; top: 0; right: 0; bottom: 0; pointer-events: none; }
+                                        .annotationLayer section { position: absolute; cursor: pointer; pointer-events: auto; }
+                                    </style>
+                                </head>
+                                <body>
+                                    <div id="pdf-viewer"></div>
+                                    <script>
+                                        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://appassets.androidplatform.net/pdfjs/pdf.worker.min.js';
+                                        const url = 'https://appassets.androidplatform.net/local_pdf/$safeFileName';
+                                        const viewer = document.getElementById('pdf-viewer');
+
+                                        pdfjsLib.getDocument(url).promise.then(pdf => {
+                                            const totalPages = pdf.numPages;
+                                            for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
+                                                pdf.getPage(pageNum).then(page => {
+                                                    const screenWidth = window.innerWidth;
+                                                    const defaultViewport = page.getViewport({ scale: 1.0 });
+                                                    const scale = screenWidth / defaultViewport.width;
+                                                    const viewport = page.getViewport({ scale: scale });
+                                                    
+                                                    const container = document.createElement('div');
+                                                    container.className = 'pdf-page-container';
+                                                    container.style.width = viewport.width + 'px';
+                                                    container.style.height = viewport.height + 'px';
+                                                    
+                                                    const canvas = document.createElement('canvas');
+                                                    const context = canvas.getContext('2d');
+                                                    canvas.height = viewport.height;
+                                                    canvas.width = viewport.width;
+                                                    container.appendChild(canvas);
+                                                    viewer.appendChild(container);
+
+                                                    page.render({ canvasContext: context, viewport: viewport }).promise.then(() => {
+                                                        // Text Layer for Perfect Selection
+                                                        const textLayerDiv = document.createElement('div');
+                                                        textLayerDiv.className = 'textLayer';
+                                                        container.appendChild(textLayerDiv);
+                                                        page.getTextContent().then(textContent => {
+                                                            pdfjsLib.renderTextLayer({
+                                                                textContent: textContent,
+                                                                container: textLayerDiv,
+                                                                viewport: viewport,
+                                                                textDivs: []
+                                                            });
+                                                        });
+
+                                                        // Annotation Layer for Audio Links
+                                                        page.getAnnotations().then(annotations => {
+                                                            const annotationLayerDiv = document.createElement('div');
+                                                            annotationLayerDiv.className = 'annotationLayer';
+                                                            container.appendChild(annotationLayerDiv);
+                                                            pdfjsLib.AnnotationLayer.render({
+                                                                viewport: viewport.clone({ dontFlip: true }),
+                                                                div: annotationLayerDiv,
+                                                                annotations: annotations,
+                                                                page: page,
+                                                                linkService: {
+                                                                    getDestinationHash: () => '',
+                                                                    getAnchorUrl: () => '',
+                                                                    executeNamedAction: () => {}
+                                                                },
+                                                                downloadManager: null
+                                                            });
+
+                                                            // Intercept clicks
+                                                            annotationLayerDiv.addEventListener('click', (e) => {
+                                                                const target = e.target.closest('a');
+                                                                if (target && target.href) {
+                                                                    e.preventDefault();
+                                                                    window.AndroidBridge.onAudioLinkClick(target.href);
+                                                                }
+                                                            });
+                                                        });
+                                                        
+                                                        window.AndroidBridge.onPageRendered(pageNum, totalPages);
+                                                    });
+                                                });
+                                            }
+                                        }).catch(err => {
+                                            console.error(err);
+                                        });
+                                    </script>
+                                </body>
+                                </html>
+                            """.trimIndent()
+
+                            loadDataWithBaseURL("https://appassets.androidplatform.net", htmlContent, "text/html", "UTF-8", null)
                         }
-                    }
-                },
-                modifier = Modifier.fillMaxSize()
-            )
+                    },
+                    update = { webView ->
+                        if (isLoaded) {
+                            // Night / Sepia mode updates via JavaScript evaluation dynamically
+                            val filterCss = when (readingMode) {
+                                "night" -> "invert(1) hue-rotate(180deg) brightness(0.85)"
+                                "sepia" -> "sepia(0.6) brightness(0.9)"
+                                else -> "none"
+                            }
+                            webView.evaluateJavascript("document.body.style.filter = '$filterCss';", null)
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
         }
 
         val density = LocalDensity.current
@@ -469,15 +455,8 @@ fun PdfViewerWidget(
                 modifier = Modifier
                     .offset(x = leftDp, y = topDp)
                     .size(width = widthDp, height = heightDp)
-                    .background(Color(0xFF2196F3).copy(alpha = 0.35f)) // Translucent light-blue visual shade highlight
+                    .background(Color(0xFF2196F3).copy(alpha = 0.35f))
             )
         }
-    }
-}
-
-fun com.github.barteksc.pdfviewer.PDFView.setPageRotation(page: Int, rotation: Int) {
-    if (page == this.currentPage) {
-        val normRot = ((rotation % 360) + 360) % 360
-        this.rotation = normRot.toFloat()
     }
 }
