@@ -10,6 +10,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.webkit.WebSettingsCompat
+import androidx.webkit.WebViewFeature
 import com.example.ui.PdfViewModel
 
 class PdfViewerController(
@@ -87,39 +89,6 @@ fun PdfViewerWidget(
     var controllerInstance by remember { mutableStateOf<PdfViewerController?>(null) }
     var isPageFinished by remember { mutableStateOf(false) }
 
-    var pdfBase64 by remember(pdfUriString) { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(pdfUriString) {
-        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            try {
-                val uri = Uri.parse(pdfUriString)
-                val inputStream = if (uri.scheme == "content") {
-                    context.contentResolver.openInputStream(uri)
-                } else {
-                    java.io.FileInputStream(java.io.File(uri.path ?: pdfUriString))
-                }
-                val bytes = inputStream?.readBytes()
-                inputStream?.close()
-                if (bytes != null) {
-                    pdfBase64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
-                } else {
-                    onError(Exception("Could not read PDF bytes"))
-                }
-            } catch (e: Exception) {
-                android.util.Log.e("PdfViewerWidget", "Failed to load PDF bytes", e)
-                onError(e)
-            }
-        }
-    }
-
-    LaunchedEffect(isPageFinished, pdfBase64) {
-        val base64 = pdfBase64
-        val webView = webViewInstance
-        if (isPageFinished && base64 != null && webView != null) {
-            webView.evaluateJavascript("if (window.loadPdfFromAndroid) { window.loadPdfFromAndroid(); }", null)
-        }
-    }
-
     Box(modifier = modifier.fillMaxSize()) {
         AndroidView(
             factory = { ctx ->
@@ -128,6 +97,8 @@ fun PdfViewerWidget(
                     val ctrl = PdfViewerController(this)
                     controllerInstance = ctrl
                     onPdfViewCreated?.invoke(ctrl)
+
+                    setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
 
                     settings.apply {
                         javaScriptEnabled = true
@@ -140,18 +111,16 @@ fun PdfViewerWidget(
                         loadWithOverviewMode = true
                         builtInZoomControls = true
                         displayZoomControls = false
+                        setSupportZoom(true)
+                        mediaPlaybackRequiresUserGesture = false
 
-                        // Disable algorithmic darkening on newer versions
-                        try {
-                            if (android.os.Build.VERSION.SDK_INT >= 33) { // Build.VERSION_CODES.TIRAMISU
-                                val method = settings.javaClass.getMethod("setAlgorithmicDarkeningAllowed", Boolean::class.javaPrimitiveType)
-                                method.invoke(settings, false)
-                            } else if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                                @Suppress("DEPRECATION")
-                                forceDark = android.webkit.WebSettings.FORCE_DARK_OFF
-                            }
-                        } catch (e: Throwable) {
-                            android.util.Log.e("PdfViewerWidget", "Failed to disable force dark", e)
+                        // Safe and modern way to disable force dark & algorithmic darkening
+                        if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
+                            WebSettingsCompat.setAlgorithmicDarkeningAllowed(this, false)
+                        }
+                        if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)) {
+                            @Suppress("DEPRECATION")
+                            WebSettingsCompat.setForceDark(this, WebSettingsCompat.FORCE_DARK_OFF)
                         }
                     }
 
@@ -165,11 +134,6 @@ fun PdfViewerWidget(
                     }
 
                     addJavascriptInterface(object {
-                        @android.webkit.JavascriptInterface
-                        fun getPdfBase64(): String {
-                            return pdfBase64 ?: ""
-                        }
-
                         @android.webkit.JavascriptInterface
                         fun getCurrentPage(): Int {
                             return currentPage
@@ -232,6 +196,66 @@ fun PdfViewerWidget(
                     }, "Android")
 
                     webViewClient = object : WebViewClient() {
+                        override fun onReceivedError(
+                            view: WebView?,
+                            request: android.webkit.WebResourceRequest?,
+                            error: android.webkit.WebResourceError?
+                        ) {
+                            android.util.Log.e("PDFJS_ERROR", "Error: ${error?.description} for ${request?.url}")
+                        }
+
+                        override fun shouldInterceptRequest(
+                            view: WebView?,
+                            request: android.webkit.WebResourceRequest?
+                        ): android.webkit.WebResourceResponse? {
+                            val url = request?.url ?: return null
+                            if (url.host == "app.local") {
+                                val path = url.path ?: ""
+                                if (path == "/current_pdf.pdf") {
+                                    try {
+                                        val uri = Uri.parse(pdfUriString)
+                                        val inputStream = if (uri.scheme == "content") {
+                                            context.contentResolver.openInputStream(uri)
+                                        } else {
+                                            java.io.FileInputStream(java.io.File(uri.path ?: pdfUriString))
+                                        }
+                                        if (inputStream != null) {
+                                            return android.webkit.WebResourceResponse(
+                                                "application/pdf",
+                                                "UTF-8",
+                                                inputStream
+                                            )
+                                        }
+                                    } catch (e: Exception) {
+                                        android.util.Log.e("PdfViewerWidget", "Failed to load current PDF stream", e)
+                                    }
+                                } else if (path.startsWith("/pdfjs/")) {
+                                    try {
+                                        // Remove leading "/pdfjs/" to get asset path
+                                        val assetPath = path.substring(1) // e.g., "pdfjs/web/viewer.html"
+                                        val inputStream = context.assets.open(assetPath)
+                                        
+                                        // Determine MIME type
+                                        val mimeType = when {
+                                            path.endsWith(".html") -> "text/html"
+                                            path.endsWith(".css") -> "text/css"
+                                            path.endsWith(".js") -> "application/javascript"
+                                            path.endsWith(".json") -> "application/json"
+                                            path.endsWith(".svg") -> "image/svg+xml"
+                                            path.endsWith(".png") -> "image/png"
+                                            path.endsWith(".wasm") -> "application/wasm"
+                                            else -> "application/octet-stream"
+                                        }
+                                        
+                                        return android.webkit.WebResourceResponse(mimeType, "UTF-8", inputStream)
+                                    } catch (e: Exception) {
+                                        android.util.Log.e("PdfViewerWidget", "Failed to load asset: $path", e)
+                                    }
+                                }
+                            }
+                            return super.shouldInterceptRequest(view, request)
+                        }
+
                         override fun onPageFinished(view: WebView?, url: String?) {
                             super.onPageFinished(view, url)
                             isPageFinished = true
@@ -274,32 +298,6 @@ fun PdfViewerWidget(
                                     }
                                 }
                                 setupEventBusListeners();
-
-                                window.loadPdfFromAndroid = function() {
-                                    if (window.PDFViewerApplication && typeof window.PDFViewerApplication.open === 'function') {
-                                        try {
-                                            var base64Data = Android.getPdfBase64();
-                                            if (base64Data) {
-                                                var binaryString = window.atob(base64Data);
-                                                var len = binaryString.length;
-                                                var bytes = new Uint8Array(len);
-                                                for (var i = 0; i < len; i++) {
-                                                    bytes[i] = binaryString.charCodeAt(i);
-                                                }
-                                                window.PDFViewerApplication.open({ data: bytes }).then(function() {
-                                                    var startPage = Android.getCurrentPage();
-                                                    if (window.PDFViewerApplication.page !== startPage + 1) {
-                                                        window.PDFViewerApplication.page = startPage + 1;
-                                                    }
-                                                });
-                                            }
-                                        } catch (e) {
-                                            console.error("Error loading PDF via JS: " + e.message);
-                                        }
-                                    } else {
-                                        setTimeout(window.loadPdfFromAndroid, 50);
-                                    }
-                                };
                             """.trimIndent()
                             view?.evaluateJavascript(jsInjection, null)
 
@@ -318,8 +316,8 @@ fun PdfViewerWidget(
                         }
                     }
 
-                    // Load viewer.html from local assets!
-                    loadUrl("file:///android_asset/pdfjs/web/viewer.html")
+                    // Load viewer.html under app.local custom HTTPS origin!
+                    loadUrl("https://app.local/pdfjs/web/viewer.html?file=https://app.local/current_pdf.pdf#page=${currentPage + 1}&zoom=page-width")
                 }
             },
             update = { webView ->
