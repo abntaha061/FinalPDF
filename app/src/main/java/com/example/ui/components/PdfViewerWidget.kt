@@ -299,7 +299,9 @@ fun PdfViewerWidget(
                     }
 
                     // Use HTTPS appassets.androidplatform.net schema with zoom and page parameters
-                    val viewerUrl = "https://appassets.androidplatform.net/assets/pdfjs/web/viewer.html?file=/pdf/document.pdf#page=${currentPage + 1}&zoom=page-width"
+                    val viewerUrl = "https://appassets.androidplatform.net/assets/pdfjs/web/viewer.html" +
+                        "?file=https://appassets.androidplatform.net/pdf/document.pdf" +
+                        "#page=${currentPage + 1}&zoom=page-width"
                     loadUrl(viewerUrl)
                 }
             },
