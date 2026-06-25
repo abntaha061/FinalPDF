@@ -13,9 +13,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewFeature
 import com.example.ui.PdfViewModel
-import com.example.ui.components.pdf.AssetResourceLoader
+import androidx.webkit.WebViewAssetLoader
 import com.example.ui.components.pdf.PdfDocumentResourceLoader
-import com.example.ui.components.pdf.ResourceLoader
 import com.example.ui.components.pdf.WebInterface
 import com.example.ui.components.pdf.WebViewSupport
 
@@ -100,20 +99,12 @@ fun PdfViewerWidget(
         android.util.Log.d("PdfViewerWidget", "WebView compatibility status: $supportCheck")
     }
 
-    // Initialize decoupled ResourceLoaders for modular request interception
-    val resourceLoaders = remember(pdfUriString, context) {
-        listOf(
-            PdfDocumentResourceLoader(
-                context = context,
-                pdfUriStringProvider = { pdfUriString },
-                onError = { e -> onError(e) }
-            ),
-            AssetResourceLoader(
-                context = context,
-                onError = { path, e ->
-                    android.util.Log.e("PdfViewerWidget", "Error loading asset path: $path", e)
-                }
-            )
+    // Initialize decoupled ResourceLoader for streaming the targeted PDF file
+    val pdfDocumentResourceLoader = remember(pdfUriString, context) {
+        PdfDocumentResourceLoader(
+            context = context,
+            pdfUriStringProvider = { pdfUriString },
+            onError = { e -> onError(e) }
         )
     }
 
@@ -126,21 +117,28 @@ fun PdfViewerWidget(
                     controllerInstance = ctrl
                     onPdfViewCreated?.invoke(ctrl)
 
-                    setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
+                    setBackgroundColor(android.graphics.Color.TRANSPARENT)
+                    setLayerType(android.view.View.LAYER_TYPE_SOFTWARE, null)
+
+                    val assetLoader = WebViewAssetLoader.Builder()
+                        .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(ctx))
+                        .setDomain("appassets.androidplatform.net")
+                        .build()
 
                     settings.apply {
                         javaScriptEnabled = true
                         domStorageEnabled = true
-                        allowFileAccess = true
-                        allowContentAccess = true
-                        allowFileAccessFromFileURLs = true
-                        allowUniversalAccessFromFileURLs = true
+                        allowFileAccess = false
+                        allowContentAccess = false
+                        allowFileAccessFromFileURLs = false
+                        allowUniversalAccessFromFileURLs = false
                         useWideViewPort = true
                         loadWithOverviewMode = true
                         builtInZoomControls = true
                         displayZoomControls = false
                         setSupportZoom(true)
                         mediaPlaybackRequiresUserGesture = false
+                        mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
 
                         // Disable algorithmic darkening & force dark cleanly
                         if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
@@ -156,6 +154,12 @@ fun PdfViewerWidget(
                         override fun onConsoleMessage(consoleMessage: android.webkit.ConsoleMessage?): Boolean {
                             if (consoleMessage != null) {
                                 android.util.Log.d("PdfViewerJS", "${consoleMessage.messageLevel()}: ${consoleMessage.message()} -- From line ${consoleMessage.lineNumber()} of ${consoleMessage.sourceId()}")
+                                if (consoleMessage.messageLevel() == android.webkit.ConsoleMessage.MessageLevel.ERROR) {
+                                    val msg = consoleMessage.message()
+                                    post {
+                                        android.widget.Toast.makeText(ctx, "PDF.js Error: $msg", android.widget.Toast.LENGTH_LONG).show()
+                                    }
+                                }
                             }
                             return true
                         }
@@ -210,6 +214,14 @@ fun PdfViewerWidget(
                     addJavascriptInterface(webInterfaceBridge, "Android")
 
                     webViewClient = object : WebViewClient() {
+                        override fun shouldOverrideUrlLoading(
+                            view: WebView?,
+                            request: android.webkit.WebResourceRequest?
+                        ): Boolean {
+                            if (request?.url?.host == "appassets.androidplatform.net") return false
+                            return true
+                        }
+
                         override fun onReceivedError(
                             view: WebView?,
                             request: android.webkit.WebResourceRequest?,
@@ -225,13 +237,19 @@ fun PdfViewerWidget(
                             val url = request?.url ?: return null
                             android.util.Log.d("PDFJS_REQUEST", "Intercepting: ${url.host}${url.path}")
 
-                            // Query resource loaders sequentially to intercept local custom scheme requests
-                            val response = resourceLoaders
-                                .firstOrNull { it.canHandle(url) }
-                                ?.shouldInterceptRequest(url)
-
+                            // 1. Let the official tool handle all PDF.js assets
+                            val response = assetLoader.shouldInterceptRequest(url)
                             if (response != null) {
+                                val path = url.path ?: ""
+                                if (path.endsWith(".bcmap")) response.mimeType = "application/octet-stream"
+                                if (path.endsWith(".properties")) response.mimeType = "text/plain"
+                                response.responseHeaders = mapOf("Access-Control-Allow-Origin" to "*")
                                 return response
+                            }
+
+                            // 2. If the request belongs to the loaded PDF
+                            if (url.path == "/current_pdf.pdf") {
+                                return pdfDocumentResourceLoader.shouldInterceptRequest(url)
                             }
 
                             return super.shouldInterceptRequest(view, request)
@@ -240,6 +258,20 @@ fun PdfViewerWidget(
                         override fun onPageFinished(view: WebView?, url: String?) {
                             super.onPageFinished(view, url)
                             isPageFinished = true
+
+                            // Inject the PDF loading trigger dynamically (The Handshake)
+                            val pdfUrl = "https://appassets.androidplatform.net/current_pdf.pdf"
+                            val jsCode = """
+                                if (typeof PDFViewerApplication !== 'undefined') {
+                                    PDFViewerApplicationOptions.set('disableRange', true);
+                                    PDFViewerApplicationOptions.set('disableStream', true);
+                                    PDFViewerApplicationOptions.set('disableAutoFetch', true);
+                                    
+                                    // التعديل هنا لحل مشكلة الـ Signature:
+                                    PDFViewerApplication.open({ url: '$pdfUrl' });
+                                }
+                            """.trimIndent()
+                            view?.evaluateJavascript(jsCode, null)
 
                             val jsInjection = """
                                 // Listen for native browser selection changes
@@ -297,8 +329,9 @@ fun PdfViewerWidget(
                         }
                     }
 
-                    // Load viewer.html under app.local custom HTTPS origin!
-                    loadUrl("https://app.local/pdfjs/web/viewer.html?file=%2F%2Fapp.local%2Fcurrent_pdf.pdf#page=${currentPage + 1}&zoom=page-width")
+                    // Load only the viewer.html under appassets.androidplatform.net official secure origin
+                    val viewerUrl = "https://appassets.androidplatform.net/assets/pdfjs/web/viewer.html"
+                    loadUrl(viewerUrl)
                 }
             },
             update = { webView ->

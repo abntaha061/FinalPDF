@@ -1,17 +1,17 @@
-name: Build Android APK
+name: Android CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "master" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "master" ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout Code
+    - name: Checkout Repository
       uses: actions/checkout@v4
 
     - name: Set up JDK 17
@@ -21,30 +21,15 @@ jobs:
         distribution: 'temurin'
         cache: gradle
 
-    # الخطوة الجديدة: تحميل مكتبة PDF.js وفك ضغطها داخل مجلد الأصول
-    - name: Download and extract PDF.js
+    - name: Download PDF.js assets
       run: |
-        wget -qO pdfjs.zip https://github.com/mozilla/pdf.js/releases/download/v3.11.174/pdfjs-3.11.174-legacy-dist.zip
+        wget -O pdfjs.zip https://github.com/mozilla/pdf.js/releases/download/v3.11.174/pdfjs-3.11.174-legacy-dist.zip
         mkdir -p app/src/main/assets/pdfjs
-        unzip -q -o pdfjs.zip -d app/src/main/assets/pdfjs
+        unzip -o pdfjs.zip -d app/src/main/assets/pdfjs
         rm pdfjs.zip
 
-    # إنشاء ملف debug.keystore وهمي لتجاوز خطأ التوقيع
-    - name: Generate debug keystore
-      run: |
-        keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "C=US, O=Android, CN=Android Debug"
-
-    - name: Generate Gradle Wrapper
-      run: gradle wrapper
-
     - name: Grant execute permission for gradlew
-      run: chmod +x gradlew
+      run: chmod +x gradlew || true
 
     - name: Build with Gradle
       run: ./gradlew assembleDebug
-
-    - name: Upload APK
-      uses: actions/upload-artifact@v4
-      with:
-        name: app-debug
-        path: app/build/outputs/apk/debug/app-debug.apk

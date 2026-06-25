@@ -1,4 +1,5 @@
 import java.net.URL
+import java.net.URI
 import java.net.HttpURLConnection
 import java.io.BufferedInputStream
 import java.io.File
@@ -147,4 +148,71 @@ dependencies {
   "ksp"(libs.hilt.compiler)
   "ksp"(libs.moshi.kotlin.codegen)
 }
+
+tasks.register("downloadPdfJs") {
+    group = "assets"
+    description = "Downloads and unzips PDF.js assets if they are missing"
+    
+    val outputDir = file("src/main/assets/pdfjs")
+    val checkFile = file("src/main/assets/pdfjs/web/viewer.html")
+    
+    val outputDirPath = outputDir.absolutePath
+    val checkFilePath = checkFile.absolutePath
+    val zipFilePath = file("${layout.buildDirectory.get().asFile}/tmp/pdfjs.zip").absolutePath
+    
+    outputs.dir(outputDir)
+    
+    doLast {
+        val checkF = File(checkFilePath)
+        if (!checkF.exists()) {
+            println("PDF.js assets not found at $checkFilePath. Downloading...")
+            val outD = File(outputDirPath)
+            outD.mkdirs()
+            val zipF = File(zipFilePath)
+            zipF.parentFile.mkdirs()
+            
+            val urlConnection = URI("https://github.com/mozilla/pdf.js/releases/download/v3.11.174/pdfjs-3.11.174-legacy-dist.zip").toURL().openConnection() as HttpURLConnection
+            urlConnection.requestMethod = "GET"
+            urlConnection.connect()
+            
+            if (urlConnection.responseCode == 200) {
+                urlConnection.inputStream.use { input ->
+                    FileOutputStream(zipF).use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                println("Downloaded pdfjs.zip successfully. Unzipping to $outputDirPath...")
+                
+                ZipInputStream(FileInputStream(zipF)).use { zis ->
+                    var entry: ZipEntry? = zis.nextEntry
+                    while (entry != null) {
+                        val newFile = File(outD, entry.name)
+                        if (entry.isDirectory) {
+                            newFile.mkdirs()
+                        } else {
+                            newFile.parentFile.mkdirs()
+                            FileOutputStream(newFile).use { fos ->
+                                zis.copyTo(fos)
+                            }
+                        }
+                        zis.closeEntry()
+                        entry = zis.nextEntry
+                    }
+                }
+                zipF.delete()
+                println("PDF.js assets unzipped successfully!")
+            } else {
+                throw GradleException("Failed to download PDF.js assets: HTTP ${urlConnection.responseCode}")
+            }
+        } else {
+            println("PDF.js assets already exist, skipping download.")
+        }
+    }
+}
+
+// Make android preBuild or asset merging tasks depend on downloadPdfJs
+tasks.matching { it.name == "preBuild" || (it.name.startsWith("merge") && it.name.endsWith("Assets")) }.configureEach {
+    dependsOn("downloadPdfJs")
+}
+
 

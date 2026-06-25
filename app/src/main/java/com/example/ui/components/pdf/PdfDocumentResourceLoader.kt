@@ -15,13 +15,13 @@ class PdfDocumentResourceLoader(
     private val context: Context,
     private val pdfUriStringProvider: () -> String,
     private val onError: (Exception) -> Unit = {}
-) : ResourceLoader {
+) {
 
-    override fun canHandle(uri: Uri): Boolean {
-        return uri.host == "app.local" && uri.path == "/current_pdf.pdf"
+    fun canHandle(uri: Uri): Boolean {
+        return uri.host == "appassets.androidplatform.net" && uri.path == "/current_pdf.pdf"
     }
 
-    override fun shouldInterceptRequest(uri: Uri): WebResourceResponse? {
+    fun shouldInterceptRequest(uri: Uri): WebResourceResponse? {
         try {
             val pdfUriString = pdfUriStringProvider()
             val pdfUri = Uri.parse(pdfUriString)
@@ -32,11 +32,17 @@ class PdfDocumentResourceLoader(
             }
 
             if (inputStream != null) {
-                return WebResourceResponse(
+                val response = WebResourceResponse(
                     "application/pdf",
                     "UTF-8",
                     inputStream
                 )
+                response.responseHeaders = mapOf(
+                    "Access-Control-Allow-Origin" to "*",
+                    "Access-Control-Allow-Methods" to "GET, POST, OPTIONS",
+                    "Access-Control-Allow-Headers" to "Content-Type, Access-Control-Allow-Headers, Authorization, X-Requested-With"
+                )
+                return response
             }
         } catch (e: Exception) {
             Log.e("PdfDocResourceLoader", "Failed to load current PDF stream", e)
