@@ -55,7 +55,7 @@ import androidx.core.content.ContextCompat
 import com.example.data.BookmarkEntity
 import com.example.data.AudioBookmarkEntity
 import com.example.ui.theme.*
-import com.github.barteksc.pdfviewer.PDFView
+import com.example.ui.components.PdfViewerController
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -70,7 +70,7 @@ fun BookmarkDrawer(
     totalPages: Int,
     pageBookmarks: List<BookmarkEntity>,
     audioBookmarks: List<AudioBookmarkEntity> = emptyList(),
-    pdfViewInst: PDFView?,
+    pdfViewInst: PdfViewerController?,
     onJumpToPage: (Int) -> Unit,
     onAddBookmark: (String) -> Unit,
     onDeleteBookmark: (BookmarkEntity) -> Unit,
@@ -78,8 +78,8 @@ fun BookmarkDrawer(
     onDeleteAudioBookmark: (AudioBookmarkEntity) -> Unit = {},
     onCloseDrawer: () -> Unit,
     modifier: Modifier = Modifier,
-    tableOfContents: List<com.shockwave.pdfium.PdfDocument.Bookmark> = emptyList(),
-    onTocItemClicked: ((com.shockwave.pdfium.PdfDocument.Bookmark) -> Unit)? = null
+    tableOfContents: List<com.example.data.PdfBookmark> = emptyList(),
+    onTocItemClicked: ((com.example.data.PdfBookmark) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val haptic = LocalHapticFeedback.current
@@ -1008,9 +1008,9 @@ fun WaveformVisualizer(isRecording: Boolean) {
     }
 }
 
-private fun getAllParentKeys(items: List<com.shockwave.pdfium.PdfDocument.Bookmark>): List<String> {
+private fun getAllParentKeys(items: List<com.example.data.PdfBookmark>): List<String> {
     val keys = mutableListOf<String>()
-    fun traverse(node: com.shockwave.pdfium.PdfDocument.Bookmark) {
+    fun traverse(node: com.example.data.PdfBookmark) {
         val hasChildren = node.children != null && node.children.isNotEmpty()
         if (hasChildren) {
             keys.add("${node.title}_${node.pageIdx}")
@@ -1025,11 +1025,11 @@ private fun getAllParentKeys(items: List<com.shockwave.pdfium.PdfDocument.Bookma
 
 @Composable
 private fun TocItemRow(
-    item: com.shockwave.pdfium.PdfDocument.Bookmark,
+    item: com.example.data.PdfBookmark,
     level: Int,
     expandedMap: Map<String, Boolean>,
     onToggleExpand: (String) -> Unit,
-    onJumpTo: (com.shockwave.pdfium.PdfDocument.Bookmark) -> Unit
+    onJumpTo: (com.example.data.PdfBookmark) -> Unit
 ) {
     if (level >= 3) return
 

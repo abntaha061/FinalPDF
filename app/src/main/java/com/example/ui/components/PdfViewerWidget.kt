@@ -8,17 +8,61 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.webkit.WebViewAssetLoader
 import com.example.ui.PdfViewModel
-import com.github.barteksc.pdfviewer.PDFView
-import com.github.barteksc.pdfviewer.util.FitPolicy
+
+class PdfViewerController(
+    val webView: WebView?,
+    val onJumpToPage: (Int) -> Unit = {}
+) {
+    var pageCount: Int = 0
+    var currentPage: Int = 0
+    var zoom: Float = 1.0f
+    val maxZoom: Float = 4.0f
+    val minZoom: Float = 0.5f
+
+    fun jumpTo(page: Int) {
+        currentPage = page
+        webView?.post {
+            webView.evaluateJavascript("if (window.PDFViewerApplication && window.PDFViewerApplication.page !== ${page + 1}) { window.PDFViewerApplication.page = ${page + 1}; }", null)
+        }
+        onJumpToPage(page)
+    }
+
+    fun jumpTo(page: Int, withAnimation: Boolean) {
+        jumpTo(page)
+    }
+
+    fun zoomTo(zoomFactor: Float) {
+        zoom = zoomFactor
+        webView?.post {
+            webView.evaluateJavascript("if (window.PDFViewerApplication && window.PDFViewerApplication.pdfViewer) { window.PDFViewerApplication.pdfViewer.currentScale = $zoomFactor; }", null)
+        }
+    }
+
+    fun zoomWithAnimation(zoomFactor: Float) {
+        zoomTo(zoomFactor)
+    }
+
+    fun invalidate() {
+        // No-op for compatibility
+    }
+
+    private var tag: Any? = null
+    fun setTag(t: Any?) { tag = t }
+    fun getTag(): Any? = tag
+}
+
+fun PdfViewerController.setPageRotation(page: Int, rotation: Int) {
+    val normRot = ((rotation % 360) + 360) % 360
+    webView?.post {
+        webView.evaluateJavascript("if (window.PDFViewerApplication) { window.PDFViewerApplication.rotatePages($normRot - (window.PDFViewerApplication.pdfViewer.pagesRotation || 0)); }", null)
+    }
+}
 
 @Composable
 fun PdfViewerWidget(
@@ -33,7 +77,7 @@ fun PdfViewerWidget(
     onError: (Throwable) -> Unit,
     viewModel: PdfViewModel,
     modifier: Modifier = Modifier,
-    onPdfViewCreated: ((PDFView) -> Unit)? = null,
+    onPdfViewCreated: ((PdfViewerController) -> Unit)? = null,
     onTap: (() -> Unit)? = null,
     onLongPress: ((androidx.compose.ui.geometry.Offset) -> Unit)? = null,
     onZoomChanged: ((Float) -> Unit)? = null,
@@ -43,7 +87,7 @@ fun PdfViewerWidget(
 ) {
     val context = LocalContext.current
     var webViewInstance by remember { mutableStateOf<WebView?>(null) }
-    var pdfViewInstance by remember { mutableStateOf<PDFView?>(null) }
+    var controllerInstance by remember { mutableStateOf<PdfViewerController?>(null) }
 
     // Initialize WebViewAssetLoader once
     val assetLoader = remember(context, pdfUriString) {
@@ -76,59 +120,14 @@ fun PdfViewerWidget(
     }
 
     Box(modifier = modifier.fillMaxSize()) {
-        // 1. Hidden PDFView to track state, pageCount, search results, and ensure backward compatibility
-        AndroidView(
-            factory = { ctx ->
-                PDFView(ctx, null).apply {
-                    setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
-                    pdfViewInstance = this
-                    onPdfViewCreated?.invoke(this)
-
-                    val uri = Uri.parse(pdfUriString)
-                    val fitPolicy = when (fitMode) {
-                        "width" -> FitPolicy.WIDTH
-                        "fit" -> FitPolicy.HEIGHT
-                        else -> FitPolicy.BOTH
-                    }
-
-                    fromUri(uri)
-                        .defaultPage(currentPage)
-                        .onPageChange { page, pageCount ->
-                            // Update WebView if it is initialized and current page diverges
-                            webViewInstance?.post {
-                                webViewInstance?.evaluateJavascript(
-                                    "if (window.PDFViewerApplication && window.PDFViewerApplication.page !== ${page + 1}) { window.PDFViewerApplication.page = ${page + 1}; }",
-                                    null
-                                )
-                            }
-                            onPageChanged(page, pageCount)
-                        }
-                        .onLoad { nbPages ->
-                            onLoadComplete(nbPages)
-                        }
-                        .onError { t ->
-                            onError(t)
-                        }
-                        .enableSwipe(true)
-                        .swipeHorizontal(isSwipeHorizontal)
-                        .nightMode(readingMode == "night")
-                        .pageFitPolicy(fitPolicy)
-                        .load()
-                }
-            },
-            update = { pdfView ->
-                if (pdfView.currentPage != currentPage) {
-                    pdfView.jumpTo(currentPage)
-                }
-            },
-            modifier = Modifier.size(1.dp).align(Alignment.TopStart)
-        )
-
-        // 2. Foreground WebView using Mozilla PDF.js for extremely high-precision text selection and beautiful rendering
         AndroidView(
             factory = { ctx ->
                 WebView(ctx).apply {
                     webViewInstance = this
+                    val ctrl = PdfViewerController(this)
+                    controllerInstance = ctrl
+                    onPdfViewCreated?.invoke(ctrl)
+
                     settings.apply {
                         javaScriptEnabled = true
                         domStorageEnabled = true
@@ -142,13 +141,21 @@ fun PdfViewerWidget(
                         displayZoomControls = false
                     }
 
+                    webChromeClient = object : android.webkit.WebChromeClient() {
+                        override fun onConsoleMessage(consoleMessage: android.webkit.ConsoleMessage?): Boolean {
+                            if (consoleMessage != null) {
+                                android.util.Log.d("PdfViewerJS", "${consoleMessage.messageLevel()}: ${consoleMessage.message()} -- From line ${consoleMessage.lineNumber()} of ${consoleMessage.sourceId()}")
+                            }
+                            return true
+                        }
+                    }
+
                     addJavascriptInterface(object {
                         @android.webkit.JavascriptInterface
                         fun onPageChanged(page: Int, pageCount: Int) {
                             post {
-                                if (pdfViewInstance?.currentPage != page) {
-                                    pdfViewInstance?.jumpTo(page)
-                                }
+                                controllerInstance?.currentPage = page
+                                controllerInstance?.pageCount = pageCount
                                 onPageChanged(page, pageCount)
                             }
                         }
@@ -156,6 +163,7 @@ fun PdfViewerWidget(
                         @android.webkit.JavascriptInterface
                         fun onLoadComplete(pageCount: Int) {
                             post {
+                                controllerInstance?.pageCount = pageCount
                                 onLoadComplete(pageCount)
                             }
                         }
@@ -206,13 +214,11 @@ fun PdfViewerWidget(
                         ): WebResourceResponse? {
                             val requestUrl = request?.url ?: return null
                             
-                            // 1. First intercept with WebViewAssetLoader
                             val response = assetLoader.shouldInterceptRequest(requestUrl)
                             if (response != null) {
                                 return response
                             }
 
-                            // 2. Fallback check for PDF requests
                             val path = requestUrl.path ?: ""
                             if (path.contains("pdf/document.pdf")) {
                                 try {
@@ -240,7 +246,6 @@ fun PdfViewerWidget(
                         override fun onPageFinished(view: WebView?, url: String?) {
                             super.onPageFinished(view, url)
 
-                            // Inject event listeners for text selection, tapping and custom long press selection
                             val jsInjection = """
                                 // Listen for native browser selection changes
                                 document.addEventListener('selectionchange', function() {
@@ -282,14 +287,13 @@ fun PdfViewerWidget(
                             """.trimIndent()
                             view?.evaluateJavascript(jsInjection, null)
 
-                            // Apply night-mode theme style overlay if active
                             if (readingMode == "night") {
                                 val nightStyleJs = """
                                     var style = document.getElementById('night-mode-style');
                                     if (!style) {
                                         style = document.createElement('style');
                                         style.id = 'night-mode-style';
-                                        style.innerHTML = 'html { filter: invert(0.9) hue-rotate(180deg); background-color: #121212 !important; } .textLayer { mix-blend-mode: difference; }';
+                                        style.innerHTML = '#viewerContainer { background-color: #121212 !important; } .page, .thumbnail { filter: invert(0.9) hue-rotate(180deg) !important; } .textLayer { mix-blend-mode: difference; }';
                                         document.head.appendChild(style);
                                     }
                                 """.trimIndent()
@@ -298,7 +302,6 @@ fun PdfViewerWidget(
                         }
                     }
 
-                    // Use HTTPS appassets.androidplatform.net schema with zoom and page parameters
                     val viewerUrl = "https://appassets.androidplatform.net/assets/pdfjs/web/viewer.html" +
                         "?file=https://appassets.androidplatform.net/pdf/document.pdf" +
                         "#page=${currentPage + 1}&zoom=page-width"
@@ -315,7 +318,7 @@ fun PdfViewerWidget(
                         if (!style) {
                             style = document.createElement('style');
                             style.id = 'night-mode-style';
-                            style.innerHTML = 'html { filter: invert(0.9) hue-rotate(180deg); background-color: #121212 !important; } .textLayer { mix-blend-mode: difference; }';
+                            style.innerHTML = '#viewerContainer { background-color: #121212 !important; } .page, .thumbnail { filter: invert(0.9) hue-rotate(180deg) !important; } .textLayer { mix-blend-mode: difference; }';
                             document.head.appendChild(style);
                         }
                     """.trimIndent()
@@ -332,12 +335,5 @@ fun PdfViewerWidget(
             },
             modifier = Modifier.fillMaxSize()
         )
-    }
-}
-
-fun com.github.barteksc.pdfviewer.PDFView.setPageRotation(page: Int, rotation: Int) {
-    if (page == this.currentPage) {
-        val normRot = ((rotation % 360) + 360) % 360
-        this.rotation = normRot.toFloat()
     }
 }

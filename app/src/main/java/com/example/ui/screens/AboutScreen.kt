@@ -264,8 +264,8 @@ fun AboutScreen(
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     val libraries = listOf(
-                        Triple("android-pdf-viewer", "https://github.com/barteksc/android-pdf-viewer", Icons.Default.Attachment),
-                        Triple("PdfiumAndroid (C++)", "https://github.com/barteksc/PdfiumAndroid", Icons.Default.Code),
+                        Triple("PDF.js (Mozilla)", "https://github.com/mozilla/pdf.js", Icons.Default.Attachment),
+                        Triple("Android PdfRenderer", "https://developer.android.com/reference/android/graphics/pdf/PdfRenderer", Icons.Default.Code),
                         Triple("Jetpack Compose", "https://developer.android.com/compose", Icons.Default.Book),
                         Triple("Room Database", "https://developer.android.com/room", Icons.Default.Storage),
                         Triple("Hilt", "https://dagger.dev/hilt", Icons.Default.Extension)

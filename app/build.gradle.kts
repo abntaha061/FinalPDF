@@ -106,7 +106,7 @@ dependencies {
   implementation(libs.hilt.android)
   implementation(libs.hilt.navigation.compose)
   implementation(libs.coil.compose)
-  implementation("com.github.mhiew:android-pdf-viewer:3.2.0-beta.1")
+  // implementation("com.github.mhiew:android-pdf-viewer:3.2.0-beta.1")
   implementation("androidx.webkit:webkit:1.12.0")
   implementation("org.apache.poi:poi-ooxml:5.2.5")
   implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")

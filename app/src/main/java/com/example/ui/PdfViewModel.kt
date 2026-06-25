@@ -411,14 +411,14 @@ class PdfViewModel(
     private val _isViewerLoading = MutableStateFlow(false)
     val isViewerLoading: StateFlow<Boolean> = _isViewerLoading.asStateFlow()
 
-    private val _tableOfContents = MutableStateFlow<List<com.shockwave.pdfium.PdfDocument.Bookmark>>(emptyList())
-    val tableOfContents: StateFlow<List<com.shockwave.pdfium.PdfDocument.Bookmark>> = _tableOfContents.asStateFlow()
+    private val _tableOfContents = MutableStateFlow<List<com.example.data.PdfBookmark>>(emptyList())
+    val tableOfContents: StateFlow<List<com.example.data.PdfBookmark>> = _tableOfContents.asStateFlow()
 
     val prefetchManager = PdfPrefetchManager()
     private val _prefetchEnabled = MutableStateFlow(true)
     val prefetchEnabled: StateFlow<Boolean> = _prefetchEnabled.asStateFlow()
 
-    fun setTableOfContents(toc: List<com.shockwave.pdfium.PdfDocument.Bookmark>) {
+    fun setTableOfContents(toc: List<com.example.data.PdfBookmark>) {
         _tableOfContents.value = toc
     }
 

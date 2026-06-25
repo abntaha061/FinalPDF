@@ -117,7 +117,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.RepeatMode
-import com.github.barteksc.pdfviewer.PDFView
+import com.example.ui.components.PdfViewerController
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import android.speech.tts.TextToSpeech
@@ -182,7 +182,7 @@ fun ViewerScreen(
     var showSaveAsImageConfirmDialog by remember { mutableStateOf(false) }
 
     // Keep reference to PDFView for zooming levels
-    var pdfViewInst by remember { mutableStateOf<PDFView?>(null) }
+    var pdfViewInst by remember { mutableStateOf<PdfViewerController?>(null) }
 
     val annotationViewModel: AnnotationViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
     val annotationTool by annotationViewModel.currentTool.collectAsState()
@@ -694,7 +694,7 @@ fun ViewerScreen(
     // Document metadata
     val documentName = activeDocument?.name ?: "قارئ الكتب"
 
-    val executeGestureAction: (com.example.data.GestureAction, com.github.barteksc.pdfviewer.PDFView?, androidx.compose.ui.geometry.Offset?) -> Unit = { action, pdfView, offset ->
+    val executeGestureAction: (com.example.data.GestureAction, PdfViewerController?, androidx.compose.ui.geometry.Offset?) -> Unit = { action, pdfView, offset ->
         when (action) {
             com.example.data.GestureAction.NOTHING -> { /* Do nothing */ }
             com.example.data.GestureAction.TOGGLE_TOOLBAR -> {
@@ -5665,7 +5665,7 @@ data class PdfSearchState(
     var currentIndex: Int
 )
 
-fun PDFView.findFocus(keyword: String): List<Int> {
+fun PdfViewerController.findFocus(keyword: String): List<Int> {
     if (keyword.isBlank()) {
         resetSearch()
         return emptyList()
@@ -5692,7 +5692,7 @@ fun PDFView.findFocus(keyword: String): List<Int> {
     return matches
 }
 
-fun PDFView.findNext(forward: Boolean): Int {
+fun PdfViewerController.findNext(forward: Boolean): Int {
     val state = this.getTag() as? PdfSearchState ?: return -1
     if (state.matches.isEmpty()) return -1
     if (forward) {
@@ -5704,7 +5704,7 @@ fun PDFView.findNext(forward: Boolean): Int {
     return state.currentIndex
 }
 
-fun PDFView.resetSearch() {
+fun PdfViewerController.resetSearch() {
     this.setTag(null)
 }
 
@@ -5894,23 +5894,76 @@ fun PdfPageImage(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    AndroidView<PDFView>(
-        factory = { ctx ->
-            PDFView(ctx, null).apply {
-                setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
-                val fileUri = Uri.parse(pdfUriString)
-                fromUri(fileUri)
-                    .pages(pageNumber)
-                    .enableSwipe(false)
-                    .enableDoubletap(true)
-                    .enableAntialiasing(false)
-                    .enableAnnotationRendering(true)
-                    .nightMode(readingMode == "night")
-                    .load()
+    val bitmapState = remember(pdfUriString, pageNumber) {
+        mutableStateOf<android.graphics.Bitmap?>(null)
+    }
+
+    LaunchedEffect(pdfUriString, pageNumber) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val uri = Uri.parse(pdfUriString)
+                val parcelFileDescriptor = if (uri.scheme == "content") {
+                    context.contentResolver.openFileDescriptor(uri, "r")
+                } else {
+                    val file = java.io.File(uri.path ?: uri.toString())
+                    android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
+                }
+                
+                if (parcelFileDescriptor != null) {
+                    val pdfRenderer = android.graphics.pdf.PdfRenderer(parcelFileDescriptor)
+                    if (pageNumber < pdfRenderer.pageCount) {
+                        val page = pdfRenderer.openPage(pageNumber)
+                        val width = page.width * 2
+                        val height = page.height * 2
+                        val bitmap = android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888)
+                        
+                        page.render(bitmap, null, null, android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                        
+                        if (readingMode == "night") {
+                            val paint = android.graphics.Paint()
+                            val matrix = android.graphics.ColorMatrix(floatArrayOf(
+                                -1.0f, 0.0f, 0.0f, 0.0f, 255f,
+                                0.0f, -1.0f, 0.0f, 0.0f, 255f,
+                                0.0f, 0.0f, -1.0f, 0.0f, 255f,
+                                0.0f, 0.0f, 0.0f, 1.0f, 0f
+                            ))
+                            paint.colorFilter = android.graphics.ColorMatrixColorFilter(matrix)
+                            val invertedBitmap = android.graphics.Bitmap.createBitmap(bitmap.width, bitmap.height, android.graphics.Bitmap.Config.ARGB_8888)
+                            val canvas = android.graphics.Canvas(invertedBitmap)
+                            canvas.drawBitmap(bitmap, 0f, 0f, paint)
+                            bitmapState.value = invertedBitmap
+                        } else {
+                            bitmapState.value = bitmap
+                        }
+                        
+                        page.close()
+                    }
+                    pdfRenderer.close()
+                    parcelFileDescriptor.close()
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("PdfPageImage", "Error rendering page with PdfRenderer", e)
             }
-        },
-        modifier = modifier
-    )
+        }
+    }
+
+    Box(modifier = modifier, contentAlignment = androidx.compose.ui.Alignment.Center) {
+        val bitmap = bitmapState.value
+        if (bitmap != null) {
+            androidx.compose.foundation.Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = "Page $pageNumber",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = androidx.compose.ui.layout.ContentScale.Fit
+            )
+        } else {
+            androidx.compose.material3.CircularProgressIndicator(
+                modifier = Modifier.size(24.dp),
+                color = androidx.compose.material3.MaterialTheme.colorScheme.primary,
+                strokeWidth = 2.dp
+            )
+        }
+    }
 }
 
 private fun applySignatureToPdf(
@@ -6221,7 +6274,7 @@ suspend fun performAdvancedSearch(
     return@withContext matches
 }
 
-fun com.github.barteksc.pdfviewer.PDFView.saveSearchState(keyword: String, matches: List<Int>) {
+fun PdfViewerController.saveSearchState(keyword: String, matches: List<Int>) {
     if (matches.isNotEmpty()) {
         this.setTag(PdfSearchState(keyword, matches, 0))
         this.jumpTo(matches[0])
