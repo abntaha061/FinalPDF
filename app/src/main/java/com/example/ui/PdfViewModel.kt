@@ -474,6 +474,38 @@ class PdfViewModel(
         val prefs = context.getSharedPreferences("PdfPrefs", Context.MODE_PRIVATE)
         _savedSignaturePath.value = prefs.getString("saved_signature_path", null)
 
+        // Prepopulate demo PDF from assets
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val demoFile = File(context.filesDir, "demo.pdf")
+                if (!demoFile.exists()) {
+                    context.assets.open("pdfjs/web/compressed.tracemonkey-pldi-09.pdf").use { input ->
+                        demoFile.outputStream().use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                }
+                if (demoFile.exists()) {
+                    val demoUri = Uri.fromFile(demoFile).toString()
+                    val existing = repository.getPdfByUri(demoUri)
+                    if (existing == null) {
+                        val demoDoc = RecentFileEntity(
+                            uri = demoUri,
+                            name = "TraceMonkey (Demo).pdf",
+                            sizeBytes = demoFile.length(),
+                            currentPage = 0,
+                            totalPages = 14,
+                            lastOpenedAt = System.currentTimeMillis()
+                        )
+                        repository.insertPdf(demoDoc)
+                        Log.d("PdfViewModel", "Successfully prepopulated demo PDF file!")
+                    }
+                }
+            } catch (e: java.lang.Exception) {
+                Log.e("PdfViewModel", "Failed to prepopulate demo PDF", e)
+            }
+        }
+
         // Observe recent documents to check if any file in the last 24 hours is after last_files_check
         viewModelScope.launch {
             try {
