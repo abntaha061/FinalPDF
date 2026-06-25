@@ -21,15 +21,7 @@ jobs:
         distribution: 'temurin'
         cache: gradle
 
-    # الخطوة الجديدة: تحميل مكتبة PDF.js وفك ضغطها داخل مجلد الأصول
-    - name: Download and extract PDF.js
-      run: |
-        wget -qO pdfjs.zip https://github.com/mozilla/pdf.js/releases/download/v3.11.174/pdfjs-3.11.174-legacy-dist.zip
-        mkdir -p app/src/main/assets/pdfjs
-        unzip -q -o pdfjs.zip -d app/src/main/assets/pdfjs
-        rm pdfjs.zip
-
-    # إنشاء ملف debug.keystore وهمي لتجاوز خطأ التوقيع
+    # الخطوة الجديدة: إنشاء ملف debug.keystore وهمي لتجاوز خطأ التوقيع
     - name: Generate debug keystore
       run: |
         keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "C=US, O=Android, CN=Android Debug"
