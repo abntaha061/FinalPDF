@@ -152,7 +152,7 @@ val buildDir = layout.buildDirectory.get().asFile
 val projDir = layout.projectDirectory.asFile
 
 tasks.register("downloadPdfJs") {
-    val destFile = File(buildDir, "pdfjs.zip")
+    val destFile = File(projDir, "src/main/assets/pdfjs.zip")
     val destDir = File(projDir, "src/main/assets/pdfjs")
 
     doLast {
@@ -162,6 +162,7 @@ tasks.register("downloadPdfJs") {
             println("PDF.js already exists at $destDir. Skipping download and extraction.")
             return@doLast
         }
+        destFile.parentFile?.mkdirs()
         if (!destDir.exists()) {
             destDir.mkdirs()
         }
