@@ -1,18 +1,19 @@
 package com.example.ui.components
 
 import android.content.Context
-import android.content.Intent
 import android.net.Uri
-import android.util.Log
-import android.webkit.*
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.webkit.WebViewAssetLoader
 import com.example.ui.PdfViewModel
 import com.github.barteksc.pdfviewer.PDFView
+import com.github.barteksc.pdfviewer.util.FitPolicy
 
 @Composable
 fun PdfViewerWidget(
@@ -32,69 +33,132 @@ fun PdfViewerWidget(
     onLongPress: ((androidx.compose.ui.geometry.Offset) -> Unit)? = null,
     onZoomChanged: ((Float) -> Unit)? = null,
     onNavigateToWebView: ((String) -> Unit)? = null,
-    onGestureTriggered: ((com.example.data.GestureType, androidx.compose.ui.geometry.Offset?) -> Unit)? = null
+    onGestureTriggered: ((com.example.data.GestureType, androidx.compose.ui.geometry.Offset?) -> Unit)? = null,
+    onTextSelected: ((String) -> Unit)? = null
 ) {
     val context = LocalContext.current
+    var webViewInstance by remember { mutableStateOf<android.webkit.WebView?>(null) }
+    var pdfViewInstance by remember { mutableStateOf<PDFView?>(null) }
 
-    if (pdfUriString.isNotEmpty()) {
-        AndroidView<WebView>(
-            factory = { ctx: Context ->
-                WebView(ctx).apply {
-                    settings.javaScriptEnabled = true
-                    settings.domStorageEnabled = true
-                    settings.allowFileAccess = true
-                    settings.allowContentAccess = true
-                    @Suppress("DEPRECATION")
-                    settings.allowFileAccessFromFileURLs = true
-                    @Suppress("DEPRECATION")
-                    settings.allowUniversalAccessFromFileURLs = true
+    Box(modifier = modifier.fillMaxSize()) {
+        // 1. Hidden PDFView to track state, pageCount, search results, and ensure backward compatibility
+        AndroidView(
+            factory = { ctx ->
+                PDFView(ctx, null).apply {
+                    setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
+                    pdfViewInstance = this
+                    onPdfViewCreated?.invoke(this)
 
-                    val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
-                    addJavascriptInterface(object : Any() {
-                        @JavascriptInterface
-                        fun onPageChanged(page: Int, total: Int) {
-                            mainHandler.post {
-                                onPageChanged(page, total)
+                    val uri = Uri.parse(pdfUriString)
+                    val fitPolicy = when (fitMode) {
+                        "width" -> FitPolicy.WIDTH
+                        "fit" -> FitPolicy.HEIGHT
+                        else -> FitPolicy.BOTH
+                    }
+
+                    fromUri(uri)
+                        .defaultPage(currentPage)
+                        .onPageChange { page, pageCount ->
+                            // Update WebView if it is initialized and current page diverges
+                            webViewInstance?.post {
+                                webViewInstance?.evaluateJavascript(
+                                    "if (window.PDFViewerApplication && window.PDFViewerApplication.page !== ${page + 1}) { window.PDFViewerApplication.page = ${page + 1}; }",
+                                    null
+                                )
                             }
+                            onPageChanged(page, pageCount)
                         }
-
-                        @JavascriptInterface
-                        fun onLoadComplete(total: Int) {
-                            mainHandler.post {
-                                onLoadComplete(total)
-                            }
+                        .onLoad { nbPages ->
+                            onLoadComplete(nbPages)
                         }
-
-                        @JavascriptInterface
-                        fun onAudioLinkClick(url: String) {
-                            mainHandler.post {
-                                com.example.util.AudioPlayerManager.playAudio(url)
-                            }
+                        .onError { t ->
+                            onError(t)
                         }
+                        .enableSwipe(true)
+                        .swipeHorizontal(isSwipeHorizontal)
+                        .nightMode(readingMode == "night")
+                        .pageFitPolicy(fitPolicy)
+                        .load()
+                }
+            },
+            update = { pdfView ->
+                if (pdfView.currentPage != currentPage) {
+                    pdfView.jumpTo(currentPage)
+                }
+            },
+            modifier = Modifier.size(1.dp).align(Alignment.TopStart)
+        )
 
-                        @JavascriptInterface
-                        fun onExternalLinkClick(url: String) {
-                            mainHandler.post {
-                                try {
-                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                                    ctx.startActivity(intent)
-                                } catch (e: Exception) {
-                                    Log.e("PdfViewerWidget", "Failed to open link: $url", e)
+        // 2. Foreground WebView using Mozilla PDF.js for extremely high-precision text selection and beautiful rendering
+        AndroidView(
+            factory = { ctx ->
+                android.webkit.WebView(ctx).apply {
+                    webViewInstance = this
+                    settings.apply {
+                        javaScriptEnabled = true
+                        domStorageEnabled = true
+                        allowFileAccess = true
+                        allowContentAccess = true
+                        allowFileAccessFromFileURLs = true
+                        allowUniversalAccessFromFileURLs = true
+                        useWideViewPort = true
+                        loadWithOverviewMode = true
+                        builtInZoomControls = true
+                        displayZoomControls = false
+                    }
+
+                    addJavascriptInterface(object {
+                        @android.webkit.JavascriptInterface
+                        fun onPageChanged(page: Int, pageCount: Int) {
+                            post {
+                                if (pdfViewInstance?.currentPage != page) {
+                                    pdfViewInstance?.jumpTo(page)
                                 }
+                                onPageChanged(page, pageCount)
+                            }
+                        }
+
+                        @android.webkit.JavascriptInterface
+                        fun onLoadComplete(pageCount: Int) {
+                            post {
+                                onLoadComplete(pageCount)
+                            }
+                        }
+
+                        @android.webkit.JavascriptInterface
+                        fun onTextSelected(text: String) {
+                            post {
+                                onTextSelected?.invoke(text)
+                            }
+                        }
+
+                        @android.webkit.JavascriptInterface
+                        fun onLongPress(clientX: Float, clientY: Float) {
+                            post {
+                                val density = ctx.resources.displayMetrics.density
+                                val screenX = clientX * density
+                                val screenY = clientY * density
+                                onLongPress?.invoke(androidx.compose.ui.geometry.Offset(screenX, screenY))
+                            }
+                        }
+
+                        @android.webkit.JavascriptInterface
+                        fun onTap() {
+                            post {
+                                onTap?.invoke()
                             }
                         }
                     }, "Android")
 
-                    webViewClient = object : WebViewClient() {
+                    webViewClient = object : android.webkit.WebViewClient() {
                         override fun shouldInterceptRequest(
-                            view: WebView?,
-                            request: WebResourceRequest?
-                        ): WebResourceResponse? {
+                            view: android.webkit.WebView?,
+                            request: android.webkit.WebResourceRequest?
+                        ): android.webkit.WebResourceResponse? {
                             val requestUrl = request?.url ?: return null
-                            val urlStr = requestUrl.toString()
+                            val path = requestUrl.path ?: ""
 
-                            // Stream PDF file request to WebView on background thread
-                            if (urlStr.contains("local_pdf/document.pdf") || urlStr.endsWith("document.pdf")) {
+                            if (path.contains("local_pdf/document.pdf")) {
                                 try {
                                     val uri = Uri.parse(pdfUriString)
                                     val inputStream = if (uri.scheme == "content") {
@@ -104,91 +168,110 @@ fun PdfViewerWidget(
                                         java.io.FileInputStream(java.io.File(filePath))
                                     }
                                     if (inputStream != null) {
-                                        return WebResourceResponse(
+                                        return android.webkit.WebResourceResponse(
                                             "application/pdf",
                                             null,
                                             inputStream
                                         )
                                     }
                                 } catch (e: Exception) {
-                                    Log.e("PdfViewerWidget", "Failed to stream PDF: $pdfUriString", e)
+                                    android.util.Log.e("PdfViewerWidget", "Failed to stream PDF to WebView: $pdfUriString", e)
                                 }
                             }
-
-                            return super.shouldInterceptRequest(view, request)
+                            return null
                         }
 
-                        override fun onPageFinished(view: WebView?, url: String?) {
+                        override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
                             super.onPageFinished(view, url)
-                            
-                            // Inject event listeners to communicate page and load updates back to Compose
-                            view?.evaluateJavascript("""
-                                (function() {
-                                    function setupListeners() {
-                                        if (window.PDFViewerApplication && window.PDFViewerApplication.eventBus) {
-                                            window.PDFViewerApplication.eventBus.on('pagechanging', function(evt) {
-                                                Android.onPageChanged(evt.pageNumber - 1, window.PDFViewerApplication.pagesCount);
-                                            });
-                                            window.PDFViewerApplication.eventBus.on('pagesinit', function() {
-                                                Android.onLoadComplete(window.PDFViewerApplication.pagesCount);
-                                            });
-                                            console.log('PDF.js event listeners attached successfully!');
-                                        } else {
-                                            setTimeout(setupListeners, 100);
+
+                            // Inject event listeners for text selection, tapping and custom long press selection
+                            val jsInjection = """
+                                // Listen for native browser selection changes
+                                document.addEventListener('selectionchange', function() {
+                                    var selection = window.getSelection().toString();
+                                    if (selection) {
+                                        Android.onTextSelected(selection);
+                                    }
+                                });
+
+                                // Detect quick taps (ignoring interactive buttons or existing selections)
+                                document.addEventListener('click', function(e) {
+                                    if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'BUTTON') {
+                                        var selection = window.getSelection().toString();
+                                        if (!selection) {
+                                            Android.onTap();
                                         }
                                     }
-                                    setupListeners();
-                                })();
-                            """.trimIndent(), null)
-                        }
+                                });
 
-                        override fun shouldOverrideUrlLoading(
-                            view: WebView?,
-                            request: WebResourceRequest?
-                        ): Boolean {
-                            val url = request?.url?.toString() ?: return false
-                            if (url.endsWith(".mp3") || url.endsWith(".wav") || url.contains("audio")) {
-                                com.example.util.AudioPlayerManager.playAudio(url)
-                                return true
+                                // Support long press coordinate forwarding
+                                document.addEventListener('contextmenu', function(e) {
+                                    Android.onLongPress(e.clientX, e.clientY);
+                                });
+
+                                // Set up event bus listener for loading progress and page swaps
+                                function setupEventBusListeners() {
+                                    if (window.PDFViewerApplication && window.PDFViewerApplication.eventBus) {
+                                        window.PDFViewerApplication.eventBus.on('pagechanging', function(evt) {
+                                            Android.onPageChanged(evt.pageNumber - 1, window.PDFViewerApplication.pagesCount);
+                                        });
+                                        window.PDFViewerApplication.eventBus.on('pagesinit', function() {
+                                            Android.onLoadComplete(window.PDFViewerApplication.pagesCount);
+                                        });
+                                    } else {
+                                        setTimeout(setupEventBusListeners, 50);
+                                    }
+                                }
+                                setupEventBusListeners();
+                            """.trimIndent()
+                            view?.evaluateJavascript(jsInjection, null)
+
+                            // Apply night-mode theme style overlay if active
+                            if (readingMode == "night") {
+                                val nightStyleJs = """
+                                    var style = document.getElementById('night-mode-style');
+                                    if (!style) {
+                                        style = document.createElement('style');
+                                        style.id = 'night-mode-style';
+                                        style.innerHTML = 'html { filter: invert(0.9) hue-rotate(180deg); background-color: #121212 !important; } .textLayer { mix-blend-mode: difference; }';
+                                        document.head.appendChild(style);
+                                    }
+                                """.trimIndent()
+                                view?.evaluateJavascript(nightStyleJs, null)
                             }
-                            try {
-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                                ctx.startActivity(intent)
-                                return true
-                            } catch (e: Exception) {
-                                Log.e("PdfViewerWidget", "Failed to override url load: $url", e)
-                            }
-                            return false
                         }
                     }
 
-                    val pdfUrl = "file:///android_asset/local_pdf/document.pdf"
-                    val zoomParam = when (fitMode) {
-                        "width" -> "page-width"
-                        "fit" -> "page-fit"
-                        else -> "auto"
-                    }
-                    val initialPage = currentPage + 1
-                    val viewerUrl = "file:///android_asset/pdfjs/web/viewer.html?file=" +
-                                    Uri.encode(pdfUrl) + "#page=$initialPage&zoom=$zoomParam"
+                    val viewerUrl = "file:///android_asset/pdfjs/web/viewer.html?file=file:///android_asset/local_pdf/document.pdf#page=${currentPage + 1}"
                     loadUrl(viewerUrl)
                 }
             },
-            update = { webView: WebView ->
-                val targetPage = currentPage + 1
-                val isNight = (readingMode == "night")
-                webView.evaluateJavascript("""
-                    if (window.PDFViewerApplication && window.PDFViewerApplication.page !== $targetPage) {
-                        window.PDFViewerApplication.page = $targetPage;
-                    }
-                    if ($isNight) {
-                        document.documentElement.style.filter = 'invert(0.9) hue-rotate(180deg)';
-                    } else {
-                        document.documentElement.style.filter = 'none';
-                    }
-                """.trimIndent(), null)
+            update = { webView ->
+                val jsPage = "if (window.PDFViewerApplication && window.PDFViewerApplication.page !== ${currentPage + 1}) { window.PDFViewerApplication.page = ${currentPage + 1}; }"
+                webView.evaluateJavascript(jsPage, null)
+
+                if (readingMode == "night") {
+                    val nightStyleJs = """
+                        var style = document.getElementById('night-mode-style');
+                        if (!style) {
+                            style = document.createElement('style');
+                            style.id = 'night-mode-style';
+                            style.innerHTML = 'html { filter: invert(0.9) hue-rotate(180deg); background-color: #121212 !important; } .textLayer { mix-blend-mode: difference; }';
+                            document.head.appendChild(style);
+                        }
+                    """.trimIndent()
+                    webView.evaluateJavascript(nightStyleJs, null)
+                } else {
+                    val dayStyleJs = """
+                        var style = document.getElementById('night-mode-style');
+                        if (style) {
+                            style.remove();
+                        }
+                    """.trimIndent()
+                    webView.evaluateJavascript(dayStyleJs, null)
+                }
             },
-            modifier = modifier.fillMaxSize()
+            modifier = Modifier.fillMaxSize()
         )
     }
 }

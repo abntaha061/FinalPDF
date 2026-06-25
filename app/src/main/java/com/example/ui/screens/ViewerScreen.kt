@@ -1428,7 +1428,7 @@ fun ViewerScreen(
                                     zoomLevel = zoom
                                 },
                                 viewModel = viewModel,
-                                onNavigateToWebView = onNavigateToWebView,
+                                onNavigateToWebView = onNavigateToWebView, onTextSelected = { text -> if (text.isNotBlank()) { selectedText = text; isTextSelected = true } },
                                 onGestureTriggered = { gestureType, offset ->
                                     val act = gestureMappings[gestureType] ?: com.example.data.GestureAction.NOTHING
                                     executeGestureAction(act, pdfViewInst, offset)
