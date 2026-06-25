@@ -37,6 +37,11 @@ object AudioPlayerManager {
         }
     }
 
+    fun playAudio(url: String) {
+        val context = com.example.PdfApplication.instance
+        play(context, url)
+    }
+
     fun play(context: Context, url: String, volume: Float = 1.0f, wordText: String? = null, rect: RectF? = null) {
         Log.d(TAG, "Playing URL: $url")
         _audioState.value = AudioState.Loading

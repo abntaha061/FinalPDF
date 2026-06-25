@@ -1,55 +1,20 @@
 package com.example.ui.components
 
-import android.annotation.SuppressLint
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.util.Log
-import android.graphics.RectF
-import android.webkit.JavascriptInterface
-import android.webkit.WebChromeClient
-import android.webkit.WebResourceRequest
-import android.webkit.WebResourceResponse
-import android.webkit.WebView
-import android.webkit.WebViewClient
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
+import android.webkit.*
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.offset
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.animation.core.tween
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.webkit.WebViewAssetLoader
 import com.example.ui.PdfViewModel
 import com.github.barteksc.pdfviewer.PDFView
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.Dispatchers
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.sp
-import androidx.compose.material3.Surface
-import androidx.compose.foundation.layout.padding
-import androidx.webkit.WebViewAssetLoader
 import java.io.File
-import java.io.FileInputStream
 
-@SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun PdfViewerWidget(
     pdfUriString: String,
@@ -70,508 +35,98 @@ fun PdfViewerWidget(
     onNavigateToWebView: ((String) -> Unit)? = null,
     onGestureTriggered: ((com.example.data.GestureType, androidx.compose.ui.geometry.Offset?) -> Unit)? = null
 ) {
-    val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
-    val pageSpacing by viewModel.pageSpacing.collectAsState()
-    var isLoaded by remember { mutableStateOf(false) }
     var loadError by remember { mutableStateOf<String?>(null) }
-    var resolvedFile by remember { mutableStateOf<File?>(null) }
-    var fileResolved by remember { mutableStateOf(false) }
 
-    val haptic = LocalHapticFeedback.current
-
-    val onLinkTapped: (RectF) -> Unit = { rect ->
-        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-    }
-
-    var containerWidth by remember { mutableStateOf(0f) }
-    var containerHeight by remember { mutableStateOf(0f) }
-
-    var localWebViewRef by remember { mutableStateOf<WebView?>(null) }
-    var showFastScrollBadge by remember { mutableStateOf(false) }
-
-    var touchTime by remember { mutableStateOf(0L) }
-    var isMultiTap by remember { mutableStateOf(false) }
-    var startX by remember { mutableStateOf(0f) }
-    var startY by remember { mutableStateOf(0f) }
-    var startX2 by remember { mutableStateOf(0f) }
-    var startY2 by remember { mutableStateOf(0f) }
-    var initialTwoFingerPageY by remember { mutableStateOf(0f) }
-    var lastTapTime by remember { mutableStateOf(0L) }
-
-    LaunchedEffect(showFastScrollBadge) {
-        if (showFastScrollBadge) {
-            kotlinx.coroutines.delay(1000)
-            showFastScrollBadge = false
-        }
-    }
-
-    LaunchedEffect(pdfUriString) {
-        withContext(Dispatchers.IO) {
-            try {
-                val fileUri = Uri.parse(pdfUriString)
-                val cacheFile = File(context.cacheDir, "pdf_viewer_temp.pdf")
-                
-                val inputStream = if (fileUri.scheme == "content") {
-                    context.contentResolver.openInputStream(fileUri)
-                } else if (fileUri.scheme == "file") {
-                    FileInputStream(File(fileUri.path ?: ""))
-                } else {
-                    FileInputStream(File(pdfUriString))
-                }
-                
-                inputStream?.use { input ->
-                    cacheFile.outputStream().use { output ->
-                        input.copyTo(output)
-                    }
-                }
-                
-                withContext(Dispatchers.Main) {
-                    if (cacheFile.exists() && cacheFile.length() > 0) {
-                        resolvedFile = cacheFile
-                    } else {
-                        loadError = "تعذّر قراءة الملف (حجمه 0)"
-                    }
-                    fileResolved = true
-                }
-            } catch (e: Exception) {
-                Log.e("PdfViewerWidget", "Failed to cache PDF securely", e)
-                withContext(Dispatchers.Main) {
-                    loadError = "تعذّر قراءة مسار الملف"
-                    fileResolved = true
-                }
-            }
-        }
-    }
-
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .onSizeChanged { size ->
-                containerWidth = size.width.toFloat()
-                containerHeight = size.height.toFloat()
-            }
-            .pointerInput(onGestureTriggered) {
-                if (onGestureTriggered == null) return@pointerInput
-                awaitPointerEventScope {
-                    while (true) {
-                        val event = awaitPointerEvent(androidx.compose.ui.input.pointer.PointerEventPass.Initial)
-                        val changes = event.changes
-                        
-                        if (changes.size < 2 && !isMultiTap) {
-                            continue
-                        }
-                        
-                        when (event.type) {
-                            androidx.compose.ui.input.pointer.PointerEventType.Press -> {
-                                touchTime = System.currentTimeMillis()
-                                if (changes.size >= 2) {
-                                    isMultiTap = true
-                                    startX = changes[0].position.x
-                                    startY = changes[0].position.y
-                                    startX2 = changes[1].position.x
-                                    startY2 = changes[1].position.y
-                                    initialTwoFingerPageY = (startY + startY2) / 2
-                                } else if (changes.size == 1 && !isMultiTap) {
-                                    startX = changes[0].position.x
-                                    startY = changes[0].position.y
-                                }
-                            }
-                            androidx.compose.ui.input.pointer.PointerEventType.Release -> {
-                                val duration = System.currentTimeMillis() - touchTime
-                                val endX = if (changes.isNotEmpty()) changes[0].position.x else startX
-                                val endY = if (changes.isNotEmpty()) changes[0].position.y else startY
-                                val dx = endX - startX
-                                val dy = endY - startY
-                                
-                                if (isMultiTap) {
-                                    val endX2 = if (changes.size >= 2) changes[1].position.x else startX2
-                                    val endY2 = if (changes.size >= 2) changes[1].position.y else startY2
-                                    val finalTwoFingerY = (endY + endY2) / 2
-                                    val deltaYTwo = finalTwoFingerY - initialTwoFingerPageY
-                                    
-                                    if (deltaYTwo < -150f) {
-                                        onGestureTriggered(com.example.data.GestureType.TWO_FINGER_SWIPE_UP, null)
-                                    } else if (deltaYTwo > 150f) {
-                                        onGestureTriggered(com.example.data.GestureType.TWO_FINGER_SWIPE_DOWN, null)
-                                    } else if (duration < 400) {
-                                        onGestureTriggered(com.example.data.GestureType.TWO_FINGER_TAP, null)
-                                    }
-                                    isMultiTap = false
-                                } else {
-                                    if (kotlin.math.abs(dx) < 20f && kotlin.math.abs(dy) < 20f) {
-                                        if (duration > 500) {
-                                            onGestureTriggered(com.example.data.GestureType.LONG_PRESS, androidx.compose.ui.geometry.Offset(endX, endY))
-                                        } else {
-                                            val now = System.currentTimeMillis()
-                                            if (now - lastTapTime < 300) {
-                                                onGestureTriggered(com.example.data.GestureType.DOUBLE_TAP, null)
-                                                lastTapTime = 0L
-                                            } else {
-                                                lastTapTime = now
-                                                coroutineScope.launch {
-                                                    kotlinx.coroutines.delay(260)
-                                                    if (lastTapTime == now) {
-                                                        onGestureTriggered(com.example.data.GestureType.SINGLE_TAP, null)
-                                                        lastTapTime = 0L
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
+    val file = remember(pdfUriString) {
+        val fileUri = Uri.parse(pdfUriString)
+        val f: File? = when (fileUri.scheme) {
+            "file" -> fileUri.path?.let { File(it) }
+            "content" -> {
+                try {
+                    val pfd = context.contentResolver.openFileDescriptor(fileUri, "r")
+                    val fd = pfd?.fileDescriptor
+                    // نسخ الملف إلى cacheDir للوصول إليه عبر WebViewAssetLoader
+                    val cacheFile = File(context.cacheDir, "pdf_viewer_temp.pdf")
+                    pfd?.use {
+                        java.io.FileInputStream(fd).use { input ->
+                            cacheFile.outputStream().use { output ->
+                                input.copyTo(output)
                             }
                         }
                     }
+                    cacheFile
+                } catch (e: Exception) {
+                    Log.e("PdfViewerWidget", "Failed to copy content URI to cache", e)
+                    null
                 }
             }
-    ) {
-        if (!fileResolved || (!isLoaded && loadError == null)) {
-            CircularProgressIndicator(
-                modifier = Modifier
-                    .size(48.dp)
-                    .align(Alignment.Center),
-                color = MaterialTheme.colorScheme.primary
-            )
+            else -> null
         }
-
-        AnimatedVisibility(
-            visible = showFastScrollBadge,
-            enter = fadeIn(tween(200)),
-            exit = fadeOut(tween(200)),
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = 80.dp)
-        ) {
-            Surface(
-                color = MaterialTheme.colorScheme.primary,
-                shape = CircleShape,
-                shadowElevation = 6.dp
-            ) {
-                Text(
-                    text = "تمرير سريع ⚡",
-                    color = Color.White,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
-                )
-            }
+        if (f == null || !f.exists()) {
+            loadError = "تعذّر قراءة الملف"
         }
+        f
+    }
 
-        if (loadError != null) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = loadError ?: "حدث خطأ مجهول",
-                    color = Color.Red,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-        }
+    if (loadError == null && file != null) {
+        AndroidView<WebView>(
+            factory = { ctx: Context ->
+                WebView(ctx).apply {
+                    settings.javaScriptEnabled = true
+                    settings.domStorageEnabled = true
+                    settings.allowFileAccess = true
+                    settings.allowContentAccess = true
 
-        if (fileResolved && resolvedFile != null && loadError == null) {
-            key(readingMode, isSwipeHorizontal, pdfUriString, pageSpacing, readingScrollMode, fitMode) {
-                AndroidView(
-                    factory = { ctx ->
-                        WebView(ctx).apply {
-                            localWebViewRef = this
-                            
-                            settings.apply {
-                                javaScriptEnabled = true
-                                domStorageEnabled = true
-                                builtInZoomControls = true
-                                displayZoomControls = false
-                                setSupportZoom(true)
-                                loadWithOverviewMode = true
-                                useWideViewPort = true
-                                allowFileAccess = true
-                            }
+                    // no-op: PDFView not used with WebView implementation
 
-                            addJavascriptInterface(object {
-                                @JavascriptInterface
-                                fun onAudioLinkClick(url: String) {
-                                    if (url.endsWith(".mp3") || url.endsWith(".wav") || url.endsWith(".ogg") || url.endsWith(".m4a")) {
-                                        onLinkTapped(RectF())
-                                        com.example.util.AudioPlayerManager.play(ctx, url)
-                                    } else {
-                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                                        ctx.startActivity(intent)
-                                    }
-                                }
-
-                                @JavascriptInterface
-                                fun onPdfLoaded(total: Int) {
-                                    android.os.Handler(android.os.Looper.getMainLooper()).post {
-                                        if (!isLoaded) {
-                                            isLoaded = true
-                                            viewModel.setTotalPages(total)
-                                            onLoadComplete(total)
-                                        }
-                                    }
-                                }
-
-                                @JavascriptInterface
-                                fun onPageScrolled(page: Int) {
-                                    android.os.Handler(android.os.Looper.getMainLooper()).post {
-                                        if (currentPage != page - 1) {
-                                            viewModel.setCurrentPage(page - 1)
-                                            onPageChanged(page - 1, viewModel.totalPages.value)
-                                        }
-                                    }
-                                }
-                            }, "AndroidBridge")
-
-                            val assetLoader = WebViewAssetLoader.Builder()
-                                .addPathHandler(
-                                    "/local_pdf/",
-                                    WebViewAssetLoader.InternalStoragePathHandler(ctx, ctx.cacheDir)
-                                )
-                                .addPathHandler(
-                                    "/assets/",
-                                    WebViewAssetLoader.AssetsPathHandler(ctx)
-                                )
-                                .build()
-                                
-                            val safeFileName = "pdf_viewer_temp.pdf"
-
-                            webViewClient = object : WebViewClient() {
-                                override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
-                                    return assetLoader.shouldInterceptRequest(request.url)
-                                }
-                                
-                                override fun onRenderProcessGone(view: WebView?, detail: android.webkit.RenderProcessGoneDetail?): Boolean {
-                                    android.os.Handler(android.os.Looper.getMainLooper()).post {
-                                        loadError = "نفدت الذاكرة أثناء عرض الملف. يرجى إعادة فتح المستند."
-                                    }
-                                    return true 
-                                }
-                            }
-
-                            webChromeClient = WebChromeClient()
-
-                            val htmlContent = """
-                                <!DOCTYPE html>
-                                <html>
-                                <head>
-                                    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=4.0, user-scalable=yes">
-                                    <script src="https://appassets.androidplatform.net/assets/pdfjs/pdf.min.js"></script>
-                                    <style>
-                                        body { margin: 0; padding: 0; background: ${if(readingMode == "night") "#121212" else if (readingMode == "sepia") "#f4ecd8" else "#ffffff"}; display: flex; flex-direction: column; align-items: center; }
-                                        .pdf-page-container { position: relative; margin-bottom: ${pageSpacing}px; display: flex; justify-content: center; align-items: center; background: #fff; }
-                                        canvas { display: block; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
-                                        .textLayer { position: absolute; left: 0; top: 0; right: 0; bottom: 0; overflow: hidden; opacity: 0; line-height: 1.0; }
-                                        .textLayer ::selection { background: rgba(0, 123, 255, 0.3); }
-                                        .annotationLayer { position: absolute; left: 0; top: 0; right: 0; bottom: 0; pointer-events: none; }
-                                        .annotationLayer section { position: absolute; cursor: pointer; pointer-events: auto; }
-                                    </style>
-                                </head>
-                                <body>
-                                    <div id="pdf-viewer"></div>
-                                    <script>
-                                        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://appassets.androidplatform.net/assets/pdfjs/pdf.worker.min.js';
-                                        const url = 'https://appassets.androidplatform.net/local_pdf/$safeFileName';
-                                        const viewer = document.getElementById('pdf-viewer');
-
-                                        pdfjsLib.getDocument(url).promise.then(pdf => {
-                                            const totalPages = pdf.numPages;
-                                            window.AndroidBridge.onPdfLoaded(totalPages);
-                                            
-                                            pdf.getPage(1).then(firstPage => {
-                                                let sWidth = window.innerWidth || screen.width || 800;
-                                                const defaultViewport = firstPage.getViewport({ scale: 1.0 });
-                                                const scale = sWidth / defaultViewport.width;
-                                                const scaledViewport = firstPage.getViewport({ scale: scale });
-                                                let pHeight = scaledViewport.height || 1000;
-
-                                                let renderQueue = [];
-                                                let isRendering = false;
-
-                                                let scrollTimeout;
-                                                window.addEventListener('scroll', () => {
-                                                    if (scrollTimeout) clearTimeout(scrollTimeout);
-                                                    scrollTimeout = setTimeout(() => {
-                                                        const containers = document.querySelectorAll('.pdf-page-container');
-                                                        for(let i = 0; i < containers.length; i++) {
-                                                            const rect = containers[i].getBoundingClientRect();
-                                                            if(rect.top >= -rect.height/2 && rect.top <= window.innerHeight/2) {
-                                                                window.AndroidBridge.onPageScrolled(parseInt(containers[i].dataset.pageNumber));
-                                                                break;
-                                                            }
-                                                        }
-                                                    }, 150);
-                                                });
-
-                                                const observer = new IntersectionObserver((entries) => {
-                                                    entries.forEach(entry => {
-                                                        if (entry.isIntersecting) {
-                                                            queueRender(entry.target);
-                                                        } else {
-                                                            cleanupPage(entry.target);
-                                                        }
-                                                    });
-                                                }, { rootMargin: "150% 0px" });
-
-                                                for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
-                                                    const container = document.createElement('div');
-                                                    container.className = 'pdf-page-container';
-                                                    container.style.width = sWidth + 'px';
-                                                    container.style.height = pHeight + 'px'; 
-                                                    container.dataset.pageNumber = pageNum;
-                                                    container.dataset.loaded = "false";
-                                                    container.dataset.queued = "false";
-                                                    viewer.appendChild(container);
-                                                    observer.observe(container);
-                                                }
-
-                                                function queueRender(container) {
-                                                    if (container.dataset.loaded === "true" || container.dataset.queued === "true") return;
-                                                    container.dataset.queued = "true";
-                                                    renderQueue.push(container);
-                                                    processQueue();
-                                                }
-
-                                                function processQueue() {
-                                                    if (isRendering || renderQueue.length === 0) return;
-                                                    isRendering = true;
-                                                    const container = renderQueue.shift();
-                                                    
-                                                    if (container.dataset.queued === "false") {
-                                                        isRendering = false;
-                                                        processQueue();
-                                                        return;
-                                                    }
-
-                                                    renderPage(container).then(() => {
-                                                        isRendering = false;
-                                                        processQueue();
-                                                    }).catch(err => {
-                                                        console.error(err);
-                                                        isRendering = false;
-                                                        processQueue();
-                                                    });
-                                                }
-
-                                                function renderPage(container) {
-                                                    return new Promise((resolve, reject) => {
-                                                        const pageNum = parseInt(container.dataset.pageNumber);
-                                                        pdf.getPage(pageNum).then(page => {
-                                                            let cWidth = window.innerWidth || screen.width || 800;
-                                                            const cViewport = page.getViewport({ scale: 1.0 });
-                                                            const cScale = cWidth / cViewport.width;
-                                                            const viewport = page.getViewport({ scale: cScale });
-                                                            
-                                                            container.style.width = viewport.width + 'px';
-                                                            container.style.height = viewport.height + 'px';
-                                                            
-                                                            const canvas = document.createElement('canvas');
-                                                            const context = canvas.getContext('2d');
-                                                            canvas.height = viewport.height;
-                                                            canvas.width = viewport.width;
-                                                            container.appendChild(canvas);
-
-                                                            page.render({ canvasContext: context, viewport: viewport }).promise.then(() => {
-                                                                const textLayerDiv = document.createElement('div');
-                                                                textLayerDiv.className = 'textLayer';
-                                                                container.appendChild(textLayerDiv);
-                                                                page.getTextContent().then(textContent => {
-                                                                    pdfjsLib.renderTextLayer({
-                                                                        textContent: textContent,
-                                                                        container: textLayerDiv,
-                                                                        viewport: viewport,
-                                                                        textDivs: []
-                                                                    });
-                                                                });
-
-                                                                page.getAnnotations().then(annotations => {
-                                                                    const annotationLayerDiv = document.createElement('div');
-                                                                    annotationLayerDiv.className = 'annotationLayer';
-                                                                    container.appendChild(annotationLayerDiv);
-                                                                    pdfjsLib.AnnotationLayer.render({
-                                                                        viewport: viewport.clone({ dontFlip: true }),
-                                                                        div: annotationLayerDiv,
-                                                                        annotations: annotations,
-                                                                        page: page,
-                                                                        linkService: { getDestinationHash:()=>'', getAnchorUrl:()=>'', executeNamedAction:()=>{} },
-                                                                        downloadManager: null
-                                                                    });
-
-                                                                    annotationLayerDiv.addEventListener('click', (e) => {
-                                                                        const target = e.target.closest('a');
-                                                                        if (target && target.href) {
-                                                                            e.preventDefault();
-                                                                            window.AndroidBridge.onAudioLinkClick(target.href);
-                                                                        }
-                                                                    });
-                                                                });
-                                                                
-                                                                container.dataset.loaded = "true";
-                                                                container.dataset.queued = "false";
-                                                                resolve();
-                                                            }).catch(reject);
-                                                        }).catch(reject);
-                                                    });
-                                                }
-
-                                                function cleanupPage(container) {
-                                                    container.dataset.queued = "false";
-                                                    if (container.dataset.loaded === "false") return;
-                                                    container.innerHTML = '';
-                                                    container.dataset.loaded = "false";
-                                                }
-                                            });
-                                        }).catch(err => {
-                                            console.error(err);
-                                        });
-                                    </script>
-                                </body>
-                                </html>
-                            """.trimIndent()
-
-                            loadDataWithBaseURL("https://appassets.androidplatform.net", htmlContent, "text/html", "UTF-8", null)
+                    addJavascriptInterface(object : Any() {
+                        @JavascriptInterface
+                        fun onAudioLinkClick(url: String) {
+                            com.example.util.AudioPlayerManager.playAudio(url)
                         }
-                    },
-                    update = { webView ->
-                        if (isLoaded) {
-                            val filterCss = when (readingMode) {
-                                "night" -> "invert(1) hue-rotate(180deg) brightness(0.85)"
-                                "sepia" -> "sepia(0.6) brightness(0.9)"
-                                else -> "none"
-                            }
-                            webView.evaluateJavascript("document.body.style.filter = '$filterCss';", null)
-                            
-                            if (webView.url != null) {
-                                webView.evaluateJavascript("""
-                                    (function() {
-                                        const containers = document.querySelectorAll('.pdf-page-container');
-                                        if (containers.length >= ${currentPage + 1}) {
-                                            containers[${currentPage}].scrollIntoView({behavior: 'smooth'});
-                                        }
-                                    })();
-                                """.trimIndent(), null)
-                            }
+
+                        @JavascriptInterface
+                        fun onExternalLinkClick(url: String) {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                            ctx.startActivity(intent)
                         }
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
-        }
+                    }, "Android")
 
-        val density = LocalDensity.current
-        val globalHighlightRect by com.example.util.AudioPlayerManager.highlightedRect.collectAsState()
-        globalHighlightRect?.let { rect ->
-            val leftDp = with(density) { rect.left.toDp() }
-            val topDp = with(density) { rect.top.toDp() }
-            val widthDp = with(density) { (rect.right - rect.left).toDp() }
-            val heightDp = with(density) { (rect.bottom - rect.top).toDp() }
+                    val assetLoader = WebViewAssetLoader.Builder()
+                        .addPathHandler(
+                            "/local_pdf/",
+                            WebViewAssetLoader.InternalStoragePathHandler(ctx, file.parentFile ?: ctx.cacheDir)
+                        )
+                        .build()
+                    val safeFileName = file.name
 
-            Box(
-                modifier = Modifier
-                    .offset(x = leftDp, y = topDp)
-                    .size(width = widthDp, height = heightDp)
-                    .background(Color(0xFF2196F3).copy(alpha = 0.35f))
-            )
-        }
+                    webViewClient = object : WebViewClient() {
+                        override fun shouldInterceptRequest(
+                            view: WebView?,
+                            request: WebResourceRequest?
+                        ): WebResourceResponse? {
+                            val requestUrl = request?.url ?: return null
+                            return assetLoader.shouldInterceptRequest(requestUrl)
+                        }
+                    }
+
+                    // Load PDF.js with loaded file
+                    val pdfUrl = "https://appassets.androidplatform.net/local_pdf/$safeFileName"
+                    loadUrl("file:///android_asset/pdfjs/web/viewer.html?file=" + Uri.encode(pdfUrl))
+                }
+            },
+            update = { webView: WebView ->
+                // no-op
+            },
+            modifier = modifier.fillMaxSize()
+        )
+    }
+}
+
+fun com.github.barteksc.pdfviewer.PDFView.setPageRotation(page: Int, rotation: Int) {
+    if (page == this.currentPage) {
+        val normRot = ((rotation % 360) + 360) % 360
+        this.rotation = normRot.toFloat()
     }
 }

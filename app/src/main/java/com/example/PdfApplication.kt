@@ -6,8 +6,14 @@ import com.example.util.PdfPrefetchManager
 import com.github.barteksc.pdfviewer.util.Constants
 
 class PdfApplication : Application() {
+    companion object {
+        lateinit var instance: PdfApplication
+            private set
+    }
+
     override fun onCreate() {
         super.onCreate()
+        instance = this
         // Set tile cache size to a robust limit (150 tiles) to prevent high-res tile eviction and fix blurry pages.
         Constants.Cache.CACHE_SIZE = 150
         Constants.PART_SIZE = 256f // Default tile size for crisp and standard rendering

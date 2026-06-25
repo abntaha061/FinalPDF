@@ -161,20 +161,28 @@ class MainActivity : ComponentActivity() {
             }
 
             splashScreen.setOnExitAnimationListener { splashScreenView ->
-                val iconView = splashScreenView.iconView
-                if (iconView != null) {
-                    // Animate the logo scaling down and fading out
-                    val scaleX = ObjectAnimator.ofFloat(iconView, View.SCALE_X, 1f, 0.8f)
-                    val scaleY = ObjectAnimator.ofFloat(iconView, View.SCALE_Y, 1f, 0.8f)
-                    val alpha  = ObjectAnimator.ofFloat(iconView, View.ALPHA, 1f, 0f)
-                    AnimatorSet().apply {
-                        playTogether(scaleX, scaleY, alpha)
-                        duration = 400
-                        doOnEnd { splashScreenView.remove() }
-                        start()
+                try {
+                    val iconView = splashScreenView.iconView
+                    if (iconView != null) {
+                        // Animate the logo scaling down and fading out
+                        val scaleX = ObjectAnimator.ofFloat(iconView, View.SCALE_X, 1f, 0.8f)
+                        val scaleY = ObjectAnimator.ofFloat(iconView, View.SCALE_Y, 1f, 0.8f)
+                        val alpha  = ObjectAnimator.ofFloat(iconView, View.ALPHA, 1f, 0f)
+                        AnimatorSet().apply {
+                            playTogether(scaleX, scaleY, alpha)
+                            duration = 400
+                            doOnEnd { splashScreenView.remove() }
+                            start()
+                        }
+                    } else {
+                        splashScreenView.remove()
                     }
-                } else {
-                    splashScreenView.remove()
+                } catch (e: Exception) {
+                    try {
+                        splashScreenView.remove()
+                    } catch (ex: Exception) {
+                        // ignore
+                    }
                 }
             }
 

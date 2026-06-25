@@ -11,6 +11,7 @@ import android.net.Uri
 import android.provider.MediaStore
 import android.print.PrintManager
 import android.util.Log
+import com.example.ui.components.setPageRotation
 import java.io.File
 import java.io.FileOutputStream
 import java.io.ByteArrayOutputStream
@@ -120,6 +121,7 @@ import com.github.barteksc.pdfviewer.PDFView
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import android.speech.tts.TextToSpeech
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
@@ -133,6 +135,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.focus.*
+import androidx.compose.ui.graphics.graphicsLayer
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -273,24 +276,15 @@ fun ViewerScreen(
     LaunchedEffect(activeUri) {
         val uriStr = activeUri
         if (uriStr != null) {
-            withContext(Dispatchers.IO) {
-                try {
-                    val result = viewModel.getOcrResultByUri(uriStr)
-                    withContext(Dispatchers.Main) {
-                        ocrResultEntity = result
-                        hasOcrResult = result != null
-                    }
-                } catch (e: Throwable) {
-                    Log.e("ViewerScreen", "DB Error", e)
-                }
-            }
+            val result = viewModel.getOcrResultByUri(uriStr)
+            ocrResultEntity = result
+            hasOcrResult = result != null
         } else {
             ocrResultEntity = null
             hasOcrResult = false
             showOcrBanner = false
         }
     }
-
 
     val checkSearchabilityAndOcrBanner: (String) -> Unit = { uriStr ->
         coroutineScope.launch(Dispatchers.IO) {
@@ -312,13 +306,12 @@ fun ViewerScreen(
                 return@launch
             }
 
-            // Otherwise check searchable using PDFBox safely (Temp files & Throwable)
+            // Otherwise check searchable using PDFBox
             var searchable = true
             try {
                 com.tom_roush.pdfbox.android.PDFBoxResourceLoader.init(context)
                 context.contentResolver.openInputStream(Uri.parse(uriStr))?.use { inputStream ->
-                    val memorySetting = com.tom_roush.pdfbox.io.MemoryUsageSetting.setupTempFileOnly()
-                    val document = com.tom_roush.pdfbox.pdmodel.PDDocument.load(inputStream, memorySetting)
+                    val document = com.tom_roush.pdfbox.pdmodel.PDDocument.load(inputStream)
                     val stripper = com.tom_roush.pdfbox.text.PDFTextStripper()
                     stripper.startPage = 1
                     stripper.endPage = 1
@@ -326,7 +319,7 @@ fun ViewerScreen(
                     searchable = pageText?.trim()?.length ?: 0 > 50
                     document.close()
                 }
-            } catch (e: Throwable) {
+            } catch (e: Exception) {
                 Log.e("ViewerScreen", "Error checking searchable", e)
             }
 
@@ -3012,18 +3005,28 @@ fun ViewerScreen(
                             showSaveAsImageConfirmDialog = true
                         },
                         onRotateRightClick = {
-                            coroutineScope.launch {
-                                snackbarHostState.showSnackbar("تدوير الصفحة غير متاح في وضع WebView حالياً")
+                            pdfViewInst?.let { pdfView ->
+                                val currentRot = viewModel.pageRotations[currentPage] ?: 0
+                                val newRot = currentRot + 90
+                                viewModel.pageRotations[currentPage] = newRot
+                                pdfView.setPageRotation(currentPage, newRot % 360)
+                                pdfView.invalidate()
                             }
                         },
                         onRotateLeftClick = {
-                            coroutineScope.launch {
-                                snackbarHostState.showSnackbar("تدوير الصفحة غير متاح في وضع WebView حالياً")
+                            pdfViewInst?.let { pdfView ->
+                                val currentRot = viewModel.pageRotations[currentPage] ?: 0
+                                val newRot = currentRot - 90
+                                viewModel.pageRotations[currentPage] = newRot
+                                pdfView.setPageRotation(currentPage, ((newRot % 360) + 360) % 360)
+                                pdfView.invalidate()
                             }
                         },
                         onResetRotationClick = {
-                            coroutineScope.launch {
-                                snackbarHostState.showSnackbar("تدوير الصفحة غير متاح في وضع WebView حالياً")
+                            pdfViewInst?.let { pdfView ->
+                                viewModel.pageRotations[currentPage] = 0
+                                pdfView.setPageRotation(currentPage, 0)
+                                pdfView.invalidate()
                             }
                         },
                         isScreenRotationLocked = isScreenRotationLocked,

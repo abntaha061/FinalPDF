@@ -1,3 +1,6 @@
+import java.net.URL
+import java.net.HttpURLConnection
+
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.compose)
@@ -68,7 +71,6 @@ secrets {
 // Some unused dependencies are commented out below instead of being removed.
 // This makes it easy to add them back in the future if needed.
 dependencies {
-  implementation("androidx.webkit:webkit:1.8.0")
   implementation(platform(libs.androidx.compose.bom))
   implementation(platform(libs.firebase.bom))
   // implementation(libs.accompanist.permissions)
@@ -99,6 +101,7 @@ dependencies {
   implementation(libs.hilt.navigation.compose)
   implementation(libs.coil.compose)
   implementation("com.github.mhiew:android-pdf-viewer:3.2.0-beta.1")
+  implementation("androidx.webkit:webkit:1.12.0")
   implementation("org.apache.poi:poi-ooxml:5.2.5")
   implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.3")
   implementation("androidx.documentfile:documentfile:1.0.1")
@@ -138,3 +141,42 @@ dependencies {
   "ksp"(libs.hilt.compiler)
   "ksp"(libs.moshi.kotlin.codegen)
 }
+
+tasks.register("downloadPdfJs") {
+    doLast {
+        val destFile = file("${layout.buildDirectory.get().asFile}/pdfjs.zip")
+        val destDir = file("${project.projectDir}/src/main/assets/pdfjs")
+        if (!destDir.exists()) {
+            destDir.mkdirs()
+        }
+        val url = URL("https://github.com/mozilla/pdf.js/releases/download/v3.11.174/pdfjs-3.11.174-legacy-dist.zip")
+        println("Downloading PDF.js from $url...")
+        
+        var connection = url.openConnection() as HttpURLConnection
+        connection.instanceFollowRedirects = true
+        var status = connection.responseCode
+        var redirectUrl = url
+        if (status == HttpURLConnection.HTTP_MOVED_TEMP || 
+            status == HttpURLConnection.HTTP_MOVED_PERM ||
+            status == 302 || status == 301 || status == 307 || status == 308) {
+            val newUrl = connection.getHeaderField("Location")
+            redirectUrl = URL(newUrl)
+            connection = redirectUrl.openConnection() as HttpURLConnection
+            connection.instanceFollowRedirects = true
+        }
+        
+        connection.inputStream.use { input ->
+            destFile.outputStream().use { output ->
+                input.copyTo(output)
+            }
+        }
+        println("Extracting PDF.js zip...")
+        copy {
+            from(zipTree(destFile))
+            into(destDir)
+        }
+        destFile.delete()
+        println("PDF.js successfully downloaded and extracted to assets!")
+    }
+}
+
