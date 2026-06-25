@@ -209,6 +209,7 @@ fun PdfViewerWidget(
                             request: android.webkit.WebResourceRequest?
                         ): android.webkit.WebResourceResponse? {
                             val url = request?.url ?: return null
+                            android.util.Log.d("PDFJS_REQUEST", "Intercepting: ${url.host}${url.path}")
                             if (url.host == "app.local") {
                                 val path = url.path ?: ""
                                 if (path == "/current_pdf.pdf") {
@@ -317,7 +318,7 @@ fun PdfViewerWidget(
                     }
 
                     // Load viewer.html under app.local custom HTTPS origin!
-                    loadUrl("https://app.local/pdfjs/web/viewer.html?file=https://app.local/current_pdf.pdf#page=${currentPage + 1}&zoom=page-width")
+                    loadUrl("https://app.local/pdfjs/web/viewer.html?file=%2F%2Fapp.local%2Fcurrent_pdf.pdf#page=${currentPage + 1}&zoom=page-width")
                 }
             },
             update = { webView ->
