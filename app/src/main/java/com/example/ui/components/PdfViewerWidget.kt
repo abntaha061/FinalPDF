@@ -13,6 +13,11 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewFeature
 import com.example.ui.PdfViewModel
+import com.example.ui.components.pdf.AssetResourceLoader
+import com.example.ui.components.pdf.PdfDocumentResourceLoader
+import com.example.ui.components.pdf.ResourceLoader
+import com.example.ui.components.pdf.WebInterface
+import com.example.ui.components.pdf.WebViewSupport
 
 class PdfViewerController(
     val webView: WebView?,
@@ -89,6 +94,29 @@ fun PdfViewerWidget(
     var controllerInstance by remember { mutableStateOf<PdfViewerController?>(null) }
     var isPageFinished by remember { mutableStateOf(false) }
 
+    // Check device WebView support and log recommendations/actions
+    val supportCheck = remember(context) { WebViewSupport.check(context) }
+    LaunchedEffect(supportCheck) {
+        android.util.Log.d("PdfViewerWidget", "WebView compatibility status: $supportCheck")
+    }
+
+    // Initialize decoupled ResourceLoaders for modular request interception
+    val resourceLoaders = remember(pdfUriString, context) {
+        listOf(
+            PdfDocumentResourceLoader(
+                context = context,
+                pdfUriStringProvider = { pdfUriString },
+                onError = { e -> onError(e) }
+            ),
+            AssetResourceLoader(
+                context = context,
+                onError = { path, e ->
+                    android.util.Log.e("PdfViewerWidget", "Error loading asset path: $path", e)
+                }
+            )
+        )
+    }
+
     Box(modifier = modifier.fillMaxSize()) {
         AndroidView(
             factory = { ctx ->
@@ -114,7 +142,7 @@ fun PdfViewerWidget(
                         setSupportZoom(true)
                         mediaPlaybackRequiresUserGesture = false
 
-                        // Safe and modern way to disable force dark & algorithmic darkening
+                        // Disable algorithmic darkening & force dark cleanly
                         if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
                             WebSettingsCompat.setAlgorithmicDarkeningAllowed(this, false)
                         }
@@ -133,67 +161,53 @@ fun PdfViewerWidget(
                         }
                     }
 
-                    addJavascriptInterface(object {
-                        @android.webkit.JavascriptInterface
-                        fun getCurrentPage(): Int {
-                            return currentPage
-                        }
-
-                        @android.webkit.JavascriptInterface
-                        fun onPageChanged(page: Int, pageCount: Int) {
+                    // Setup custom WebInterface bridge between Javascript and Kotlin
+                    val webInterfaceBridge = WebInterface(
+                        currentPageProvider = { currentPage },
+                        onPageChangedCallback = { page, pageCount ->
                             post {
                                 controllerInstance?.currentPage = page
                                 controllerInstance?.pageCount = pageCount
                                 onPageChanged(page, pageCount)
                             }
-                        }
-
-                        @android.webkit.JavascriptInterface
-                        fun onLoadComplete(pageCount: Int) {
+                        },
+                        onLoadCompleteCallback = { pageCount ->
                             post {
                                 controllerInstance?.pageCount = pageCount
                                 onLoadComplete(pageCount)
                             }
-                        }
-
-                        @android.webkit.JavascriptInterface
-                        fun onTextSelected(text: String) {
+                        },
+                        onTextSelectedCallback = { text ->
                             post {
                                 onTextSelected?.invoke(text)
                             }
-                        }
-
-                        @android.webkit.JavascriptInterface
-                        fun onLongPress(clientX: Float, clientY: Float) {
+                        },
+                        onLongPressCallback = { clientX, clientY ->
                             post {
                                 val density = ctx.resources.displayMetrics.density
                                 val screenX = clientX * density
                                 val screenY = clientY * density
                                 onLongPress?.invoke(androidx.compose.ui.geometry.Offset(screenX, screenY))
                             }
-                        }
-
-                        @android.webkit.JavascriptInterface
-                        fun onTap() {
+                        },
+                        onTapCallback = {
                             post {
                                 onTap?.invoke()
                             }
-                        }
-
-                        @android.webkit.JavascriptInterface
-                        fun onAudioLinkClick(url: String) {
+                        },
+                        onAudioLinkClickCallback = { url ->
+                            post {
+                                onNavigateToWebView?.invoke(url)
+                            }
+                        },
+                        onExternalLinkClickCallback = { url ->
                             post {
                                 onNavigateToWebView?.invoke(url)
                             }
                         }
+                    )
 
-                        @android.webkit.JavascriptInterface
-                        fun onExternalLinkClick(url: String) {
-                            post {
-                                onNavigateToWebView?.invoke(url)
-                            }
-                        }
-                    }, "Android")
+                    addJavascriptInterface(webInterfaceBridge, "Android")
 
                     webViewClient = object : WebViewClient() {
                         override fun onReceivedError(
@@ -210,50 +224,16 @@ fun PdfViewerWidget(
                         ): android.webkit.WebResourceResponse? {
                             val url = request?.url ?: return null
                             android.util.Log.d("PDFJS_REQUEST", "Intercepting: ${url.host}${url.path}")
-                            if (url.host == "app.local") {
-                                val path = url.path ?: ""
-                                if (path == "/current_pdf.pdf") {
-                                    try {
-                                        val uri = Uri.parse(pdfUriString)
-                                        val inputStream = if (uri.scheme == "content") {
-                                            context.contentResolver.openInputStream(uri)
-                                        } else {
-                                            java.io.FileInputStream(java.io.File(uri.path ?: pdfUriString))
-                                        }
-                                        if (inputStream != null) {
-                                            return android.webkit.WebResourceResponse(
-                                                "application/pdf",
-                                                "UTF-8",
-                                                inputStream
-                                            )
-                                        }
-                                    } catch (e: Exception) {
-                                        android.util.Log.e("PdfViewerWidget", "Failed to load current PDF stream", e)
-                                    }
-                                } else if (path.startsWith("/pdfjs/")) {
-                                    try {
-                                        // Remove leading "/pdfjs/" to get asset path
-                                        val assetPath = path.substring(1) // e.g., "pdfjs/web/viewer.html"
-                                        val inputStream = context.assets.open(assetPath)
-                                        
-                                        // Determine MIME type
-                                        val mimeType = when {
-                                            path.endsWith(".html") -> "text/html"
-                                            path.endsWith(".css") -> "text/css"
-                                            path.endsWith(".js") -> "application/javascript"
-                                            path.endsWith(".json") -> "application/json"
-                                            path.endsWith(".svg") -> "image/svg+xml"
-                                            path.endsWith(".png") -> "image/png"
-                                            path.endsWith(".wasm") -> "application/wasm"
-                                            else -> "application/octet-stream"
-                                        }
-                                        
-                                        return android.webkit.WebResourceResponse(mimeType, "UTF-8", inputStream)
-                                    } catch (e: Exception) {
-                                        android.util.Log.e("PdfViewerWidget", "Failed to load asset: $path", e)
-                                    }
-                                }
+
+                            // Query resource loaders sequentially to intercept local custom scheme requests
+                            val response = resourceLoaders
+                                .firstOrNull { it.canHandle(url) }
+                                ?.shouldInterceptRequest(url)
+
+                            if (response != null) {
+                                return response
                             }
+
                             return super.shouldInterceptRequest(view, request)
                         }
 
