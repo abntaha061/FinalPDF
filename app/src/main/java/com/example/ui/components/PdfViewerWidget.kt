@@ -44,8 +44,10 @@ fun PdfViewerWidget(
                     settings.domStorageEnabled = true
                     settings.allowFileAccess = true
                     settings.allowContentAccess = true
-
-                    // no-op: PDFView not used with WebView implementation
+                    @Suppress("DEPRECATION")
+                    settings.allowFileAccessFromFileURLs = true
+                    @Suppress("DEPRECATION")
+                    settings.allowUniversalAccessFromFileURLs = true
 
                     val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
                     addJavascriptInterface(object : Any() {
@@ -83,23 +85,16 @@ fun PdfViewerWidget(
                         }
                     }, "Android")
 
-                    val assetLoader = WebViewAssetLoader.Builder()
-                        .addPathHandler(
-                            "/assets/",
-                            WebViewAssetLoader.AssetsPathHandler(ctx)
-                        )
-                        .build()
-
                     webViewClient = object : WebViewClient() {
                         override fun shouldInterceptRequest(
                             view: WebView?,
                             request: WebResourceRequest?
                         ): WebResourceResponse? {
                             val requestUrl = request?.url ?: return null
-                            val path = requestUrl.path ?: ""
+                            val urlStr = requestUrl.toString()
 
                             // Stream PDF file request to WebView on background thread
-                            if (path.endsWith("/local_pdf/document.pdf") || path.contains("/local_pdf/")) {
+                            if (urlStr.contains("local_pdf/document.pdf") || urlStr.endsWith("document.pdf")) {
                                 try {
                                     val uri = Uri.parse(pdfUriString)
                                     val inputStream = if (uri.scheme == "content") {
@@ -120,7 +115,7 @@ fun PdfViewerWidget(
                                 }
                             }
 
-                            return assetLoader.shouldInterceptRequest(requestUrl)
+                            return super.shouldInterceptRequest(view, request)
                         }
 
                         override fun onPageFinished(view: WebView?, url: String?) {
@@ -167,14 +162,14 @@ fun PdfViewerWidget(
                         }
                     }
 
-                    val pdfUrl = "https://appassets.androidplatform.net/local_pdf/document.pdf"
+                    val pdfUrl = "file:///android_asset/local_pdf/document.pdf"
                     val zoomParam = when (fitMode) {
                         "width" -> "page-width"
                         "fit" -> "page-fit"
                         else -> "auto"
                     }
                     val initialPage = currentPage + 1
-                    val viewerUrl = "https://appassets.androidplatform.net/assets/pdfjs/web/viewer.html?file=" +
+                    val viewerUrl = "file:///android_asset/pdfjs/web/viewer.html?file=" +
                                     Uri.encode(pdfUrl) + "#page=$initialPage&zoom=$zoomParam"
                     loadUrl(viewerUrl)
                 }
