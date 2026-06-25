@@ -2,6 +2,10 @@ package com.example.ui.components
 
 import android.content.Context
 import android.net.Uri
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
@@ -11,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.webkit.WebViewAssetLoader
 import com.example.ui.PdfViewModel
 import com.github.barteksc.pdfviewer.PDFView
 import com.github.barteksc.pdfviewer.util.FitPolicy
@@ -37,8 +42,38 @@ fun PdfViewerWidget(
     onTextSelected: ((String) -> Unit)? = null
 ) {
     val context = LocalContext.current
-    var webViewInstance by remember { mutableStateOf<android.webkit.WebView?>(null) }
+    var webViewInstance by remember { mutableStateOf<WebView?>(null) }
     var pdfViewInstance by remember { mutableStateOf<PDFView?>(null) }
+
+    // Initialize WebViewAssetLoader once
+    val assetLoader = remember(context, pdfUriString) {
+        WebViewAssetLoader.Builder()
+            .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(context))
+            .addPathHandler("/pdf/", object : WebViewAssetLoader.PathHandler {
+                override fun handle(path: String): WebResourceResponse? {
+                    try {
+                        val uri = Uri.parse(pdfUriString)
+                        val inputStream = if (uri.scheme == "content") {
+                            context.contentResolver.openInputStream(uri)
+                        } else {
+                            val filePath = uri.path ?: uri.toString()
+                            java.io.FileInputStream(java.io.File(filePath))
+                        }
+                        if (inputStream != null) {
+                            return WebResourceResponse(
+                                "application/pdf",
+                                null,
+                                inputStream
+                            )
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.e("PdfViewerWidget", "Failed to stream PDF to WebViewAssetLoader: $pdfUriString", e)
+                    }
+                    return null
+                }
+            })
+            .build()
+    }
 
     Box(modifier = modifier.fillMaxSize()) {
         // 1. Hidden PDFView to track state, pageCount, search results, and ensure backward compatibility
@@ -92,7 +127,7 @@ fun PdfViewerWidget(
         // 2. Foreground WebView using Mozilla PDF.js for extremely high-precision text selection and beautiful rendering
         AndroidView(
             factory = { ctx ->
-                android.webkit.WebView(ctx).apply {
+                WebView(ctx).apply {
                     webViewInstance = this
                     settings.apply {
                         javaScriptEnabled = true
@@ -148,17 +183,38 @@ fun PdfViewerWidget(
                                 onTap?.invoke()
                             }
                         }
+
+                        @android.webkit.JavascriptInterface
+                        fun onAudioLinkClick(url: String) {
+                            post {
+                                onNavigateToWebView?.invoke(url)
+                            }
+                        }
+
+                        @android.webkit.JavascriptInterface
+                        fun onExternalLinkClick(url: String) {
+                            post {
+                                onNavigateToWebView?.invoke(url)
+                            }
+                        }
                     }, "Android")
 
-                    webViewClient = object : android.webkit.WebViewClient() {
+                    webViewClient = object : WebViewClient() {
                         override fun shouldInterceptRequest(
-                            view: android.webkit.WebView?,
-                            request: android.webkit.WebResourceRequest?
-                        ): android.webkit.WebResourceResponse? {
+                            view: WebView?,
+                            request: WebResourceRequest?
+                        ): WebResourceResponse? {
                             val requestUrl = request?.url ?: return null
-                            val path = requestUrl.path ?: ""
+                            
+                            // 1. First intercept with WebViewAssetLoader
+                            val response = assetLoader.shouldInterceptRequest(requestUrl)
+                            if (response != null) {
+                                return response
+                            }
 
-                            if (path.contains("local_pdf/document.pdf")) {
+                            // 2. Fallback check for PDF requests
+                            val path = requestUrl.path ?: ""
+                            if (path.contains("pdf/document.pdf")) {
                                 try {
                                     val uri = Uri.parse(pdfUriString)
                                     val inputStream = if (uri.scheme == "content") {
@@ -168,20 +224,20 @@ fun PdfViewerWidget(
                                         java.io.FileInputStream(java.io.File(filePath))
                                     }
                                     if (inputStream != null) {
-                                        return android.webkit.WebResourceResponse(
+                                        return WebResourceResponse(
                                             "application/pdf",
                                             null,
                                             inputStream
                                         )
                                     }
                                 } catch (e: Exception) {
-                                    android.util.Log.e("PdfViewerWidget", "Failed to stream PDF to WebView: $pdfUriString", e)
+                                    android.util.Log.e("PdfViewerWidget", "Failed to stream PDF directly: $pdfUriString", e)
                                 }
                             }
                             return null
                         }
 
-                        override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
+                        override fun onPageFinished(view: WebView?, url: String?) {
                             super.onPageFinished(view, url)
 
                             // Inject event listeners for text selection, tapping and custom long press selection
@@ -242,7 +298,8 @@ fun PdfViewerWidget(
                         }
                     }
 
-                    val viewerUrl = "file:///android_asset/pdfjs/web/viewer.html?file=file:///android_asset/local_pdf/document.pdf#page=${currentPage + 1}"
+                    // Use HTTPS appassets.androidplatform.net schema with zoom and page parameters
+                    val viewerUrl = "https://appassets.androidplatform.net/assets/pdfjs/web/viewer.html?file=/pdf/document.pdf#page=${currentPage + 1}&zoom=page-width"
                     loadUrl(viewerUrl)
                 }
             },
