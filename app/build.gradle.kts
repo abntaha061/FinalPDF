@@ -1,5 +1,11 @@
 import java.net.URL
 import java.net.HttpURLConnection
+import java.io.BufferedInputStream
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.util.zip.ZipInputStream
+import java.util.zip.ZipEntry
 
 plugins {
   alias(libs.plugins.android.application)
@@ -142,10 +148,20 @@ dependencies {
   "ksp"(libs.moshi.kotlin.codegen)
 }
 
+val buildDir = layout.buildDirectory.get().asFile
+val projDir = layout.projectDirectory.asFile
+
 tasks.register("downloadPdfJs") {
+    val destFile = File(buildDir, "pdfjs.zip")
+    val destDir = File(projDir, "src/main/assets/pdfjs")
+
     doLast {
-        val destFile = file("${layout.buildDirectory.get().asFile}/pdfjs.zip")
-        val destDir = file("${project.projectDir}/src/main/assets/pdfjs")
+        val checkFile1 = File(destDir, "web/viewer.html")
+        val checkFile2 = File(destDir, "build/pdf.js")
+        if (checkFile1.exists() && checkFile2.exists()) {
+            println("PDF.js already exists at $destDir. Skipping download and extraction.")
+            return@doLast
+        }
         if (!destDir.exists()) {
             destDir.mkdirs()
         }
@@ -171,12 +187,28 @@ tasks.register("downloadPdfJs") {
             }
         }
         println("Extracting PDF.js zip...")
-        copy {
-            from(zipTree(destFile))
-            into(destDir)
+        ZipInputStream(BufferedInputStream(FileInputStream(destFile))).use { zis ->
+            var entry: ZipEntry? = zis.nextEntry
+            while (entry != null) {
+                val newFile = File(destDir, entry.name)
+                if (entry.isDirectory) {
+                    newFile.mkdirs()
+                } else {
+                    newFile.parentFile?.mkdirs()
+                    FileOutputStream(newFile).use { fos ->
+                        zis.copyTo(fos)
+                    }
+                }
+                zis.closeEntry()
+                entry = zis.nextEntry
+            }
         }
         destFile.delete()
         println("PDF.js successfully downloaded and extracted to assets!")
     }
+}
+
+tasks.named("preBuild") {
+    dependsOn("downloadPdfJs")
 }
 
